@@ -74,6 +74,7 @@ interface StudioViewProps {
   onDuplicatePreset?: (presetId: string) => void;
   onDeletePreset?: (presetId: string) => void;
   onToggleFavoritePreset?: (presetId: string) => void;
+  onRenamePreset?: (presetId: string, newName: string) => void;
 }
 
 // Active trigger reaction state for canvas animation
@@ -108,6 +109,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onDuplicatePreset,
   onDeletePreset,
   onToggleFavoritePreset,
+  onRenamePreset,
 }) => {
   // Selected Element
   const [selectedId, setSelectedId] = useState<string | null>(elements[0]?.id || null);
@@ -162,6 +164,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [newPresetModalOpen, setNewPresetModalOpen] = useState(false);
   const [newPresetNameInput, setNewPresetNameInput] = useState('');
   const [newPresetDescInput, setNewPresetDescInput] = useState('');
+
+  // Preset Selector (entry screen before canvas)
+  const [showPresetSelector, setShowPresetSelector] = useState(true);
+  const [selectorCreateModalOpen, setSelectorCreateModalOpen] = useState(false);
+  const [selectorPresetName, setSelectorPresetName] = useState('');
+  const [selectorCategory, setSelectorCategory] = useState<PresetCategory>('hp_screen');
+  const [selectorOrientation, setSelectorOrientation] = useState<CanvasOrientation>('9:16');
+  const [selectorDescription, setSelectorDescription] = useState('');
+  const [selectorTemplate, setSelectorTemplate] = useState<'blank' | 'gaming' | 'chatting' | 'music'>('gaming');
+  const [selectorFilterCategory, setSelectorFilterCategory] = useState<PresetCategory>('all');
+  const [editingPresetIdInSelector, setEditingPresetIdInSelector] = useState<string | null>(null);
+  const [editingNameInSelector, setEditingNameInSelector] = useState('');
 
   // Media Library State
   const [mediaLibrary, setMediaLibrary] = useState<LocalMediaItem[]>([
@@ -1278,8 +1292,376 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return p.category === presetFilterCategory;
   });
 
+  // --- Preset Selector: filtered list for entry screen ---
+  const selectorFilteredPresets = presets.filter((p) => {
+    if (selectorFilterCategory === 'favorites') return p.isFavorite;
+    if (selectorFilterCategory === 'all') return true;
+    return p.category === selectorFilterCategory;
+  });
+
+  // --- Preset Selector: template generator (mirrors PresetManagerView) ---
+  const generateTemplateElements = (template: 'blank' | 'gaming' | 'chatting' | 'music'): StudioElement[] => {
+    if (template === 'gaming') {
+      return [
+        { id: `elem_screen_${Date.now()}`, name: 'Layar Game (Screen Capture)', type: 'screen_capture', x: 0, y: 20, width: 100, height: 56, layer: 1, visible: true, locked: true, opacity: 100, rotation: 0, properties: { fps: 60 } },
+        { id: `elem_cam_${Date.now()}`, name: 'Facecam Bulat', type: 'camera', x: 6, y: 4, width: 28, height: 15, layer: 2, visible: true, locked: false, opacity: 100, rotation: 0, properties: { borderRadius: 16, borderColor: '#2563EB' } },
+        { id: `elem_chat_${Date.now()}`, name: 'Live Chat Penonton', type: 'chat_message', x: 6, y: 78, width: 88, height: 20, layer: 3, visible: true, locked: false, opacity: 90, rotation: 0, properties: { maxMessages: 4 } },
+      ];
+    }
+    if (template === 'chatting') {
+      return [
+        { id: `elem_cam_${Date.now()}`, name: 'Kamera Utama Full Frame', type: 'camera', x: 0, y: 0, width: 100, height: 100, layer: 1, visible: true, locked: true, opacity: 100, rotation: 0, properties: { facingMode: 'user' } },
+        { id: `elem_chat_${Date.now()}`, name: 'Kotak Chat Kaca', type: 'chat_message', x: 6, y: 60, width: 88, height: 30, layer: 2, visible: true, locked: false, opacity: 85, rotation: 0, properties: { maxMessages: 6 } },
+        { id: `elem_alert_${Date.now()}`, name: 'Alert Gift & Follow', type: 'event_alert', x: 10, y: 10, width: 80, height: 12, layer: 3, visible: true, locked: false, opacity: 100, rotation: 0, properties: { soundEnabled: true } },
+      ];
+    }
+    if (template === 'music') {
+      return [
+        { id: `elem_song_${Date.now()}`, name: 'Now Playing Widget', type: 'song_request', x: 6, y: 40, width: 88, height: 16, layer: 2, visible: true, locked: false, opacity: 100, rotation: 0, properties: { showAlbumArt: true } },
+        { id: `elem_chat_${Date.now()}`, name: 'Request Queue Chat', type: 'chat_message', x: 6, y: 65, width: 88, height: 25, layer: 3, visible: true, locked: false, opacity: 90, rotation: 0, properties: { maxMessages: 5 } },
+      ];
+    }
+    return [];
+  };
+
+  // --- Preset Selector: handlers ---
+  const handleSelectorSelectPreset = (presetId: string) => {
+    if (onSelectPreset) onSelectPreset(presetId);
+    setShowPresetSelector(false);
+  };
+
+  const handleSelectorBlankCanvas = () => {
+    if (onUpdateElements) onUpdateElements([]);
+    setShowPresetSelector(false);
+  };
+
+  const handleSelectorCreatePreset = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectorPresetName.trim() || !onCreatePreset) return;
+    const elements = generateTemplateElements(selectorTemplate);
+    onCreatePreset({
+      name: selectorPresetName.trim(),
+      category: selectorCategory,
+      canvasOrientation: selectorOrientation,
+      elements,
+      isFavorite: false,
+      description: selectorDescription.trim() || 'Preset tata letak kustom SYNTXRR STREAM',
+      thumbnailColor: '#1e3a8a',
+    });
+    setSelectorCreateModalOpen(false);
+    setSelectorPresetName('');
+    setSelectorDescription('');
+    setShowPresetSelector(false);
+  };
+
+  const handleSelectorSaveRename = (presetId: string) => {
+    if (editingNameInSelector.trim() && onRenamePreset) {
+      onRenamePreset(presetId, editingNameInSelector.trim());
+    }
+    setEditingPresetIdInSelector(null);
+  };
+
   return (
     <div className="space-y-6 pb-20 md:pb-8">
+      {/* === PRESET SELECTION ENTRY SCREEN === */}
+      {showPresetSelector ? (
+        <div className="space-y-6">
+          {/* Selector Header */}
+          <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 shadow-lg relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center space-x-2 mb-1.5">
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1e293b] text-blue-400 border border-blue-500/20">
+                    Studio Scene Presets
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    {presets.length} Preset Tersimpan
+                  </span>
+                </div>
+                <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                  <Tv className="w-6 h-6 text-blue-400" />
+                  Pilih Preset Studio
+                </h1>
+                <p className="text-sm text-slate-400 mt-1 max-w-2xl">
+                  Pilih preset untuk dimuat ke kanvas, buat preset baru dari template, atau mulai dengan kanvas kosong. Mendukung orientasi 9:16, 16:9, dan 1:1.
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setSelectorCreateModalOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-sm flex items-center space-x-2 transition shadow-lg shadow-blue-600/25"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Buat Preset Baru</span>
+                </button>
+                <button
+                  onClick={handleSelectorBlankCanvas}
+                  className="px-4 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] active:scale-95 text-slate-300 hover:text-white font-bold text-sm flex items-center space-x-2 transition"
+                >
+                  <Layout className="w-4 h-4" />
+                  <span>Kanvas Kosong</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Selector Category Tabs */}
+            <div className="mt-6 flex flex-wrap gap-2 pt-4 border-t border-[#1e293b]">
+              {(
+                [
+                  { id: 'all', label: 'Semua Preset' },
+                  { id: 'hp_screen', label: 'Layar HP (9:16)' },
+                  { id: 'landscape', label: 'Landscape (16:9)' },
+                  { id: 'portrait', label: 'Portrait' },
+                  { id: 'favorites', label: 'Favorit' },
+                ] as const
+              ).map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectorFilterCategory(cat.id)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
+                    selectorFilterCategory === cat.id
+                      ? 'bg-[#2563EB] text-white shadow'
+                      : 'bg-[#080c16] text-slate-400 hover:text-white border border-[#1e293b]'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Selector Preset Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {selectorFilteredPresets.map((preset) => {
+              const isActive = preset.id === activePresetId;
+              return (
+                <div
+                  key={preset.id}
+                  className={`rounded-2xl border transition-all flex flex-col justify-between overflow-hidden ${
+                    isActive
+                      ? 'bg-[#101b33] border-[#38BDF8] shadow-xl shadow-blue-950/50'
+                      : 'bg-[#0e172a] border-[#1e293b] hover:border-slate-700'
+                  }`}
+                >
+                  <div className="p-5">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center space-x-2">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#080c16] text-blue-400 border border-[#1e293b] flex items-center space-x-1">
+                          {preset.canvasOrientation === '9:16' && <Smartphone className="w-3 h-3" />}
+                          {preset.canvasOrientation === '16:9' && <Monitor className="w-3 h-3" />}
+                          {preset.canvasOrientation === '1:1' && <Square className="w-3 h-3" />}
+                          <span>{preset.canvasOrientation}</span>
+                        </span>
+                        {isActive && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1">
+                            <Check className="w-3 h-3" />
+                            <span>Aktif</span>
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => onToggleFavoritePreset?.(preset.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-[#1e293b] transition"
+                      >
+                        <Star className={`w-4 h-4 ${preset.isFavorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+                      </button>
+                    </div>
+
+                    {editingPresetIdInSelector === preset.id ? (
+                      <div className="flex items-center space-x-2 my-1">
+                        <input
+                          type="text"
+                          value={editingNameInSelector}
+                          onChange={(e) => setEditingNameInSelector(e.target.value)}
+                          className="flex-1 bg-[#080c16] border border-[#2563EB] rounded px-2 py-1 text-sm text-white focus:outline-none font-bold"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleSelectorSaveRename(preset.id)}
+                          className="px-2 py-1 bg-[#2563EB] text-white text-xs rounded hover:bg-blue-600 font-bold"
+                        >
+                          Simpan
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-bold text-white tracking-tight">{preset.name}</h3>
+                        <button
+                          onClick={() => { setEditingPresetIdInSelector(preset.id); setEditingNameInSelector(preset.name); }}
+                          className="text-slate-500 hover:text-slate-300 p-1"
+                          title="Ubah Nama"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">{preset.description}</p>
+
+                    <div className="mt-4 flex items-center space-x-2 text-xs text-slate-400">
+                      <Layers className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{preset.elements.length} Elemen Overlay</span>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-[#080c16]/50 border-t border-[#1e293b] flex items-center justify-between gap-2">
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => onDuplicatePreset?.(preset.id)}
+                        className="p-2 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-slate-300 text-xs transition"
+                        title="Duplikasi"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                      {presets.length > 1 && (
+                        <button
+                          onClick={() => onDeletePreset?.(preset.id)}
+                          className="p-2 rounded-lg bg-[#1e293b] hover:bg-red-500/20 text-slate-400 hover:text-red-400 text-xs transition"
+                          title="Hapus"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleSelectorSelectPreset(preset.id)}
+                      className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1 transition ${
+                        isActive
+                          ? 'bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white shadow'
+                          : 'bg-[#1e293b] hover:bg-[#2563EB] hover:text-white text-slate-300'
+                      }`}
+                    >
+                      <span>{isActive ? 'Muat ke Studio' : 'Gunakan Preset'}</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Selector: Create Preset Modal */}
+          {selectorCreateModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#1e293b]">
+                  <div className="flex items-center space-x-2">
+                    <Layout className="w-5 h-5 text-blue-400" />
+                    <h3 className="text-base font-bold text-white">Buat Preset Studio Baru</h3>
+                  </div>
+                  <button onClick={() => setSelectorCreateModalOpen(false)} className="text-slate-400 hover:text-white">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSelectorCreatePreset} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Nama Preset</label>
+                    <input
+                      type="text"
+                      value={selectorPresetName}
+                      onChange={(e) => setSelectorPresetName(e.target.value)}
+                      placeholder="Misal: Mobile Gaming Pro, TikTok Live Malam"
+                      required
+                      className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Orientasi Kanvas</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(
+                        [
+                          { id: '9:16', label: '9:16 (Layar HP)', icon: <Smartphone className="w-4 h-4 mx-auto mb-1" /> },
+                          { id: '16:9', label: '16:9 (Landscape)', icon: <Monitor className="w-4 h-4 mx-auto mb-1" /> },
+                          { id: '1:1', label: '1:1 (Persegi)', icon: <Square className="w-4 h-4 mx-auto mb-1" /> },
+                        ] as const
+                      ).map((orient) => (
+                        <button
+                          key={orient.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectorOrientation(orient.id);
+                            if (orient.id === '9:16') setSelectorCategory('hp_screen');
+                            else if (orient.id === '16:9') setSelectorCategory('landscape');
+                            else setSelectorCategory('portrait');
+                          }}
+                          className={`p-2.5 rounded-xl text-center text-xs font-semibold border transition ${
+                            selectorOrientation === orient.id
+                              ? 'bg-[#2563EB] border-[#38BDF8] text-white'
+                              : 'bg-[#080c16] border-[#1e293b] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {orient.icon}
+                          <span>{orient.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Pilihan Template Permulaan</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { id: 'gaming', label: 'Mobile Gaming', desc: 'Screen Capture + Facecam + Chat' },
+                          { id: 'chatting', label: 'Just Chatting', desc: 'Kamera Penuh + Alert + Chat' },
+                          { id: 'music', label: 'Music Stream', desc: 'Now Playing + Queue + Chat' },
+                          { id: 'blank', label: 'Kanvas Kosong', desc: 'Mulai dari kanvas bersih' },
+                        ] as const
+                      ).map((tmpl) => (
+                        <button
+                          key={tmpl.id}
+                          type="button"
+                          onClick={() => setSelectorTemplate(tmpl.id)}
+                          className={`p-2.5 rounded-xl text-left border transition ${
+                            selectorTemplate === tmpl.id
+                              ? 'bg-[#131f38] border-[#38BDF8] text-white'
+                              : 'bg-[#080c16] border-[#1e293b] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-xs font-bold text-white mb-0.5">{tmpl.label}</div>
+                          <div className="text-[10px] text-slate-400">{tmpl.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Deskripsi (Opsional)</label>
+                    <textarea
+                      value={selectorDescription}
+                      onChange={(e) => setSelectorDescription(e.target.value)}
+                      placeholder="Keterangan singkat tentang preset ini..."
+                      rows={2}
+                      className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-end space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectorCreateModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-[#1e293b] text-slate-300 text-xs font-semibold hover:bg-[#334155]"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold shadow-lg shadow-blue-600/30"
+                    >
+                      Simpan &amp; Buat Preset
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+      /* === MAIN STUDIO CANVAS VIEW === */
+      <>
       {/* Studio Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -1342,6 +1724,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
             className="min-h-[38px] px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md"
           >
             <Sparkles className="w-4 h-4" /> Simpan Preset
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPresetSelector(true)}
+            className="min-h-[38px] px-3.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            title="Ganti Preset"
+          >
+            <Layout className="w-4 h-4" /> Ganti Preset
           </button>
         </div>
       </div>
