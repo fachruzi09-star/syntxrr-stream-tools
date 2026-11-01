@@ -186,6 +186,21 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Prime TTS engine on first user gesture (Android WebView requires this)
+  useEffect(() => {
+    const primeTTS = () => {
+      ttsService.prime();
+      window.removeEventListener('pointerdown', primeTTS);
+      window.removeEventListener('keydown', primeTTS);
+    };
+    window.addEventListener('pointerdown', primeTTS, { once: true });
+    window.addEventListener('keydown', primeTTS, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', primeTTS);
+      window.removeEventListener('keydown', primeTTS);
+    };
+  }, []);
+
   // Android Native Hardware Back Button & Status Bar Handling (Capacitor)
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -649,6 +664,7 @@ export default function App() {
       timestamp: newEvent.timestamp,
     });
     if (ttsConfig.enabled) {
+      ttsService.prime();
       ttsService.speakEvent(newEvent.type, newEvent.username, newEvent.detail);
     }
   };

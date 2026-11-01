@@ -82,6 +82,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
 
   const handleTestTTS = () => {
     ttsService.updateConfig(ttsConfig);
+    ttsService.prime();
     ttsService.speak(testVoiceText, true);
   };
 
