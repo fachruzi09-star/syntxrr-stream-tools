@@ -1,0 +1,17 @@
+{
+  "short_name": "SYNTXRR",
+  "name": "SYNTXRR STREAM TOOLS",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#080c16",
+  "theme_color": "#080c16",
+  "display": "standalone",
+  "orientation": "portrait-primary"
+}
