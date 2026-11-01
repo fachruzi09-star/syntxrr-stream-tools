@@ -1,6 +1,6 @@
 {
 	"appId": "com.syntxrr.streamtools",
-	"appName": "SYNTXRR STREAM TOOLS",
+	"appName": "SYNTXRR STREAM",
 	"webDir": "dist",
 	"server": {
 		"androidScheme": "https",

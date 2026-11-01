@@ -1,37 +1,56 @@
 import { useState, useEffect } from 'react';
 import {
   ActiveNav,
+  NavigationTab,
   AppSettings,
   Scene,
   SongRequest,
   AlertSettings,
   AlertEvent,
-  OperatingMode,
-  OverlayWidgetConfig,
   AlertType,
+  OperatingMode,
+  CanvasOrientation,
   UnifiedQueueItem,
   LocalAudioTrackMeta,
+  StudioPreset,
+  StudioElement,
+  SoundboardItem,
+  MarketplaceItem,
+  IntegrationProvider,
+  TTSConfig,
 } from './types';
 import {
   StorageService,
+  ensureUniqueElementIds,
   DEFAULT_SETTINGS,
   DEFAULT_SCENES,
   DEFAULT_SONG_REQUESTS,
   DEFAULT_ALERT_SETTINGS,
-  DEFAULT_OVERLAY_CONFIG,
+  DEFAULT_PRESETS,
+  DEFAULT_STUDIO_ELEMENTS,
+  DEFAULT_SOUNDBOARD,
+  DEFAULT_MARKETPLACE_ITEMS,
+  DEFAULT_INTEGRATIONS,
 } from './services/storage';
-import { soundSynth } from './services/audioSimulator';
 import { audioEngine } from './services/localAudioEngine';
+import { soundboardEngine } from './services/soundboardEngine';
+import { ttsService, DEFAULT_TTS_CONFIG } from './services/ttsService';
+import { streamEventBus } from './services/eventBus';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
+import { NavigationDrawerModal } from './components/NavigationDrawerModal';
 import { AlertBannerOverlay } from './components/AlertBannerOverlay';
 import { ModeLauncherModal } from './components/ModeLauncherModal';
 import { DashboardView } from './components/DashboardView';
+import { StudioView } from './components/StudioView';
+import { SourcesLibraryView } from './components/SourcesLibraryView';
+import { PresetManagerView } from './components/PresetManagerView';
+import { LiveCenterView } from './components/LiveCenterView';
 import { MusicCenterView } from './components/MusicCenterView';
-import { OverlayStudioView } from './components/OverlayStudioView';
-import { SceneManagerView } from './components/SceneManagerView';
-import { LiveAlertsView } from './components/LiveAlertsView';
+import { MarketplaceView } from './components/MarketplaceView';
+import { IntegrationsView } from './components/IntegrationsView';
 import { SettingsView } from './components/SettingsView';
+import { StreamDeckView } from './components/StreamDeckView';
 import { Radio } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -39,22 +58,40 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [activeNav, setActiveNav] = useState<ActiveNav>('dashboard');
+  const [activeNav, setActiveNav] = useState<NavigationTab>('dashboard');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+
+  // App Settings
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [scenes, setScenes] = useState<Scene[]>(DEFAULT_SCENES);
-  const [activeSceneId, setActiveSceneId] = useState<string>(DEFAULT_SCENES[0].id);
+
+  // Studio & Presets State
+  const [presets, setPresets] = useState<StudioPreset[]>(DEFAULT_PRESETS);
+  const [activePresetId, setActivePresetId] = useState<string>(DEFAULT_PRESETS[0].id);
+  const [studioElements, setStudioElements] = useState<StudioElement[]>(DEFAULT_STUDIO_ELEMENTS);
+
+  // Soundboard & TTS State
+  const [soundboardItems, setSoundboardItems] = useState<SoundboardItem[]>(DEFAULT_SOUNDBOARD);
+  const [ttsConfig, setTTSConfig] = useState<TTSConfig>(DEFAULT_TTS_CONFIG);
+
+  // Marketplace & Integrations State
+  const [marketplaceItems, setMarketplaceItems] = useState<MarketplaceItem[]>(DEFAULT_MARKETPLACE_ITEMS);
+  const [integrations, setIntegrations] = useState<IntegrationProvider[]>(DEFAULT_INTEGRATIONS);
+
+  // Music Center State (HTML5 local audio + Queue + Song Requests)
   const [songRequests, setSongRequests] = useState<SongRequest[]>(DEFAULT_SONG_REQUESTS);
   const [nowPlayingSong, setNowPlayingSong] = useState<SongRequest | null>(DEFAULT_SONG_REQUESTS[0]);
   const [isPlayingMusic, setIsPlayingMusic] = useState(false);
-  const [alertSettings, setAlertSettings] = useState<AlertSettings>(DEFAULT_ALERT_SETTINGS);
-  const [alertHistory, setAlertHistory] = useState<AlertEvent[]>([]);
-  const [activeFloatingAlert, setActiveFloatingAlert] = useState<AlertEvent | null>(null);
-  const [isModeModalOpen, setIsModeModalOpen] = useState(false);
-
-  // Stage 2: Music Center Hybrid State
   const [unifiedQueue, setUnifiedQueue] = useState<UnifiedQueueItem[]>([]);
   const [localTracksMeta, setLocalTracksMeta] = useState<LocalAudioTrackMeta[]>([]);
   const [localFilesMap, setLocalFilesMap] = useState<Map<string, File>>(new Map());
+
+  // Alerts & Scenes Backwards-Compatibility State
+  const [scenes, setScenes] = useState<Scene[]>(DEFAULT_SCENES);
+  const [activeSceneId, setActiveSceneId] = useState<string>(DEFAULT_SCENES[0].id);
+  const [alertSettings, setAlertSettings] = useState<AlertSettings>(DEFAULT_ALERT_SETTINGS);
+  const [alertHistory, setAlertHistory] = useState<AlertEvent[]>([]);
+  const [activeFloatingAlert, setActiveFloatingAlert] = useState<AlertEvent | null>(null);
 
   // Load from IndexedDB on startup
   useEffect(() => {
@@ -62,36 +99,59 @@ export default function App() {
       try {
         const [
           savedSettings,
-          savedScenes,
-          savedActiveId,
-          savedRequests,
-          savedAlertSettings,
-          savedAlertHistory,
+          savedPresets,
+          savedActivePresetId,
+          savedStudioElements,
+          savedSoundboard,
+          savedMarketplace,
+          savedIntegrations,
+          savedTTSConfig,
           savedQueue,
           savedLocalMeta,
+          savedRequests,
+          savedScenes,
+          savedActiveSceneId,
+          savedAlertSettings,
+          savedAlertHistory,
         ] = await Promise.all([
           StorageService.getSettings(),
-          StorageService.getScenes(),
-          StorageService.getActiveSceneId(),
-          StorageService.getSongRequests(),
-          StorageService.getAlertSettings(),
-          StorageService.getAlertHistory(),
+          StorageService.getPresets(),
+          StorageService.getActivePresetId(),
+          StorageService.getStudioElements(),
+          StorageService.getSoundboard(),
+          StorageService.getMarketplace(),
+          StorageService.getIntegrations(),
+          StorageService.getTTSConfig(),
           StorageService.getUnifiedQueue(),
           StorageService.getLocalTracksMeta(),
+          StorageService.getSongRequests(),
+          StorageService.getScenes(),
+          StorageService.getActiveSceneId(),
+          StorageService.getAlertSettings(),
+          StorageService.getAlertHistory(),
         ]);
 
         setSettings(savedSettings);
-        setScenes(savedScenes);
-        setActiveSceneId(savedActiveId);
+        setPresets(savedPresets);
+        setActivePresetId(savedActivePresetId);
+        const sanitizedElements = ensureUniqueElementIds(savedStudioElements);
+        setStudioElements(sanitizedElements);
+        setSoundboardItems(savedSoundboard);
+        setMarketplaceItems(savedMarketplace);
+        setIntegrations(savedIntegrations);
+        setTTSConfig(savedTTSConfig);
+        ttsService.updateConfig(savedTTSConfig);
+        setUnifiedQueue(savedQueue);
+        setLocalTracksMeta(savedLocalMeta);
         setSongRequests(savedRequests);
         const currentPlaying = savedRequests.find((r) => r.status === 'playing') || savedRequests[0] || null;
         setNowPlayingSong(currentPlaying);
+        setScenes(savedScenes);
+        setActiveSceneId(savedActiveSceneId);
         setAlertSettings(savedAlertSettings);
         setAlertHistory(savedAlertHistory);
-        setUnifiedQueue(savedQueue);
-        setLocalTracksMeta(savedLocalMeta);
 
-        // Apply audio engine volume from saved settings
+        // Apply audio volume
         if (savedSettings.audioVolume !== undefined) {
           audioEngine.setVolume(savedSettings.audioVolume);
         }
@@ -105,6 +165,27 @@ export default function App() {
     loadInitialData();
   }, []);
 
+  // Subscribe to Stream Event Bus to display floating overlay alerts
+  useEffect(() => {
+    const unsubscribe = streamEventBus.subscribe((streamEvent) => {
+      // Map stream event to floating alert banner
+      const alert: AlertEvent = {
+        id: streamEvent.id,
+        type: streamEvent.type === 'gift' ? 'gift' : streamEvent.type === 'donation' ? 'donation' : 'follow',
+        username: streamEvent.username,
+        message: streamEvent.detail,
+        amount: streamEvent.amount,
+        currency: streamEvent.currency,
+        timestamp: streamEvent.timestamp,
+        formattedTime: new Date(streamEvent.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setActiveFloatingAlert(alert);
+      setTimeout(() => setActiveFloatingAlert(null), 5000);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // Android Native Hardware Back Button & Status Bar Handling (Capacitor)
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -113,54 +194,192 @@ export default function App() {
     }
 
     const backListenerPromise = CapApp.addListener('backButton', () => {
-      // 1. If modal is open, dismiss it first
+      // 1. If drawer or modal is open, dismiss it
+      if (isDrawerOpen) {
+        setIsDrawerOpen(false);
+        return;
+      }
       if (isModeModalOpen) {
         setIsModeModalOpen(false);
         return;
       }
-      // 2. If floating alert is shown, dismiss it
       if (activeFloatingAlert) {
         setActiveFloatingAlert(null);
         return;
       }
-      // 3. If in a secondary navigation view, navigate back to dashboard
+      // 2. If in secondary navigation, navigate back to dashboard
       if (activeNav !== 'dashboard') {
         setActiveNav('dashboard');
         return;
       }
-      // 4. If already on dashboard, exit the app
+      // 3. If on dashboard, exit app
       CapApp.exitApp();
     });
 
     return () => {
       backListenerPromise.then((handle) => handle.remove()).catch(() => {});
     };
-  }, [isModeModalOpen, activeFloatingAlert, activeNav]);
+  }, [isDrawerOpen, isModeModalOpen, activeFloatingAlert, activeNav]);
 
-  // Listen for OAuth hash token redirects (Spotify redirect flow support)
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.hash) {
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const accessToken = hashParams.get('access_token');
-      if (accessToken) {
-        const updated = { ...settings, spotifyAccessToken: accessToken };
-        setSettings(updated);
-        StorageService.saveSettings(updated);
-        window.history.replaceState(null, '', window.location.pathname);
-      }
-    }
-  }, [settings]);
+  const activePreset = presets.find((p) => p.id === activePresetId) || presets[0] || null;
 
-  const activeScene = scenes.find((s) => s.id === activeSceneId) || scenes[0] || null;
-
-  // Handle Mode Selection
+  // Mode Selection
   const handleSelectMode = async (mode: OperatingMode) => {
     const updated = { ...settings, operatingMode: mode };
     setSettings(updated);
     await StorageService.saveSettings(updated);
   };
 
-  // Music Player Controls (Stage 1 Backwards Compatible)
+  // Canvas Orientation
+  const handleOrientationChange = async (orientation: CanvasOrientation) => {
+    const updated = { ...settings, canvasOrientation: orientation };
+    setSettings(updated);
+    await StorageService.saveSettings(updated);
+  };
+
+  // Studio Elements Handlers
+  const handleUpdateStudioElements = async (newElements: StudioElement[]) => {
+    const sanitized = ensureUniqueElementIds(newElements);
+    setStudioElements(sanitized);
+    await StorageService.saveStudioElements(sanitized);
+
+    // Also sync elements to active preset
+    const updatedPresets = presets.map((p) => {
+      if (p.id === activePresetId) {
+        return { ...p, elements: sanitized };
+      }
+      return p;
+    });
+    setPresets(updatedPresets);
+    await StorageService.savePresets(updatedPresets);
+  };
+
+  const handleAddSingleElementToStudio = async (newElement: StudioElement) => {
+    const uniqueId =
+      newElement.id && !studioElements.some((e) => e.id === newElement.id)
+        ? newElement.id
+        : `elem_${newElement.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const updated = [...studioElements, { ...newElement, id: uniqueId }];
+    await handleUpdateStudioElements(updated);
+  };
+
+  const handleInstallMarketplaceElements = async (elementsPayload: StudioElement[]) => {
+    // Generate fresh unique IDs for installed elements so they never collide with existing elements
+    const freshElements = elementsPayload.map((elem) => ({
+      ...elem,
+      id: `elem_${elem.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    }));
+    const updated = [...studioElements, ...freshElements];
+    await handleUpdateStudioElements(updated);
+  };
+
+  const handleSaveCanvasAsPreset = async () => {
+    const newPreset: StudioPreset = {
+      id: `preset_${Date.now()}`,
+      name: `Preset Baru ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      category: settings.canvasOrientation === '9:16' ? 'hp_screen' : settings.canvasOrientation === '16:9' ? 'landscape' : 'portrait',
+      canvasOrientation: settings.canvasOrientation,
+      elements: ensureUniqueElementIds([...studioElements]),
+      createdAt: Date.now(),
+      isFavorite: false,
+      description: 'Preset tersimpan dari Studio Canvas',
+      thumbnailColor: '#2563EB',
+    };
+    const updated = [newPreset, ...presets];
+    setPresets(updated);
+    setActivePresetId(newPreset.id);
+    await StorageService.savePresets(updated);
+    await StorageService.saveActivePresetId(newPreset.id);
+  };
+
+  // Preset Handlers
+  const handleSelectPreset = async (presetId: string) => {
+    const target = presets.find((p) => p.id === presetId);
+    if (target) {
+      setActivePresetId(presetId);
+      const sanitizedElements = ensureUniqueElementIds(target.elements);
+      setStudioElements(sanitizedElements);
+      const updatedSettings = { ...settings, canvasOrientation: target.canvasOrientation };
+      setSettings(updatedSettings);
+      await StorageService.saveActivePresetId(presetId);
+      await StorageService.saveStudioElements(sanitizedElements);
+      await StorageService.saveSettings(updatedSettings);
+    }
+  };
+
+  const handleCreatePreset = async (presetData: Omit<StudioPreset, 'id' | 'createdAt'>) => {
+    const newPreset: StudioPreset = {
+      ...presetData,
+      id: `preset_${Date.now()}`,
+      elements: ensureUniqueElementIds(presetData.elements),
+      createdAt: Date.now(),
+    };
+    const updated = [newPreset, ...presets];
+    setPresets(updated);
+    setActivePresetId(newPreset.id);
+    setStudioElements(newPreset.elements);
+    await StorageService.savePresets(updated);
+    await StorageService.saveActivePresetId(newPreset.id);
+  };
+
+  const handleDuplicatePreset = async (presetId: string) => {
+    const source = presets.find((p) => p.id === presetId);
+    if (!source) return;
+    const duplicated: StudioPreset = {
+      ...source,
+      id: `preset_${Date.now()}`,
+      name: `${source.name} (Salinan)`,
+      elements: source.elements.map((el) => ({
+        ...el,
+        id: `elem_${el.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      })),
+      createdAt: Date.now(),
+      isFavorite: false,
+    };
+    const updated = [...presets, duplicated];
+    setPresets(updated);
+    await StorageService.savePresets(updated);
+  };
+
+  const handleDeletePreset = async (presetId: string) => {
+    if (presets.length <= 1) return;
+    const updated = presets.filter((p) => p.id !== presetId);
+    setPresets(updated);
+    await StorageService.savePresets(updated);
+    if (activePresetId === presetId) {
+      const nextPreset = updated[0];
+      setActivePresetId(nextPreset.id);
+      setStudioElements(nextPreset.elements);
+      await StorageService.saveActivePresetId(nextPreset.id);
+      await StorageService.saveStudioElements(nextPreset.elements);
+    }
+  };
+
+  const handleRenamePreset = async (presetId: string, newName: string) => {
+    const updated = presets.map((p) => (p.id === presetId ? { ...p, name: newName } : p));
+    setPresets(updated);
+    await StorageService.savePresets(updated);
+  };
+
+  const handleToggleFavoritePreset = async (presetId: string) => {
+    const updated = presets.map((p) => (p.id === presetId ? { ...p, isFavorite: !p.isFavorite } : p));
+    setPresets(updated);
+    await StorageService.savePresets(updated);
+  };
+
+  // TTS & Integrations Handlers
+  const handleUpdateTTSConfig = async (newConfig: TTSConfig) => {
+    setTTSConfig(newConfig);
+    ttsService.updateConfig(newConfig);
+    await StorageService.saveTTSConfig(newConfig);
+  };
+
+  const handleUpdateIntegrations = async (newIntegrations: IntegrationProvider[]) => {
+    setIntegrations(newIntegrations);
+    await StorageService.saveIntegrations(newIntegrations);
+  };
+
+  // Music Player Controls (HTML5 Audio & Hybrid Queue)
   const handleTogglePlayMusic = () => {
     setIsPlayingMusic((prev) => !prev);
   };
@@ -231,7 +450,6 @@ export default function App() {
     setSongRequests(updated);
     await StorageService.saveSongRequests(updated);
 
-    // Also sync to unified queue
     const queueItem: UnifiedQueueItem = {
       id: newSong.id,
       title: newSong.title,
@@ -280,56 +498,29 @@ export default function App() {
       newTracks = [
         { id: `req_${Date.now()}_1`, title: 'Cyber City Run', artist: 'Outrun 84', duration: 198, requesterName: 'NeonKnight', platform: 'Twitch', status: 'queued', requestedAt: Date.now(), source: 'viewer_request' },
         { id: `req_${Date.now()}_2`, title: 'Laser Grid Odyssey', artist: 'Megadrive Dreams', duration: 210, requesterName: 'SynthAddict', platform: 'TikTok', status: 'queued', requestedAt: Date.now(), source: 'viewer_request' },
-        { id: `req_${Date.now()}_3`, title: 'Nightfall Cruiser', artist: 'Midnight Drive', duration: 185, requesterName: 'VectorPilot', platform: 'YouTube', status: 'queued', requestedAt: Date.now(), source: 'youtube', externalUrl: 'https://youtube.com' },
-      ];
-    } else if (packName === 'lofi') {
-      newTracks = [
-        { id: `req_${Date.now()}_1`, title: 'Tokyo Rain Walk', artist: 'Tea Garden', duration: 154, requesterName: 'CoffeeLover', platform: 'YouTube', status: 'queued', requestedAt: Date.now(), source: 'youtube', externalUrl: 'https://youtube.com' },
-        { id: `req_${Date.now()}_2`, title: 'Midnight Study Sessions', artist: 'Paper Lanterns', duration: 172, requesterName: 'QuietVibes', platform: 'TikTok', status: 'queued', requestedAt: Date.now(), source: 'viewer_request' },
       ];
     } else {
       newTracks = [
-        { id: `req_${Date.now()}_1`, title: 'Apex Predator Clutch', artist: 'Battle Arena', duration: 220, requesterName: 'FragMaster', platform: 'Twitch', status: 'queued', requestedAt: Date.now(), source: 'viewer_request' },
-        { id: `req_${Date.now()}_2`, title: 'Overtime Victory', artist: 'Esports Audio', duration: 195, requesterName: 'AcePlayer', platform: 'TikTok', status: 'queued', requestedAt: Date.now(), source: 'viewer_request' },
+        { id: `req_${Date.now()}_1`, title: 'Tokyo Rain Walk', artist: 'Tea Garden', duration: 154, requesterName: 'CoffeeLover', platform: 'YouTube', status: 'queued', requestedAt: Date.now(), source: 'youtube', externalUrl: 'https://youtube.com' },
       ];
     }
 
     const merged = [...songRequests, ...newTracks];
     setSongRequests(merged);
     await StorageService.saveSongRequests(merged);
-
-    // Merge into unified queue
-    const newQueueItems: UnifiedQueueItem[] = newTracks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      artist: t.artist,
-      source: t.source || 'viewer_request',
-      externalUrl: t.externalUrl,
-      duration: t.duration,
-      requesterName: t.requesterName,
-      platform: t.platform,
-      addedAt: t.requestedAt,
-      status: 'approved',
-    }));
-    const mergedQueue = [...unifiedQueue, ...newQueueItems];
-    setUnifiedQueue(mergedQueue);
-    await StorageService.saveUnifiedQueue(mergedQueue);
   };
 
-  // Stage 2: Local Audio File Handlers
   const handleAddLocalFiles = async (files: File[]) => {
     const newMetaList: LocalAudioTrackMeta[] = [];
     const newFilesMap = new Map(localFilesMap);
 
     for (const file of files) {
-      const trackId = `track_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      // Extract clean title from filename
+      const trackId = `track_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const cleanName = file.name.replace(/\.[^/.]+$/, '');
       const parts = cleanName.split('-');
       const artist = parts.length > 1 ? parts[0].trim() : 'Local Audio';
       const title = parts.length > 1 ? parts.slice(1).join('-').trim() : cleanName;
 
-      // Probe audio duration via temporary audio element
       const tempAudio = new Audio();
       const objUrl = URL.createObjectURL(file);
       tempAudio.src = objUrl;
@@ -360,48 +551,24 @@ export default function App() {
       newFilesMap.set(trackId, file);
     }
 
-    const updatedMeta = [...localTracksMeta, ...newMetaList];
-    setLocalTracksMeta(updatedMeta);
+    const mergedMeta = [...localTracksMeta, ...newMetaList];
+    setLocalTracksMeta(mergedMeta);
     setLocalFilesMap(newFilesMap);
-    await StorageService.saveLocalTracksMeta(updatedMeta);
+    await StorageService.saveLocalTracksMeta(mergedMeta);
   };
 
   const handleRemoveLocalTrack = async (id: string) => {
-    const updatedMeta = localTracksMeta.filter((t) => t.id !== id);
-    const newFilesMap = new Map(localFilesMap);
-    newFilesMap.delete(id);
-
-    setLocalTracksMeta(updatedMeta);
-    setLocalFilesMap(newFilesMap);
-    await StorageService.saveLocalTracksMeta(updatedMeta);
-
-    // If currently playing, cleanup audio engine
-    if (audioEngine.getState().currentTrackId === id) {
-      audioEngine.cleanup();
-    }
+    const updated = localTracksMeta.filter((t) => t.id !== id);
+    setLocalTracksMeta(updated);
+    const updatedMap = new Map(localFilesMap);
+    updatedMap.delete(id);
+    setLocalFilesMap(updatedMap);
+    await StorageService.saveLocalTracksMeta(updated);
   };
 
-  // Stage 2: Unified Queue Handlers
-  const handleUpdateUnifiedQueue = async (updatedQueue: UnifiedQueueItem[]) => {
-    setUnifiedQueue(updatedQueue);
-    await StorageService.saveUnifiedQueue(updatedQueue);
-
-    // Sync legacy requests
-    const legacyRequests: SongRequest[] = updatedQueue.map((item) => ({
-      id: item.id,
-      title: item.title,
-      artist: item.artist,
-      duration: item.duration || 180,
-      requesterName: item.requesterName,
-      platform: item.platform || 'Manual',
-      status: item.status === 'playing' ? 'playing' : item.status === 'completed' ? 'played' : 'queued',
-      requestedAt: item.addedAt,
-      source: item.source,
-      externalUrl: item.externalUrl,
-      thumbnailUrl: item.thumbnailUrl,
-      queueStatus: item.status,
-    }));
-    setSongRequests(legacyRequests);
+  const handleUpdateUnifiedQueue = async (queue: UnifiedQueueItem[]) => {
+    setUnifiedQueue(queue);
+    await StorageService.saveUnifiedQueue(queue);
   };
 
   const handleUpdateSpotifyToken = async (token: string) => {
@@ -410,130 +577,19 @@ export default function App() {
     await StorageService.saveSettings(updated);
   };
 
-  // Overlay Studio Update
-  const handleUpdateOverlayConfig = async (newConfig: OverlayWidgetConfig) => {
-    if (!activeScene) return;
-    const updatedScenes = scenes.map((s) => {
-      if (s.id === activeScene.id) {
-        return { ...s, overlayConfig: newConfig };
-      }
-      return s;
-    });
-    setScenes(updatedScenes);
-    await StorageService.saveScenes(updatedScenes);
-  };
-
-  // Scene Manager Controls
-  const handleSelectScene = async (id: string) => {
-    setActiveSceneId(id);
-    await StorageService.saveActiveSceneId(id);
-  };
-
-  const handleCreateScene = async (name: string, description: string, baseConfig?: OverlayWidgetConfig) => {
-    const newScene: Scene = {
-      id: `scene_${Date.now()}`,
-      name,
-      description,
-      createdAt: Date.now(),
-      overlayConfig: baseConfig || DEFAULT_OVERLAY_CONFIG,
-    };
-    const updated = [...scenes, newScene];
-    setScenes(updated);
-    setActiveSceneId(newScene.id);
-    await StorageService.saveScenes(updated);
-    await StorageService.saveActiveSceneId(newScene.id);
-  };
-
-  const handleRenameScene = async (id: string, newName: string, newDescription: string) => {
-    const updated = scenes.map((s) => {
-      if (s.id === id) {
-        return { ...s, name: newName, description: newDescription };
-      }
-      return s;
-    });
-    setScenes(updated);
-    await StorageService.saveScenes(updated);
-  };
-
-  const handleDuplicateScene = async (id: string) => {
-    const target = scenes.find((s) => s.id === id);
-    if (!target) return;
-    const duplicated: Scene = {
-      ...target,
-      id: `scene_${Date.now()}`,
-      name: `${target.name} (Copy)`,
-      createdAt: Date.now(),
-      overlayConfig: JSON.parse(JSON.stringify(target.overlayConfig)),
-    };
-    const updated = [...scenes, duplicated];
-    setScenes(updated);
-    await StorageService.saveScenes(updated);
-  };
-
-  const handleDeleteScene = async (id: string) => {
-    if (scenes.length <= 1) return;
-    const updated = scenes.filter((s) => s.id !== id);
-    setScenes(updated);
-    if (activeSceneId === id) {
-      setActiveSceneId(updated[0].id);
-      await StorageService.saveActiveSceneId(updated[0].id);
-    }
-    await StorageService.saveScenes(updated);
-  };
-
-  // Alert Actions & Simulator
-  const handleFireTestAlert = async (type: AlertType) => {
-    const config = alertSettings[type];
-    if (config.soundEnabled) {
-      soundSynth.playAlertChime(type);
-    }
-
-    const testUsernames = ['CyberViper', 'AeroKnight', 'StreamSamurai', 'LunaGamer', 'NeonPulse'];
-    const randomUser = testUsernames[Math.floor(Math.random() * testUsernames.length)];
-
-    let detail = '';
-    if (type === 'follower') detail = 'Just hit the Follow button!';
-    else if (type === 'gift') detail = 'Sent 5x Cyber Stars!';
-    else if (type === 'like') detail = 'Liked stream 50 times!';
-    else detail = 'First time chatter in stream!';
-
-    const newEvent: AlertEvent = {
-      id: `ev_${Date.now()}`,
-      type,
-      username: randomUser,
-      detail,
-      timestamp: Date.now(),
-    };
-
-    setActiveFloatingAlert(newEvent);
-    const updatedHistory = [newEvent, ...alertHistory];
-    setAlertHistory(updatedHistory);
-    await StorageService.saveAlertHistory(updatedHistory);
-  };
-
-  const handleUpdateAlertSettings = async (newSettings: AlertSettings) => {
-    setAlertSettings(newSettings);
-    await StorageService.saveAlertSettings(newSettings);
-  };
-
-  const handleClearAlertHistory = async () => {
-    setAlertHistory([]);
-    await StorageService.saveAlertHistory([]);
-  };
-
-  // Settings & Storage Actions
+  // Settings Handlers & Backup Export/Import
   const handleUpdateSettings = async (newSettings: AppSettings) => {
     setSettings(newSettings);
     await StorageService.saveSettings(newSettings);
   };
 
   const handleExportData = async () => {
-    const json = await StorageService.exportAllData();
-    const blob = new Blob([json], { type: 'application/json' });
+    const jsonString = await StorageService.exportAllData();
+    const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `syntxrr_stream_tools_backup_${Date.now()}.json`;
+    a.download = `syntxrr_stream_backup_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -543,65 +599,83 @@ export default function App() {
   const handleImportData = async (json: string): Promise<boolean> => {
     const success = await StorageService.importData(json);
     if (success) {
-      const [
-        savedSettings,
-        savedScenes,
-        savedActiveId,
-        savedRequests,
-        savedAlertSettings,
-        savedAlertHistory,
-        savedQueue,
-        savedLocalMeta,
-      ] = await Promise.all([
+      const [reloadedSettings, reloadedPresets, reloadedElements, reloadedIntegrations] = await Promise.all([
         StorageService.getSettings(),
-        StorageService.getScenes(),
-        StorageService.getActiveSceneId(),
-        StorageService.getSongRequests(),
-        StorageService.getAlertSettings(),
-        StorageService.getAlertHistory(),
-        StorageService.getUnifiedQueue(),
-        StorageService.getLocalTracksMeta(),
+        StorageService.getPresets(),
+        StorageService.getStudioElements(),
+        StorageService.getIntegrations(),
       ]);
-      setSettings(savedSettings);
-      setScenes(savedScenes);
-      setActiveSceneId(savedActiveId);
-      setSongRequests(savedRequests);
-      setAlertSettings(savedAlertSettings);
-      setAlertHistory(savedAlertHistory);
-      setUnifiedQueue(savedQueue);
-      setLocalTracksMeta(savedLocalMeta);
+      setSettings(reloadedSettings);
+      setPresets(reloadedPresets);
+      setStudioElements(reloadedElements);
+      setIntegrations(reloadedIntegrations);
     }
     return success;
   };
 
   const handleResetDefaults = async () => {
-    if (window.confirm('Reset all scenes and configurations to factory defaults?')) {
+    if (window.confirm('Apakah Anda yakin ingin mengembalikan seluruh pengaturan ke default?')) {
       await StorageService.resetToDefaults();
       setSettings(DEFAULT_SETTINGS);
-      setScenes(DEFAULT_SCENES);
-      setActiveSceneId(DEFAULT_SCENES[0].id);
-      setSongRequests(DEFAULT_SONG_REQUESTS);
-      setNowPlayingSong(DEFAULT_SONG_REQUESTS[0]);
-      setAlertSettings(DEFAULT_ALERT_SETTINGS);
-      setAlertHistory([]);
+      setPresets(DEFAULT_PRESETS);
+      setActivePresetId(DEFAULT_PRESETS[0].id);
+      setStudioElements(DEFAULT_STUDIO_ELEMENTS);
+      setSoundboardItems(DEFAULT_SOUNDBOARD);
+      setMarketplaceItems(DEFAULT_MARKETPLACE_ITEMS);
+      setIntegrations(DEFAULT_INTEGRATIONS);
+      setTTSConfig(DEFAULT_TTS_CONFIG);
       setUnifiedQueue([]);
       setLocalTracksMeta([]);
-      setLocalFilesMap(new Map());
     }
+  };
+
+  const handleSimulateEventFromDeck = (type: string, detail: string, amount?: number) => {
+    const newEvent: AlertEvent = {
+      id: `deck_evt_${Date.now()}`,
+      type: (type as AlertType) || 'gift',
+      username: 'Viewer_Deck',
+      detail,
+      amount,
+      timestamp: Date.now(),
+      formattedTime: new Date().toLocaleTimeString('id-ID'),
+    };
+    setActiveFloatingAlert(newEvent);
+    streamEventBus.emit({
+      id: newEvent.id,
+      type: newEvent.type as any,
+      username: newEvent.username,
+      detail: newEvent.detail || '',
+      amount: newEvent.amount,
+      timestamp: newEvent.timestamp,
+    });
+    if (ttsConfig.enabled) {
+      ttsService.speakEvent(newEvent.type, newEvent.username, newEvent.detail);
+    }
+  };
+
+  const handlePlaySoundFromDeck = (soundId: string) => {
+    if (soundId.includes('horn')) soundboardEngine.playSynthesizedSFX('horn');
+    else if (soundId.includes('cheer')) soundboardEngine.playSynthesizedSFX('cheer');
+    else if (soundId.includes('tada')) soundboardEngine.playSynthesizedSFX('tada');
+    else if (soundId.includes('bell')) soundboardEngine.playSynthesizedSFX('bell');
+    else soundboardEngine.playSynthesizedSFX('level_up');
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080c16] flex items-center justify-center p-4">
-        <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center mx-auto text-blue-400">
-            <Radio className="w-6 h-6 animate-pulse" />
+      <div className="min-h-screen bg-[#080c16] flex flex-col items-center justify-center space-y-4">
+        <div className="relative">
+          <div className="w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center animate-pulse">
+            <Radio className="w-6 h-6 text-blue-400" />
           </div>
-          <div className="text-sm font-bold text-white tracking-wider">
-            SYNTXRR STREAM TOOLS
+          <div className="absolute -inset-1 rounded-xl bg-blue-500/20 blur-md -z-10 animate-ping" />
+        </div>
+        <div className="text-center space-y-1">
+          <div className="text-sm font-extrabold text-white tracking-wider">
+            SYNTXRR STREAM
           </div>
           <div className="text-xs text-slate-400">
-            Loading Stage 2 Hybrid Studio environment...
+            Memuat lingkungan Mobile Streaming Studio...
           </div>
         </div>
       </div>
@@ -611,17 +685,18 @@ export default function App() {
   const pendingRequestsCount = unifiedQueue.filter((s) => s.status === 'pending').length;
 
   return (
-    <div className="min-h-screen bg-[#080c16] text-slate-100 flex flex-col">
-      {/* Top Bar Header */}
+    <div className="min-h-screen bg-[#080c16] text-slate-100 flex flex-col font-sans">
+      {/* Top Header Bar */}
       <Header
         activeNav={activeNav}
         operatingMode={settings.operatingMode}
-        activeScene={activeScene}
+        activePreset={activePreset}
         onNavigate={setActiveNav}
         onOpenModeModal={() => setIsModeModalOpen(true)}
+        onOpenDrawer={() => setIsDrawerOpen(true)}
       />
 
-      {/* Floating Real-Time Alert Banner Overlay */}
+      {/* Floating Alert Banner Overlay */}
       <AlertBannerOverlay
         currentAlert={activeFloatingAlert}
         onDismiss={() => setActiveFloatingAlert(null)}
@@ -636,19 +711,64 @@ export default function App() {
         onSelectMode={handleSelectMode}
       />
 
+      {/* Mobile Drawer Navigation Modal for All 9 Modules */}
+      <NavigationDrawerModal
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        activeNav={activeNav}
+        onNavigate={setActiveNav}
+        pendingMusicCount={pendingRequestsCount}
+      />
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         {activeNav === 'dashboard' && (
           <DashboardView
             settings={settings}
-            activeScene={activeScene}
-            nowPlayingSong={nowPlayingSong}
-            isPlayingMusic={isPlayingMusic}
-            queuedSongs={songRequests.filter((s) => s.status === 'queued')}
-            onTogglePlayMusic={handleTogglePlayMusic}
+            activePreset={activePreset}
+            integrations={integrations}
             onSelectMode={handleSelectMode}
             onNavigate={setActiveNav}
             onOpenModeModal={() => setIsModeModalOpen(true)}
+          />
+        )}
+
+        {(activeNav === 'studio' || (activeNav as string) === 'overlay') && (
+          <StudioView
+            elements={studioElements}
+            canvasOrientation={settings.canvasOrientation}
+            onChangeOrientation={handleOrientationChange}
+            onUpdateElements={handleUpdateStudioElements}
+            onSaveAsPreset={handleSaveCanvasAsPreset}
+          />
+        )}
+
+        {activeNav === 'sources' && (
+          <SourcesLibraryView
+            onAddElementToStudio={handleAddSingleElementToStudio}
+            onNavigateToStudio={() => setActiveNav('studio')}
+          />
+        )}
+
+        {(activeNav === 'presets' || (activeNav as string) === 'scenes') && (
+          <PresetManagerView
+            presets={presets}
+            activePresetId={activePresetId}
+            onSelectPreset={handleSelectPreset}
+            onCreatePreset={handleCreatePreset}
+            onDuplicatePreset={handleDuplicatePreset}
+            onDeletePreset={handleDeletePreset}
+            onRenamePreset={handleRenamePreset}
+            onToggleFavorite={handleToggleFavoritePreset}
+            onNavigateToStudio={() => setActiveNav('studio')}
+          />
+        )}
+
+        {(activeNav === 'live_center' || (activeNav as string) === 'alerts') && (
+          <LiveCenterView
+            ttsConfig={ttsConfig}
+            onUpdateTTSConfig={handleUpdateTTSConfig}
+            soundboardItems={soundboardItems}
           />
         )}
 
@@ -678,35 +798,18 @@ export default function App() {
           />
         )}
 
-        {activeNav === 'overlay' && (
-          <OverlayStudioView
-            activeScene={activeScene}
-            nowPlayingSong={nowPlayingSong}
-            queuedSongs={songRequests.filter((s) => s.status === 'queued')}
-            onUpdateOverlayConfig={handleUpdateOverlayConfig}
+        {activeNav === 'marketplace' && (
+          <MarketplaceView
+            items={marketplaceItems}
+            onInstallElements={handleInstallMarketplaceElements}
+            onNavigateToStudio={() => setActiveNav('studio')}
           />
         )}
 
-        {activeNav === 'scenes' && (
-          <SceneManagerView
-            scenes={scenes}
-            activeSceneId={activeSceneId}
-            onSelectScene={handleSelectScene}
-            onCreateScene={handleCreateScene}
-            onRenameScene={handleRenameScene}
-            onDuplicateScene={handleDuplicateScene}
-            onDeleteScene={handleDeleteScene}
-            onNavigateToOverlay={() => setActiveNav('overlay')}
-          />
-        )}
-
-        {activeNav === 'alerts' && (
-          <LiveAlertsView
-            alertSettings={alertSettings}
-            alertHistory={alertHistory}
-            onFireTestAlert={handleFireTestAlert}
-            onUpdateAlertSettings={handleUpdateAlertSettings}
-            onClearHistory={handleClearAlertHistory}
+        {activeNav === 'integrations' && (
+          <IntegrationsView
+            integrations={integrations}
+            onUpdateIntegrations={handleUpdateIntegrations}
           />
         )}
 
@@ -719,12 +822,28 @@ export default function App() {
             onResetDefaults={handleResetDefaults}
           />
         )}
+
+        {activeNav === 'remote_deck' && (
+          <StreamDeckView
+            settings={settings}
+            activePreset={activePreset}
+            presets={presets}
+            operatingMode={settings.operatingMode}
+            onSelectPreset={handleSelectPreset}
+            onSelectMode={handleSelectMode}
+            onTriggerEvent={handleSimulateEventFromDeck}
+            onPlaySound={handlePlaySoundFromDeck}
+            onToggleMusic={handleTogglePlayMusic}
+            onSkipMusic={handleNextTrack}
+          />
+        )}
       </main>
 
       {/* Mobile Bottom Navigation Bar */}
       <BottomNav
         activeNav={activeNav}
         onNavigate={setActiveNav}
+        onOpenDrawer={() => setIsDrawerOpen(true)}
         pendingRequestsCount={pendingRequestsCount}
       />
     </div>

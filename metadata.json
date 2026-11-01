@@ -1,6 +1,6 @@
 {
-  "name": "SYNTXRR STREAM TOOLS",
-  "description": "Mobile-first streaming control dashboard and Android companion tool for floating overlays, scene management, music center, and broadcast configuration.",
+  "name": "SYNTXRR STREAM",
+  "description": "Mobile Streaming Studio Android — Pusat kendali produksi broadcast, overlay studio, event simulator, viewer song request, dan integrasi multiplatform.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -34,11 +34,20 @@ export const LiveAlertsView: React.FC<LiveAlertsViewProps> = ({
 }) => {
   const [activeCategory, setActiveCategory] = useState<AlertType>('follower');
 
+  const defaultCategoryConfig = {
+    enabled: true,
+    messageTemplate: '{username} baru saja berinteraksi!',
+    durationSec: 5,
+    soundEnabled: true,
+    accentColor: '#38bdf8',
+  };
+
   const updateCategoryConfig = (type: AlertType, field: string, value: any) => {
+    const existing = alertSettings[type] || defaultCategoryConfig;
     const updated: AlertSettings = {
       ...alertSettings,
       [type]: {
-        ...alertSettings[type],
+        ...existing,
         [field]: value,
       },
     };
@@ -76,8 +85,8 @@ export const LiveAlertsView: React.FC<LiveAlertsViewProps> = ({
     },
   ];
 
-  const currentConfig = alertSettings[activeCategory];
-  const activeCatMeta = categories.find((c) => c.id === activeCategory)!;
+  const currentConfig = alertSettings[activeCategory] || defaultCategoryConfig;
+  const activeCatMeta = categories.find((c) => c.id === activeCategory) || categories[0];
   const ActiveIcon = activeCatMeta.icon;
 
   return (
@@ -140,12 +149,12 @@ export const LiveAlertsView: React.FC<LiveAlertsViewProps> = ({
                   </div>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      alertSettings[cat.id].enabled
+                      alertSettings[cat.id]?.enabled
                         ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800'
                         : 'bg-slate-800 text-slate-500'
                     }`}
                   >
-                    {alertSettings[cat.id].enabled ? 'ON' : 'OFF'}
+                    {alertSettings[cat.id]?.enabled ? 'ON' : 'OFF'}
                   </span>
                 </div>
 

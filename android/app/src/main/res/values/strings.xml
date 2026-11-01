@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">SYNTXRR STREAM TOOLS</string>
-    <string name="title_activity_main">SYNTXRR STREAM TOOLS</string>
+    <string name="app_name">SYNTXRR STREAM</string>
+    <string name="title_activity_main">SYNTXRR STREAM</string>
     <string name="package_name">com.syntxrr.streamtools</string>
     <string name="custom_url_scheme">com.syntxrr.streamtools</string>
 </resources>

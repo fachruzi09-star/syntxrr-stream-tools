@@ -1,4 +1,8 @@
-export type OperatingMode = 'MODE_A_OVERLAY' | 'MODE_B_ENCODER';
+import { FeatureStatus } from '../theme/designSystem';
+
+export type OperatingMode = 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER' | 'MODE_A_OVERLAY' | 'MODE_B_ENCODER';
+
+export type CanvasOrientation = '9:16' | '16:9' | '1:1';
 
 export type ResolutionTarget = '720p' | '1080p' | '1440p';
 
@@ -8,12 +12,28 @@ export type PerformanceProfile = 'battery_saver' | 'balanced' | 'performance';
 
 export type AppTheme = 'navy_dark' | 'obsidian_dark' | 'cyber_slate';
 
+export type NavigationTab =
+  | 'dashboard'
+  | 'studio'
+  | 'sources'
+  | 'presets'
+  | 'live_center'
+  | 'music'
+  | 'marketplace'
+  | 'integrations'
+  | 'settings'
+  | 'remote_deck';
+
+// Alias for backwards compatibility
+export type ActiveNav = NavigationTab;
+
 export interface AppSettings {
   operatingMode: OperatingMode;
   targetResolution: ResolutionTarget;
   frameRate: FrameRate;
   performanceProfile: PerformanceProfile;
   theme: AppTheme;
+  canvasOrientation: CanvasOrientation;
   rtmpServer: string;
   streamKey: string;
   videoBitrateKbps: number;
@@ -21,20 +41,214 @@ export interface AppSettings {
   enableOverlayInPip: boolean;
   floatingOverlayOpacity: number;
   hardwareAcceleration: boolean;
-  // Stage 2: Music Center Integrations
+  // Stage 2 & 3: Integrations & API settings
   youtubeApiKey?: string;
   spotifyClientId?: string;
   spotifyAccessToken?: string;
   spotifyTokenExpiry?: number;
-  audioVolume?: number; // 0.0 - 1.0
+  audioVolume?: number;
   audioAutoplayNext?: boolean;
+  // Mode A TikTok Companion
+  tiktokUsername?: string;
+  tiktokConnected?: boolean;
+  // Soundboard & Audio routing
+  soundboardVolume?: number;
 }
 
+// STUDIO & SOURCES DEFINITIONS
+export type BasicSourceType =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'shape'
+  | 'separator'
+  | 'camera'
+  | 'screen_capture'
+  | 'browser_embed'
+  | 'running_text'
+  | 'audio'
+  | 'soundboard';
+
+export type DynamicSourceType =
+  | 'dynamic_text'
+  | 'username'
+  | 'avatar'
+  | 'chat_message'
+  | 'event_feed'
+  | 'counter'
+  | 'combo_counter'
+  | 'progress_bar'
+  | 'leaderboard'
+  | 'song_request'
+  | 'lyrics'
+  | 'live_viewer_counter'
+  | 'event_alert'
+  | 'sticker'
+  | 'live_text';
+
+export type SourceType = BasicSourceType | DynamicSourceType;
+
+export interface StudioElement {
+  id: string;
+  name: string;
+  type: SourceType;
+  x: number; // percentage 0-100 of canvas
+  y: number; // percentage 0-100 of canvas
+  width: number; // percentage 0-100 of canvas
+  height: number; // percentage 0-100 of canvas
+  layer: number; // z-index ordering
+  visible: boolean;
+  locked: boolean;
+  opacity: number; // 0-100
+  rotation: number; // 0-360 degrees
+  properties: Record<string, any>;
+  triggerConfig?: {
+    eventType?: StreamEventType | 'all';
+    action?: 'show' | 'pulse' | 'play_sound' | 'text_update' | 'custom_css';
+    durationSec?: number;
+    condition?: 'any' | 'amount_gte' | 'keyword_match';
+    minAmount?: number;
+    matchKeyword?: string;
+    cooldownSec?: number;
+    priority?: number;
+  };
+}
+
+export type PresetCategory = 'all' | 'hp_screen' | 'landscape' | 'portrait' | 'favorites';
+
+export interface StudioPreset {
+  id: string;
+  name: string;
+  category: PresetCategory;
+  canvasOrientation: CanvasOrientation;
+  elements: StudioElement[];
+  createdAt: number;
+  isFavorite: boolean;
+  description: string;
+  thumbnailColor?: string;
+}
+
+// EVENT SYSTEM & SIMULATOR
+export type StreamEventType =
+  | 'chat'
+  | 'gift'
+  | 'like'
+  | 'follow'
+  | 'share'
+  | 'join'
+  | 'donation'
+  | 'viewer'
+  | 'custom';
+
+export interface StreamEvent {
+  id: string;
+  type: StreamEventType;
+  username: string;
+  userAvatar?: string;
+  detail: string;
+  amount?: number;
+  currency?: string;
+  timestamp: number;
+  isSimulation?: boolean;
+}
+
+// TTS & NOTIFICATION SYSTEM
+export interface TTSConfig {
+  enabled: boolean;
+  volume: number; // 0-1
+  rate: number; // 0.5 - 2
+  pitch: number; // 0.5 - 1.5
+  voiceUri?: string;
+  language: string; // 'id-ID' default
+  readComments: boolean;
+  readDonations: boolean;
+  readGifts: boolean;
+  readSongRequests: boolean;
+}
+
+export interface NotificationConfig {
+  position: 'top-center' | 'top-right' | 'bottom-center';
+  durationSec: number;
+  maxHistory: number;
+  soundEnabled: boolean;
+}
+
+// SOUNDBOARD
+export type SoundboardCategory = 'Hype' | 'Meme' | 'SFX' | 'Game';
+
+export interface SoundboardItem {
+  id: string;
+  name: string;
+  category: SoundboardCategory;
+  icon: string;
+  durationSec: number;
+  audioUrl?: string; // local object URL or synthesized
+  isQuickSlot: boolean;
+  quickSlotKey?: number;
+  synthType?: 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell';
+}
+
+// MARKETPLACE
+export type MarketplaceCategory = 'scene' | 'widget' | 'element';
+
+export type MarketplaceFilter =
+  | 'all'
+  | 'song_request'
+  | 'chat_message'
+  | 'event_feed'
+  | 'custom_html'
+  | 'alert'
+  | 'counter'
+  | 'overlay';
+
+export interface MarketplaceItem {
+  id: string;
+  name: string;
+  category: MarketplaceCategory;
+  filter: MarketplaceFilter;
+  author: string;
+  rating: number;
+  downloads: number;
+  description: string;
+  isInstalled: boolean;
+  isFavorite: boolean;
+  previewGradient: string;
+  elementsPayload: StudioElement[];
+}
+
+// INTEGRATIONS
+export type IntegrationProviderId =
+  | 'tiktok'
+  | 'youtube'
+  | 'facebook'
+  | 'twitch'
+  | 'kick'
+  | 'saweria'
+  | 'sociabuzz'
+  | 'trakteer'
+  | 'toko'
+  | 'bagibagi'
+  | 'sibagi'
+  | 'tiptap';
+
+export interface IntegrationProvider {
+  id: IntegrationProviderId;
+  name: string;
+  category: 'companion' | 'streaming' | 'donation';
+  status: FeatureStatus;
+  description: string;
+  logo: string;
+  connectedUser?: string;
+  authFields?: { key: string; label: string; placeholder: string; isSecret?: boolean }[];
+  guideUrl?: string;
+}
+
+// STAGE 1 & 2 PRESERVED TYPES
 export interface OverlayWidgetConfig {
   nowPlaying: {
     enabled: boolean;
-    x: number; // percentage 0-100
-    y: number; // percentage 0-100
+    x: number;
+    y: number;
     opacity: number;
     showAlbumArt: boolean;
     showProgress: boolean;
@@ -54,7 +268,7 @@ export interface OverlayWidgetConfig {
     y: number;
     opacity: number;
     maxMessages: number;
-    fontSize: number; // in px
+    fontSize: number;
     showBadges: boolean;
   };
   eventAlert: {
@@ -99,21 +313,20 @@ export interface UnifiedQueueItem {
   source: MusicSourceType;
   externalUrl?: string;
   thumbnailUrl?: string;
-  duration?: number; // seconds
+  duration?: number;
   requesterName: string;
   platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'Spotify' | 'Local' | 'Manual';
   addedAt: number;
   status: QueueItemStatus;
   notes?: string;
-  localFileKey?: string; // reference to local track ID
+  localFileKey?: string;
 }
 
-// Stage 1 Backwards-Compatible SongRequest extending UnifiedQueueItem
 export interface SongRequest {
   id: string;
   title: string;
   artist: string;
-  duration: number; // seconds
+  duration: number;
   requesterName: string;
   platform: 'TikTok' | 'Twitch' | 'YouTube' | 'Manual' | 'Spotify' | 'Local';
   status: 'playing' | 'queued' | 'played';
@@ -130,7 +343,7 @@ export interface LocalAudioTrackMeta {
   title: string;
   artist: string;
   filename: string;
-  duration: number; // in seconds
+  duration: number;
   sizeBytes: number;
   mimeType: string;
   addedAt: number;
@@ -155,44 +368,155 @@ export interface SpotifySearchResult {
   durationMs: number;
 }
 
-export type IntegrationStatus =
-  | 'available'
-  | 'not_configured'
-  | 'auth_required'
-  | 'disconnected'
-  | 'unsupported'
-  | 'error';
-
-export type AlertType = 'follower' | 'gift' | 'like' | 'chat_event';
+export type AlertType =
+  | 'follower'
+  | 'gift'
+  | 'like'
+  | 'chat_event'
+  | 'donation'
+  | 'follow'
+  | 'sub'
+  | 'share';
 
 export interface AlertCategoryConfig {
   enabled: boolean;
-  messageTemplate: string;
-  durationSec: number;
-  soundEnabled: boolean;
-  accentColor: string;
+  messageTemplate?: string;
+  durationSec?: number;
+  soundEnabled?: boolean;
+  accentColor?: string;
+  color?: string;
+  icon?: string;
+  minAmount?: number;
 }
 
 export interface AlertSettings {
-  follower: AlertCategoryConfig;
-  gift: AlertCategoryConfig;
-  like: AlertCategoryConfig;
-  chat_event: AlertCategoryConfig;
+  follower?: AlertCategoryConfig;
+  gift?: AlertCategoryConfig;
+  like?: AlertCategoryConfig;
+  chat_event?: AlertCategoryConfig;
+  follow?: AlertCategoryConfig;
+  sub?: AlertCategoryConfig;
+  donation?: AlertCategoryConfig;
+  share?: AlertCategoryConfig;
+  soundEnabled?: boolean;
+  soundVolume?: number;
+  durationSec?: number;
+  types?: Record<string, AlertCategoryConfig>;
+  [key: string]: any;
 }
 
 export interface AlertEvent {
   id: string;
   type: AlertType;
   username: string;
-  detail: string;
+  detail?: string;
+  message?: string;
   timestamp: number;
-  value?: number; // count of likes, coins, months
+  value?: number;
+  amount?: number;
+  currency?: string;
+  formattedTime?: string;
 }
 
-export type ActiveNav =
-  | 'dashboard'
-  | 'music'
-  | 'overlay'
-  | 'scenes'
-  | 'alerts'
-  | 'settings';
+// ELEMENT TRIGGER SPEC
+export interface ElementTriggerRule {
+  enabled: boolean;
+  eventType: StreamEventType | 'all';
+  condition?: 'any' | 'amount_gte' | 'keyword_match';
+  minAmount?: number;
+  matchKeyword?: string;
+  action: 'show' | 'pulse' | 'play_sound' | 'text_update' | 'custom_css';
+  durationSec: number;
+  cooldownSec: number;
+  priority: number;
+}
+
+// STREAM DECK COMMAND & SYNC PROTOCOL
+export type DeckCommandType =
+  | 'start_live'
+  | 'stop_live'
+  | 'toggle_live'
+  | 'switch_scene'
+  | 'toggle_overlay'
+  | 'mute_mic'
+  | 'mute_audio'
+  | 'music_play_pause'
+  | 'music_skip'
+  | 'music_prev'
+  | 'play_soundboard'
+  | 'trigger_event'
+  | 'switch_mode'
+  | 'emergency_blank';
+
+export type DeckCommandStatus = 'RECEIVED' | 'EXECUTING' | 'SUCCESS' | 'REJECTED' | 'FAILED';
+
+export interface DeckCommandPacket {
+  messageId: string;
+  command: DeckCommandType;
+  payload?: any;
+  timestamp: number;
+  sessionId: string;
+  senderDeviceId: string;
+  token: string;
+}
+
+export interface DeckCommandAck {
+  messageId: string;
+  status: DeckCommandStatus;
+  timestamp: number;
+  error?: string;
+  hostTelemetry?: DeckTelemetry;
+}
+
+export interface DeckTelemetry {
+  isStreaming: boolean;
+  streamDurationSec: number;
+  fps: number;
+  bitrateKbps: number;
+  cpuPercent: number;
+  batteryPercent: number;
+  deviceTempC: number;
+  activePresetName: string;
+  micMuted: boolean;
+  audioMuted: boolean;
+  musicNowPlaying?: string;
+  musicIsPlaying: boolean;
+  viewerCount: number;
+}
+
+export interface DeckButton {
+  id: string;
+  label: string;
+  command: DeckCommandType;
+  payload?: any;
+  icon: string;
+  color: string;
+  order: number;
+  pageId: string;
+}
+
+export interface DeckPage {
+  id: string;
+  name: string;
+  icon: string;
+  buttonIds: string[];
+}
+
+export interface DeckPairingData {
+  hostIp: string;
+  port: number;
+  pairingPin: string;
+  pairingToken: string;
+  sessionId: string;
+  hostDeviceName: string;
+  createdAt: number;
+}
+
+export interface ConnectedRemoteDevice {
+  deviceId: string;
+  deviceName: string;
+  connectedAt: number;
+  lastPing: number;
+  isApproved: boolean;
+}
+

@@ -43,16 +43,16 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-slate-800">
           <div>
             <h2 id="mode-launcher-title" className="text-base font-bold text-white flex items-center gap-2">
-              Operating Mode Architecture
+              Arsitektur Jalur Operasi (Mode A vs Mode B)
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Select or test the active Android companion runtime mode
+              Pilih dan uji dua jalur rendering terpisah: Floating HUD atau Direct RTMP Compositor
             </p>
           </div>
           <button
             onClick={onClose}
             className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            aria-label="Close dialog"
+            aria-label="Tutup dialog"
           >
             <X className="w-5 h-5" />
           </button>
@@ -66,7 +66,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             <div
               onClick={() => onSelectMode('MODE_A_OVERLAY')}
               className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                currentMode === 'MODE_A_OVERLAY'
+                currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
                   ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-950/50 ring-1 ring-blue-500'
                   : 'bg-[#131f36] border-slate-800 hover:border-slate-700'
               }`}
@@ -75,31 +75,31 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                 <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
                   <Layers className="w-5 h-5" />
                 </div>
-                {currentMode === 'MODE_A_OVERLAY' && (
+                {(currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION') && (
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800">
-                    <Check className="w-3 h-3" /> Active Mode
+                    <Check className="w-3 h-3" /> Mode Aktif
                   </span>
                 )}
               </div>
               <h3 className="text-sm font-bold text-white mt-3">
-                Mode A: Floating Overlay
+                Mode A: TikTok LIVE Companion (Floating HUD)
               </h3>
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                Render lightweight transparent HUD on top of Android games and third-party apps via system overlay window permission.
+                Menampilkan overlay mengambang transparan di atas game atau aplikasi TikTok menggunakan izin Android <code>SYSTEM_ALERT_WINDOW</code>. Tidak perlu RTMP key.
               </p>
 
               <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-400">
                 <div className="flex items-center justify-between">
-                  <span>RAM Overhead</span>
-                  <span className="font-mono text-emerald-400 font-semibold">~45 MB (Low)</span>
+                  <span>Beban RAM</span>
+                  <span className="font-mono text-emerald-400 font-semibold">~45 MB (Rendah)</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Battery Impact</span>
-                  <span className="font-mono text-emerald-400 font-semibold">Minimal (&lt;1.8%/hr)</span>
+                  <span>Dampak Baterai</span>
+                  <span className="font-mono text-emerald-400 font-semibold">Minimal (&lt;1.8%/jam)</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Target Use Case</span>
-                  <span className="text-slate-300">Gaming &amp; Chat Monitoring</span>
+                  <span>Jalur Rendering</span>
+                  <span className="text-slate-300">Android Window Service</span>
                 </div>
               </div>
 
@@ -110,12 +110,12 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                   onSelectMode('MODE_A_OVERLAY');
                 }}
                 className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  currentMode === 'MODE_A_OVERLAY'
+                  currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {currentMode === 'MODE_A_OVERLAY' ? 'Mode A Active' : 'Switch to Mode A'}
+                {currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION' ? 'Mode A Terpilih' : 'Pilih Mode A'}
               </button>
             </div>
 
@@ -123,7 +123,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             <div
               onClick={() => onSelectMode('MODE_B_ENCODER')}
               className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                currentMode === 'MODE_B_ENCODER'
+                currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER'
                   ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-950/50 ring-1 ring-blue-500'
                   : 'bg-[#131f36] border-slate-800 hover:border-slate-700'
               }`}
@@ -132,31 +132,31 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                 <div className="w-10 h-10 rounded-lg bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
                   <Radio className="w-5 h-5" />
                 </div>
-                {currentMode === 'MODE_B_ENCODER' && (
+                {(currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER') && (
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-800">
-                    <Check className="w-3 h-3" /> Active Mode
+                    <Check className="w-3 h-3" /> Mode Aktif
                   </span>
                 )}
               </div>
               <h3 className="text-sm font-bold text-white mt-3">
-                Mode B: Streaming Encoder
+                Mode B: Streaming Encoder (Compositor RTMP)
               </h3>
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                Full streaming engine packaging Camera, Mic, Screen Capture, and RTMP/RTMPS broadcast at 1080p resolution.
+                Pipa produksi siaran internal mandiri: memadukan Kamera, Mikrofon, Tangkapan Layar, dan Overlay kanvas menjadi satu stream 1080p ke server RTMP/RTMPS.
               </p>
 
               <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-400">
                 <div className="flex items-center justify-between">
-                  <span>RAM Overhead</span>
-                  <span className="font-mono text-amber-400 font-semibold">~135 MB (Balanced)</span>
+                  <span>Beban RAM</span>
+                  <span className="font-mono text-amber-400 font-semibold">~135 MB (Seimbang)</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Encoder Profile</span>
-                  <span className="font-mono text-sky-400 font-semibold">1080p @ {settings.frameRate} FPS</span>
+                  <span>Profil Encoder</span>
+                  <span className="font-mono text-sky-400 font-semibold">{settings.targetResolution} @ {settings.frameRate} FPS</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Target Protocol</span>
-                  <span className="text-slate-300">RTMP / RTMPS Broadcast</span>
+                  <span>Protokol Siaran</span>
+                  <span className="text-slate-300">RTMP / RTMPS Langsung</span>
                 </div>
               </div>
 
@@ -167,12 +167,12 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                   onSelectMode('MODE_B_ENCODER');
                 }}
                 className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  currentMode === 'MODE_B_ENCODER'
+                  currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER'
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {currentMode === 'MODE_B_ENCODER' ? 'Mode B Active' : 'Switch to Mode B'}
+                {currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER' ? 'Mode B Terpilih' : 'Pilih Mode B'}
               </button>
             </div>
           </div>
@@ -182,33 +182,33 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <Monitor className="w-4 h-4 text-blue-400" />
-                {currentMode === 'MODE_A_OVERLAY'
-                  ? 'Mode A: Floating Overlay HUD Preview'
-                  : 'Mode B: 1080p Encoder Pipeline Preview'}
+                {currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
+                  ? 'Pratinjau Mode A: Floating Overlay HUD'
+                  : 'Pratinjau Mode B: Compositor Pipeline RTMP 1080p'}
               </span>
-              <span className="text-[11px] text-amber-400 bg-amber-950/60 border border-amber-900/60 px-2 py-0.5 rounded">
-                Prototype Stage
+              <span className="text-[10px] font-bold text-sky-400 bg-sky-950/80 border border-sky-800 px-2 py-0.5 rounded">
+                SIMULATION &amp; FOUNDATION
               </span>
             </div>
 
-            {currentMode === 'MODE_A_OVERLAY' ? (
+            {currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION' ? (
               <div className="space-y-3">
                 <div className="p-3 rounded-lg bg-[#0e1626] border border-blue-900/40 text-xs text-slate-300 space-y-2">
                   <div className="flex items-center justify-between text-[11px] text-slate-400 border-b border-slate-800 pb-1.5">
-                    <span>Android SYSTEM_ALERT_WINDOW Status</span>
-                    <span className="text-blue-400 font-medium">Ready for native intent</span>
+                    <span>Status Izin Android SYSTEM_ALERT_WINDOW</span>
+                    <span className="text-emerald-400 font-bold">Tersimulasi Aktif</span>
                   </div>
                   <p className="leading-relaxed">
-                    When running on an Android device with the native companion service, SYNTXRR renders a floating pill that stays pinned over MLBB, PUBG, or TikTok.
+                    Saat dijalankan di perangkat Android dengan service latar depan, SYNTXRR memunculkan jendela floating pill yang tetap melayang di atas game (MLBB, PUBG, Free Fire) atau aplikasi TikTok LIVE.
                   </p>
                   {/* Floating Pill Mockup */}
-                  <div className="my-2 p-2.5 rounded-lg bg-blue-950/80 border border-blue-500/60 flex items-center justify-between max-w-sm mx-auto shadow-lg">
+                  <div className="my-2 p-2.5 rounded-lg bg-blue-950/90 border border-blue-500/80 flex items-center justify-between max-w-sm mx-auto shadow-lg">
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse" />
-                      <span className="text-xs font-semibold text-white">SYNTXRR HUD</span>
+                      <span className="text-xs font-bold text-white">SYNTXRR FLOATING HUD</span>
                     </div>
                     <div className="text-[11px] text-slate-300 font-mono">
-                      Queue: 3 · Chat: Active
+                      Queue: 3 · TTS: Aktif
                     </div>
                   </div>
                 </div>
@@ -246,7 +246,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-950/30 border border-blue-900/50 text-xs text-blue-300/90">
               <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
               <p className="leading-relaxed">
-                Development Rule Verified: Real live broadcast connections remain disconnected. In Stage 1, all controls, configurations, and mock streams operate locally in IndexedDB.
+                Prinsip Keterbukaan: Koneksi server broadcast aktual berstatus belum tersambung (NOT_CONNECTED). Pengaturan, simulasi render, dan parameter tersimpan persisten secara lokal di IndexedDB HP.
               </p>
             </div>
           </div>
@@ -256,21 +256,21 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             <div className="p-3 rounded-lg bg-[#131f36] border border-slate-800 flex items-center gap-2.5">
               <Battery className="w-4 h-4 text-emerald-400 shrink-0" />
               <div>
-                <div className="text-[11px] text-slate-400">Battery Drain</div>
-                <div className="font-bold text-white">~4.2%/hr Target</div>
+                <div className="text-[11px] text-slate-400">Konsumsi Baterai</div>
+                <div className="font-bold text-white">~4.2%/jam Target</div>
               </div>
             </div>
             <div className="p-3 rounded-lg bg-[#131f36] border border-slate-800 flex items-center gap-2.5">
               <Flame className="w-4 h-4 text-amber-400 shrink-0" />
               <div>
-                <div className="text-[11px] text-slate-400">Device Temp</div>
-                <div className="font-bold text-white">&lt;38°C Balanced</div>
+                <div className="text-[11px] text-slate-400">Suhu Perangkat</div>
+                <div className="font-bold text-white">&lt;38°C Seimbang</div>
               </div>
             </div>
             <div className="p-3 rounded-lg bg-[#131f36] border border-slate-800 flex items-center gap-2.5">
               <Cpu className="w-4 h-4 text-sky-400 shrink-0" />
               <div>
-                <div className="text-[11px] text-slate-400">Resolution</div>
+                <div className="text-[11px] text-slate-400">Resolusi Output</div>
                 <div className="font-bold text-white">{settings.targetResolution}</div>
               </div>
             </div>
@@ -283,7 +283,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
           >
-            Apply &amp; Return to Dashboard
+            Terapkan &amp; Tutup
           </button>
         </div>
       </div>

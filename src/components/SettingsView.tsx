@@ -20,6 +20,7 @@ import {
   Music2,
   KeyRound,
   ExternalLink,
+  Volume2,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -45,7 +46,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleUpdate = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     const updated = { ...settings, [key]: value };
     onUpdateSettings(updated);
-    setSaveStatus('Saved to IndexedDB');
+    setSaveStatus('Tersimpan di IndexedDB');
     setTimeout(() => setSaveStatus(null), 2000);
   };
 
@@ -58,10 +59,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (content) {
         const success = await onImportData(content);
         if (success) {
-          setSaveStatus('Backup restored successfully!');
+          setSaveStatus('Cadangan berhasil dipulihkan!');
           setTimeout(() => setSaveStatus(null), 2500);
         } else {
-          alert('Failed to parse backup JSON file.');
+          alert('Gagal membaca file JSON cadangan.');
         }
       }
     };
@@ -75,10 +76,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Settings className="w-6 h-6 text-blue-400" />
-            Studio Settings
+            Pengaturan Studio (Settings)
           </h1>
           <p className="text-xs text-slate-400">
-            Performance governors, broadcast resolution targets, music API keys, and local persistence
+            Profil performa perangkat, target resolusi siaran, kunci API, dan pencadangan data lokal
           </p>
         </div>
 
@@ -89,20 +90,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* Stage 2: Music Catalog & API Integrations Section */}
+      {/* Music Catalog & API Integrations Section */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-blue-900/60 shadow-lg space-y-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-blue-400 uppercase">
-            <span>Stage 2 Feature</span>
+            <span>Konektor Eksternal</span>
             <span className="text-slate-500">·</span>
-            <span>Music Center Connectors</span>
+            <span>Pencarian Metadata Musik</span>
           </div>
           <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 mt-0.5">
             <Music2 className="w-4 h-4 text-blue-400" />
-            Music Catalog &amp; API Integrations
+            Katalog Musik &amp; Kunci API Resmi
           </h2>
           <p className="text-xs text-slate-400">
-            Configure official YouTube Data API and Spotify Developer credentials for metadata searches
+            Konfigurasi kredensial resmi YouTube Data API v3 dan Spotify Developer untuk pencarian judul lagu penonton
           </p>
         </div>
 
@@ -114,7 +115,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span className="w-3.5 h-3.5 rounded bg-red-600 text-white font-black text-[8px] flex items-center justify-center">
                   YT
                 </span>
-                YouTube Data API v3 Key
+                Kunci API YouTube Data v3
               </label>
               <a
                 href="https://console.cloud.google.com/apis/credentials"
@@ -122,7 +123,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 rel="noreferrer"
                 className="text-[11px] text-blue-400 hover:underline flex items-center gap-1"
               >
-                Get API Key <ExternalLink className="w-3 h-3" />
+                Dapatkan Kunci API <ExternalLink className="w-3 h-3" />
               </a>
             </div>
             <div className="relative">
@@ -137,13 +138,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="button"
                 onClick={() => setShowYouTubeKey(!showYouTubeKey)}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                title={showYouTubeKey ? 'Hide key' : 'Show key'}
+                title={showYouTubeKey ? 'Sembunyikan' : 'Tampilkan'}
               >
                 {showYouTubeKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-[10px] text-slate-500 mt-1">
-              Stored locally in IndexedDB. Used exclusively for searching video titles and thumbnails.
+            <p className="text-[11px] text-slate-500 mt-1">
+              Digunakan murni untuk pencarian judul dan thumbnail video YouTube resmi.
             </p>
           </div>
 
@@ -151,10 +152,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-slate-300 font-medium flex items-center gap-1.5">
-                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-black font-black text-[8px] flex items-center justify-center">
-                  ●
+                <span className="w-3.5 h-3.5 rounded bg-emerald-600 text-white font-black text-[8px] flex items-center justify-center">
+                  SP
                 </span>
-                Spotify Developer Client ID
+                Client ID Spotify Developer
               </label>
               <a
                 href="https://developer.spotify.com/dashboard"
@@ -162,88 +163,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 rel="noreferrer"
                 className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
               >
-                Spotify Dashboard <ExternalLink className="w-3 h-3" />
+                Portal Spotify Developer <ExternalLink className="w-3 h-3" />
               </a>
             </div>
             <input
               type="text"
               value={settings.spotifyClientId || ''}
               onChange={(e) => handleUpdate('spotifyClientId', e.target.value)}
-              placeholder="e.g. 7d8f9a0c2e..."
+              placeholder="Masukkan Spotify Client ID 32-karakter..."
               className="w-full px-3 py-2.5 rounded-xl bg-[#080c16] border border-slate-700 text-white font-mono focus:outline-none focus:border-emerald-500"
             />
-            <p className="text-[10px] text-slate-500 mt-1">
-              Redirect URI to configure in Spotify Developer Dashboard: <code className="text-blue-300">{typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : '/auth/callback'}</code>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Memerlukan redirect URI yang diarahkan ke aplikasi ini untuk autentikasi PKCE.
             </p>
-          </div>
-
-          {/* Local Audio Engine Preferences */}
-          <div className="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">
-                Local Audio Default Volume ({Math.round((settings.audioVolume ?? 0.85) * 100)}%)
-              </label>
-              <input
-                type="range"
-                min="0.1"
-                max="1.0"
-                step="0.05"
-                value={settings.audioVolume ?? 0.85}
-                onChange={(e) => handleUpdate('audioVolume', parseFloat(e.target.value))}
-                className="w-full accent-blue-500"
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-xl bg-[#080c16] border border-slate-800">
-              <div>
-                <span className="font-semibold text-white block">Auto-Play Next Local Track</span>
-                <span className="text-[10px] text-slate-400">Play next file in playlist upon track completion</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.audioAutoplayNext ?? true}
-                onChange={(e) => handleUpdate('audioAutoplayNext', e.target.checked)}
-                className="rounded accent-blue-500 w-4 h-4 cursor-pointer"
-              />
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Target Resolution & Broadcast Pipeline (Stage 1 Preserved) */}
+      {/* Target Resolusi Siaran & Frame Rate */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
             <Monitor className="w-4 h-4 text-blue-400" />
-            Stream Target Resolution &amp; Framerate
+            Resolusi Siaran &amp; Frame Rate
           </h2>
           <p className="text-xs text-slate-400">
-            Target streaming resolution calibrated for mobile Android hardware encoders
+            Target resolusi siaran standar 1080p dengan keseimbangan kompresi hardware
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-slate-300 font-semibold mb-2">
-              Target Resolution
+            <label className="block text-xs font-semibold text-slate-300 mb-2">
+              Target Resolusi Video
             </label>
             <div className="grid grid-cols-3 gap-2">
               {(['720p', '1080p', '1440p'] as ResolutionTarget[]).map((res) => (
                 <button
                   key={res}
-                  type="button"
                   onClick={() => handleUpdate('targetResolution', res)}
-                  className={`min-h-[44px] rounded-xl border font-bold text-xs transition-all ${
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center gap-0.5 ${
                     settings.targetResolution === res
-                      ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                      : 'bg-[#080c16] text-slate-300 border-slate-700 hover:border-slate-600'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 border border-blue-400'
+                      : 'bg-[#080c16] text-slate-400 border border-slate-800 hover:text-white'
                   }`}
                 >
-                  {res}
+                  <span>{res}</span>
                   {res === '1080p' && (
-                    <span className="block text-[9px] font-normal text-blue-200">
-                      Standard
-                    </span>
+                    <span className="text-[9px] font-normal opacity-80">(Rekomendasi)</span>
                   )}
                 </button>
               ))}
@@ -251,65 +218,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-slate-300 font-semibold mb-2">
-              Frame Rate (FPS)
+            <label className="block text-xs font-semibold text-slate-300 mb-2">
+              Target Kecepatan Bingkai (FPS)
             </label>
             <div className="grid grid-cols-2 gap-2">
               {([30, 60] as FrameRate[]).map((fps) => (
                 <button
                   key={fps}
-                  type="button"
                   onClick={() => handleUpdate('frameRate', fps)}
-                  className={`min-h-[44px] rounded-xl border font-bold text-xs transition-all ${
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center gap-0.5 ${
                     settings.frameRate === fps
-                      ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                      : 'bg-[#080c16] text-slate-300 border-slate-700 hover:border-slate-600'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 border border-blue-400'
+                      : 'bg-[#080c16] text-slate-400 border border-slate-800 hover:text-white'
                   }`}
                 >
-                  {fps} FPS
-                  <span className="block text-[9px] font-normal text-blue-200">
-                    {fps === 60 ? 'Smooth Gaming' : 'Battery Saver'}
+                  <span>{fps} FPS</span>
+                  <span className="text-[9px] font-normal opacity-80">
+                    {fps === 60 ? 'Mulus (Gaming)' : 'Hemat Baterai'}
                   </span>
                 </button>
               ))}
             </div>
           </div>
         </div>
-
-        {/* Video Bitrate Slider */}
-        <div className="pt-2 border-t border-slate-800 text-xs">
-          <div className="flex justify-between text-slate-300 mb-1">
-            <span>Video Bitrate Target:</span>
-            <span className="font-mono text-blue-400 font-bold">
-              {settings.videoBitrateKbps} kbps ({Math.round(settings.videoBitrateKbps / 1000)} Mbps)
-            </span>
-          </div>
-          <input
-            type="range"
-            min="2500"
-            max="9000"
-            step="250"
-            value={settings.videoBitrateKbps}
-            onChange={(e) => handleUpdate('videoBitrateKbps', parseInt(e.target.value, 10))}
-            className="w-full accent-blue-500"
-          />
-          <div className="flex justify-between text-[10px] text-slate-500 mt-0.5">
-            <span>2500 kbps (720p Low)</span>
-            <span>6000 kbps (1080p Balanced)</span>
-            <span>9000 kbps (High Quality)</span>
-          </div>
-        </div>
       </div>
 
-      {/* Performance Profile Governor (Stage 1 Preserved) */}
+      {/* Profil Performa Hardware */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
             <Cpu className="w-4 h-4 text-blue-400" />
-            Device Performance Profile
+            Manajemen Performa &amp; Suhu Perangkat
           </h2>
           <p className="text-xs text-slate-400">
-            Balancing RAM usage, battery drain, and thermal throttling on Android
+            Pengaturan prioritas alokasi RAM, konsumsi baterai, dan temperatur CPU Android
           </p>
         </div>
 
@@ -317,194 +259,205 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {(
             [
               {
-                id: 'battery_saver' as PerformanceProfile,
-                title: 'Battery Saver',
+                id: 'battery_saver',
+                name: 'Hemat Baterai',
+                desc: 'Alokasi RAM minimal, kompresi efisien, suhu stabil',
                 icon: Battery,
-                desc: 'Limits background polling, caps overlay FPS, <2% battery/hr',
-                badge: 'Coolest (<34°C)',
               },
               {
-                id: 'balanced' as PerformanceProfile,
-                title: 'Balanced (Recommended)',
+                id: 'balanced',
+                name: 'Seimbang (Direkomendasikan)',
+                desc: 'Optimal untuk 1080p pada gameplay berdurasi panjang',
                 icon: Cpu,
-                desc: 'Target 1080p stream with balanced thermals and stable 60 FPS',
-                badge: 'Balanced (~36°C)',
               },
               {
-                id: 'performance' as PerformanceProfile,
-                title: 'High Performance',
+                id: 'performance',
+                name: 'Performa Maksimal',
+                desc: 'Prioritas bitrate tinggi, latensi kompresi terendah',
                 icon: Flame,
-                desc: 'Max hardware encoder priority, instant overlay responsiveness',
-                badge: 'Warm (~39°C)',
               },
             ] as const
-          ).map((prof) => {
-            const Icon = prof.icon;
-            const isSelected = settings.performanceProfile === prof.id;
-
+          ).map((profile) => {
+            const Icon = profile.icon;
+            const isSelected = settings.performanceProfile === profile.id;
             return (
-              <div
-                key={prof.id}
-                onClick={() => handleUpdate('performanceProfile', prof.id)}
-                className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+              <button
+                key={profile.id}
+                onClick={() => handleUpdate('performanceProfile', profile.id as PerformanceProfile)}
+                className={`p-3.5 rounded-xl text-left border transition ${
                   isSelected
-                    ? 'bg-blue-950/50 border-blue-500 ring-1 ring-blue-500 shadow-lg'
-                    : 'bg-[#080c16] border-slate-800 hover:border-slate-700'
+                    ? 'bg-blue-950/60 border-blue-500 text-white shadow-lg shadow-blue-900/30'
+                    : 'bg-[#080c16] border-slate-800 text-slate-400 hover:text-white'
                 }`}
               >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <Icon className={`w-5 h-5 ${isSelected ? 'text-blue-400' : 'text-slate-400'}`} />
-                    <span className="text-[10px] font-mono text-slate-400">{prof.badge}</span>
-                  </div>
-                  <h3 className="text-xs font-bold text-white mt-2">{prof.title}</h3>
-                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                    {prof.desc}
-                  </p>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Icon className={`w-4 h-4 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
+                  <span className="text-xs font-bold text-white">{profile.name}</span>
                 </div>
-              </div>
+                <p className="text-[11px] text-slate-400 leading-snug">{profile.desc}</p>
+              </button>
             );
           })}
         </div>
+
+        <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-semibold text-white">Akselerasi Hardware GPU</div>
+            <div className="text-[11px] text-slate-400">
+              Gunakan MediaCodec H.264 / HEVC hardware jika tersedia di Android
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.hardwareAcceleration}
+            onChange={(e) => handleUpdate('hardwareAcceleration', e.target.checked)}
+            className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-[#080c16] border-slate-700 cursor-pointer"
+          />
+        </div>
       </div>
 
-      {/* RTMP & Ingest Settings Card (Stage 1 Preserved) */}
+      {/* Konfigurasi Server RTMP Siaran Langsung */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
             <Radio className="w-4 h-4 text-blue-400" />
-            RTMP / Broadcast Credentials
+            Kredensial Server RTMP / RTMPS (Mode B)
           </h2>
           <p className="text-xs text-slate-400">
-            Streaming server configuration saved locally in IndexedDB
+            Target endpoint ingest siaran untuk YouTube Live, Twitch, Kick, atau server kustom
           </p>
         </div>
 
         <div className="space-y-3 text-xs">
           <div>
-            <label className="block text-slate-300 font-medium mb-1">
-              RTMP Ingest Server URL
-            </label>
+            <label className="block text-slate-300 font-medium mb-1">URL Server RTMP</label>
             <input
               type="text"
               value={settings.rtmpServer}
               onChange={(e) => handleUpdate('rtmpServer', e.target.value)}
-              placeholder="rtmp://live.twitch.tv/app or rtmp://a.rtmp.youtube.com/live2"
-              className="w-full px-3 py-2.5 rounded-xl bg-[#080c16] border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
+              placeholder="rtmp://live.twitch.tv/app"
+              className="w-full px-3 py-2 rounded-xl bg-[#080c16] border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-slate-300 font-medium mb-1">
-              Stream Key
-            </label>
-            <div className="relative">
-              <input
-                type={showStreamKey ? 'text' : 'password'}
-                value={settings.streamKey}
-                onChange={(e) => handleUpdate('streamKey', e.target.value)}
-                placeholder="live_..."
-                className="w-full px-3 py-2.5 rounded-xl bg-[#080c16] border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500 pr-10"
-              />
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-slate-300 font-medium">Stream Key / Kunci Siaran</label>
               <button
                 type="button"
                 onClick={() => setShowStreamKey(!showStreamKey)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                className="text-[11px] text-blue-400 hover:underline flex items-center gap-1"
               >
-                {showStreamKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showStreamKey ? (
+                  <>
+                    <EyeOff className="w-3 h-3" /> Sembunyikan
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-3 h-3" /> Tampilkan
+                  </>
+                )}
               </button>
+            </div>
+            <input
+              type={showStreamKey ? 'text' : 'password'}
+              value={settings.streamKey}
+              onChange={(e) => handleUpdate('streamKey', e.target.value)}
+              placeholder="live_..."
+              className="w-full px-3 py-2 rounded-xl bg-[#080c16] border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Bitrate Video ({settings.videoBitrateKbps} Kbps)
+              </label>
+              <input
+                type="range"
+                min="2500"
+                max="9000"
+                step="500"
+                value={settings.videoBitrateKbps}
+                onChange={(e) => handleUpdate('videoBitrateKbps', Number(e.target.value))}
+                className="w-full accent-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Bitrate Audio ({settings.audioBitrateKbps} Kbps)
+              </label>
+              <input
+                type="range"
+                min="96"
+                max="320"
+                step="32"
+                value={settings.audioBitrateKbps}
+                onChange={(e) => handleUpdate('audioBitrateKbps', Number(e.target.value))}
+                className="w-full accent-blue-500"
+              />
             </div>
           </div>
         </div>
-
-        {/* Prototype Connection Status Notice */}
-        <div className="p-3 rounded-xl bg-[#080c16] border border-amber-900/50 flex items-start gap-2 text-xs text-slate-300">
-          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <p className="leading-relaxed">
-            Streaming status is <strong>Not Connected</strong>. RTMP keys are safely stored in your local browser sandbox and will authenticate when the Android MediaProjection encoder service is compiled.
-          </p>
-        </div>
       </div>
 
-      {/* Local IndexedDB Data Management Card (Stage 1 Preserved) */}
+      {/* Pencadangan & Pemulihan Data IndexedDB */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
             <Database className="w-4 h-4 text-blue-400" />
-            Local Data &amp; IndexedDB Management
+            Penyimpanan Lokal &amp; Pencadangan JSON
           </h2>
           <p className="text-xs text-slate-400">
-            Export, import, or reset all scene setups and studio configurations
+            Seluruh preset studio, adegan, widget, antrean lagu, dan kredensial tersimpan aman di IndexedDB perangkat
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button
             onClick={onExportData}
-            className="min-h-[44px] p-3 rounded-xl bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold flex items-center justify-center gap-2 transition-colors"
+            className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-blue-500 hover:bg-blue-950/20 text-white text-xs font-semibold flex items-center justify-center gap-2 transition"
           >
             <Download className="w-4 h-4 text-blue-400" />
-            Export Backup (.json)
+            <span>Ekspor Cadangan JSON</span>
           </button>
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="min-h-[44px] p-3 rounded-xl bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold flex items-center justify-center gap-2 transition-colors"
+            className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-emerald-500 hover:bg-emerald-950/20 text-white text-xs font-semibold flex items-center justify-center gap-2 transition"
           >
-            <Upload className="w-4 h-4 text-sky-400" />
-            Import Backup (.json)
+            <Upload className="w-4 h-4 text-emerald-400" />
+            <span>Pulihkan Cadangan JSON</span>
           </button>
           <input
-            ref={fileInputRef}
             type="file"
-            accept=".json"
+            ref={fileInputRef}
             onChange={handleFileChange}
+            accept=".json,application/json"
             className="hidden"
           />
 
           <button
             onClick={onResetDefaults}
-            className="min-h-[44px] p-3 rounded-xl bg-[#080c16] hover:bg-rose-950/40 border border-slate-700 hover:border-rose-800 text-slate-200 hover:text-rose-300 font-semibold flex items-center justify-center gap-2 transition-colors"
+            className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-red-500 hover:bg-red-950/20 text-red-400 text-xs font-semibold flex items-center justify-center gap-2 transition"
           >
-            <RotateCcw className="w-4 h-4 text-rose-400" />
-            Reset Factory Scenes
+            <RotateCcw className="w-4 h-4 text-red-400" />
+            <span>Atur Ulang Pengaturan</span>
           </button>
         </div>
       </div>
 
-      {/* About Application & Android Kotlin Integration Notes */}
-      <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
+      {/* Informasi Versi & Arsitektur */}
+      <div className="p-4 rounded-xl bg-[#080c16] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-400 gap-2">
         <div>
-          <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-            <FileCode className="w-4 h-4 text-blue-400" />
-            About SYNTXRR STREAM TOOLS
-          </h2>
-          <p className="text-xs text-slate-400">
-            Version 1.2.0 (Stage 2 Hybrid Music Center &amp; Android Foundation)
-          </p>
+          <span className="font-bold text-slate-200">SYNTXRR STREAM</span>
+          <span className="text-slate-500 mx-2">·</span>
+          <span>Versi 3.0.0 (Master Release)</span>
+          <span className="text-slate-500 mx-2">·</span>
+          <span className="font-mono text-blue-400">com.syntxrr.streamtools</span>
         </div>
-
-        <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
-          <p>
-            SYNTXRR STREAM TOOLS is engineered from the ground up for modern mobile content creators and esports gamers who stream directly from Android devices.
-          </p>
-
-          <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
-            <div className="font-bold text-blue-400">
-              Future Kotlin Android Companion Integration Blueprint:
-            </div>
-            <ul className="list-disc pl-4 space-y-1 text-slate-300">
-              <li>
-                <strong>Mode A (Overlay):</strong> Powered by Android <code>SYSTEM_ALERT_WINDOW</code> permission and a dedicated <code>ForegroundService</code> to maintain overlay widgets with zero frame drops during heavy gameplay.
-              </li>
-              <li>
-                <strong>Mode B (Encoder):</strong> Connects to Android&apos;s <code>MediaProjection</code> API, hardware <code>MediaCodec</code> (H.264/HEVC), and <code>AudioRecord</code> for internal audio mixing.
-              </li>
-              <li>
-                <strong>Hybrid Music Engine (Stage 2):</strong> Decouples catalog search metadata (YouTube/Spotify) from internal local audio decoding (HTML5 Audio), ensuring full copyright and terms compliance.
-              </li>
-            </ul>
-          </div>
+        <div className="text-slate-500">
+          Mobile Streaming Studio &amp; TikTok LIVE Companion
         </div>
       </div>
     </div>
