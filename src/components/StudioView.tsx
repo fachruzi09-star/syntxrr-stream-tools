@@ -209,6 +209,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
     origH: 0,
   });
 
+  // Refs for performant live-drag (avoid per-move history pushes + stale closures)
+  const elementsRef = useRef(elements);
+  elementsRef.current = elements;
+  const isLiveDragRef = useRef(false);
+  const preDragElementsRef = useRef<StudioElement[] | null>(null);
+
   const selectedElement = elements.find((e) => e.id === selectedId) || null;
 
   // Cleanup camera and screen tracks on unmount
@@ -328,6 +334,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
       onUpdateElements(ensureUniqueElementIds(newElements));
     },
     [elements, onUpdateElements]
+  );
+
+  // Lightweight live update during drag: updates elements without pushing undo history
+  const updateElementLive = useCallback(
+    (id: string, updates: Partial<StudioElement>) => {
+      const updated = elementsRef.current.map((elem) =>
+        elem.id === id ? { ...elem, ...updates } : elem
+      );
+      onUpdateElements(updated);
+    },
+    [onUpdateElements]
   );
 
   const handleUndo = () => {
@@ -714,6 +731,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       targetEl.setPointerCapture(e.pointerId);
     } catch (_) {}
 
+    preDragElementsRef.current = elements;
     dragRef.current = {
       isDragging: true,
       isResizing: false,
@@ -740,6 +758,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       targetEl.setPointerCapture(e.pointerId);
     } catch (_) {}
 
+    preDragElementsRef.current = elements;
     dragRef.current = {
       isDragging: false,
       isResizing: true,
@@ -770,12 +789,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const deltaY = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
 
     if (dragRef.current.isDragging) {
-      // Free movement in both horizontal (X) and vertical (Y) directions
       const newX = Math.round((dragRef.current.origX + deltaX) * 10) / 10;
       const newY = Math.round((dragRef.current.origY + deltaY) * 10) / 10;
-
-      updateElementField(dragRef.current.elementId, 'x', newX);
-      updateElementField(dragRef.current.elementId, 'y', newY);
+      isLiveDragRef.current = true;
+      updateElementLive(dragRef.current.elementId, { x: newX, y: newY });
     } else if (dragRef.current.isResizing) {
       const handle = dragRef.current.resizeHandle || 'bottom-right';
       let newW = dragRef.current.origW;
@@ -800,14 +817,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         newH = proposedH;
       }
 
-      const elemId = dragRef.current.elementId;
-      const updated = elements.map((elem) => {
-        if (elem.id === elemId) {
-          return { ...elem, x: newX, y: newY, width: newW, height: newH };
-        }
-        return elem;
-      });
-      commitElements(updated);
+      isLiveDragRef.current = true;
+      updateElementLive(dragRef.current.elementId, { x: newX, y: newY, width: newW, height: newH });
     }
   };
 
@@ -816,6 +827,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       try {
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch (_) {}
+      if (isLiveDragRef.current && preDragElementsRef.current) {
+        isLiveDragRef.current = false;
+        setHistory((prev) => [...prev.slice(-15), preDragElementsRef.current]);
+        setRedoStack([]);
+        preDragElementsRef.current = null;
+      }
       dragRef.current.isDragging = false;
       dragRef.current.isResizing = false;
       dragRef.current.elementId = null;
@@ -1426,9 +1443,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
               }}
               className={`relative bg-[#020408] border-2 border-slate-800 rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()}`}
               onClick={() => setSelectedId(null)}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
               <div className="absolute inset-x-2 top-2 h-7 border border-dashed border-blue-500/30 rounded flex items-center justify-center pointer-events-none">
@@ -1439,14 +1453,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </div>
 
               {/* Elements Layer Rendering with UNIFIED POINTER EVENTS */}
-              {elements.map((elem, idx) => {
+              {elements.map((elem) => {
                 if (!elem.visible) return null;
                 const isSelected = selectedId === elem.id;
 
                 return (
                   <div
-                    key={`${elem.id}_${idx}`}
+                    key={elem.id}
                     onPointerDown={(e) => handleElementPointerDown(e, elem)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
                     style={{
                       position: 'absolute',
                       left: `${elem.x}%`,
