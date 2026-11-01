@@ -5,10 +5,17 @@ import {
   SourceType,
   StreamEventType,
   StreamEvent,
+  StudioPreset,
+  PresetCategory,
 } from '../types';
 import { streamEventBus } from '../services/eventBus';
 import { soundSynth } from '../services/audioSimulator';
-import { songRequestEngine, SongRequestState } from '../services/songRequestEngine';
+import {
+  songRequestEngine,
+  SongRequestState,
+  SongRequestTestPipelineResult,
+} from '../services/songRequestEngine';
+import { ensureUniqueElementIds } from '../services/storage';
 import {
   Tv,
   Layers,
@@ -30,11 +37,9 @@ import {
   Redo2,
   Zap,
   Globe,
-  Radio,
   Type,
   Image as ImageIcon,
   Video,
-  Volume2,
   TrendingUp,
   Sliders,
   Play,
@@ -43,11 +48,16 @@ import {
   Music,
   Monitor,
   Flame,
-  Award,
   ListMusic,
   Check,
   AlertCircle,
-  HelpCircle,
+  FolderOpen,
+  Upload,
+  Star,
+  ExternalLink,
+  ShieldCheck,
+  FileAudio,
+  Film,
 } from 'lucide-react';
 
 interface StudioViewProps {
@@ -56,6 +66,14 @@ interface StudioViewProps {
   onChangeOrientation: (orientation: CanvasOrientation) => void;
   onUpdateElements: (elements: StudioElement[]) => void;
   onSaveAsPreset: () => void;
+  // Shared Presets System integration
+  presets?: StudioPreset[];
+  activePresetId?: string;
+  onSelectPreset?: (presetId: string) => void;
+  onCreatePreset?: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => void;
+  onDuplicatePreset?: (presetId: string) => void;
+  onDeletePreset?: (presetId: string) => void;
+  onToggleFavoritePreset?: (presetId: string) => void;
 }
 
 // Active trigger reaction state for canvas animation
@@ -67,18 +85,35 @@ interface ActiveElementReaction {
   expiresAt: number;
 }
 
+// Local Media Item in Media Library
+interface LocalMediaItem {
+  id: string;
+  name: string;
+  type: 'image' | 'video';
+  url: string; // Data URL or Object URL
+  sizeBytes?: number;
+  addedAt: number;
+}
+
 export const StudioView: React.FC<StudioViewProps> = ({
   elements,
   canvasOrientation,
   onChangeOrientation,
   onUpdateElements,
   onSaveAsPreset,
+  presets = [],
+  activePresetId,
+  onSelectPreset,
+  onCreatePreset,
+  onDuplicatePreset,
+  onDeletePreset,
+  onToggleFavoritePreset,
 }) => {
   // Selected Element
   const [selectedId, setSelectedId] = useState<string | null>(elements[0]?.id || null);
 
-  // Studio Sub-Sections: 'elements' | 'properties' | 'layers' | 'simulator'
-  const [activeSidePanel, setActiveSidePanel] = useState<'properties' | 'elements' | 'layers' | 'simulator'>('properties');
+  // Studio Sub-Sections: 'properties' | 'elements' | 'presets' | 'media' | 'layers' | 'simulator'
+  const [activeSidePanel, setActiveSidePanel] = useState<'properties' | 'elements' | 'presets' | 'media' | 'layers' | 'simulator'>('properties');
 
   // Canvas Pan & Zoom
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -106,10 +141,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Song Request Engine State Sync
   const [srState, setSrState] = useState<SongRequestState>(songRequestEngine.getState());
+  const [testQueryInput, setTestQueryInput] = useState<string>('Neon Horizon');
+  const [activeTestPipeline, setActiveTestPipeline] = useState<SongRequestTestPipelineResult | null>(null);
 
   useEffect(() => {
     return songRequestEngine.subscribe((state) => {
       setSrState(state);
+      if (state.lastTestPipelineResult) {
+        setActiveTestPipeline(state.lastTestPipelineResult);
+      }
     });
   }, []);
 
@@ -117,13 +157,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [history, setHistory] = useState<StudioElement[][]>([]);
   const [redoStack, setRedoStack] = useState<StudioElement[][]>([]);
 
-  // Drag & Resize tracking
+  // Presets Category Filter
+  const [presetFilterCategory, setPresetFilterCategory] = useState<PresetCategory>('all');
+  const [newPresetModalOpen, setNewPresetModalOpen] = useState(false);
+  const [newPresetNameInput, setNewPresetNameInput] = useState('');
+  const [newPresetDescInput, setNewPresetDescInput] = useState('');
+
+  // Media Library State
+  const [mediaLibrary, setMediaLibrary] = useState<LocalMediaItem[]>([
+    {
+      id: 'default_img_1',
+      name: 'Logo Sponsor Neon',
+      type: 'image',
+      url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=300&auto=format&fit=crop&q=80',
+      addedAt: Date.now() - 3600000,
+    },
+  ]);
+  const [previewMediaUrl, setPreviewMediaUrl] = useState<string | null>(null);
+  const [previewMediaType, setPreviewMediaType] = useState<'image' | 'video'>('image');
+  const [manualMediaUrlInput, setManualMediaUrlInput] = useState<string>('');
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
+
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // UNIFIED POINTER DRAG & RESIZE REFS
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
     isDragging: boolean;
     isResizing: boolean;
     resizeHandle: string | null;
     elementId: string | null;
+    pointerId: number | null;
     startX: number;
     startY: number;
     origX: number;
@@ -135,6 +200,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     isResizing: false,
     resizeHandle: null,
     elementId: null,
+    pointerId: null,
     startX: 0,
     startY: 0,
     origX: 0,
@@ -162,21 +228,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const unsubscribe = streamEventBus.subscribe((event: StreamEvent) => {
       const now = Date.now();
 
-      // Check each element to see if it should react
       elements.forEach((elem) => {
         let isMatch = false;
         let action: 'show' | 'pulse' | 'bounce' | 'text_update' = 'pulse';
         let durationSec = elem.triggerConfig?.durationSec || 5;
         let textOverride: string | undefined = undefined;
-        let countOverride: number | undefined = undefined;
 
-        // 1. AUTO TRIGGER LOGIC BY ELEMENT TYPE
+        // Auto-Trigger Logic per Element Type
         if (elem.type === 'event_alert') {
-          // Alert pop-up: Matches gift, donation, or follow
           if (elem.triggerConfig?.eventType) {
             isMatch = elem.triggerConfig.eventType === 'all' || elem.triggerConfig.eventType === event.type;
           } else {
-            isMatch = event.type === 'gift' || event.type === 'donation';
+            isMatch = event.type === 'gift' || event.type === 'donation' || event.type === 'follow';
           }
           if (isMatch) {
             action = 'bounce';
@@ -184,14 +247,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
             soundSynth.playAlertChime(event.type === 'gift' ? 'gift' : 'follower');
           }
         } else if (elem.type === 'combo_counter') {
-          // Combo counter: Matches gift or like
           if (event.type === 'gift' || event.type === 'like') {
             isMatch = true;
             action = 'pulse';
             soundSynth.playAlertChime('gift');
           }
         } else if (elem.type === 'chat_message') {
-          // Live Chat: Matches chat comments
           if (event.type === 'chat') {
             isMatch = true;
             action = 'text_update';
@@ -202,7 +263,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
             soundSynth.playAlertChime('chat_event');
           }
         } else if (elem.type === 'counter' || elem.type === 'live_viewer_counter') {
-          // Like or viewer count
           if (event.type === 'like') {
             isMatch = true;
             action = 'pulse';
@@ -210,13 +270,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
             soundSynth.playAlertChime('like');
           }
         } else if (elem.type === 'song_request') {
-          // Song Request Widget reacts to song command
           if (event.type === 'chat' && event.detail.startsWith('!play')) {
             isMatch = true;
             action = 'pulse';
           }
         } else if (elem.triggerConfig && elem.triggerConfig.eventType) {
-          // Custom explicit trigger configuration on other elements
           if (elem.triggerConfig.eventType === 'all' || elem.triggerConfig.eventType === event.type) {
             isMatch = true;
             action = (elem.triggerConfig.action as any) || 'show';
@@ -230,7 +288,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
               elementId: elem.id,
               action,
               textOverride,
-              countOverride,
               expiresAt: now + durationSec * 1000,
             },
           }));
@@ -268,7 +325,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     (newElements: StudioElement[]) => {
       setHistory((prev) => [...prev.slice(-15), elements]);
       setRedoStack([]);
-      onUpdateElements(newElements);
+      onUpdateElements(ensureUniqueElementIds(newElements));
     },
     [elements, onUpdateElements]
   );
@@ -335,7 +392,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const handleToggleCameraForElement = async (elemId: string, requestedFacingMode?: 'user' | 'environment') => {
     const existing = activeCameraStreams[elemId];
     if (existing) {
-      // Turn off
       existing.getTracks().forEach((track) => track.stop());
       setActiveCameraStreams((prev) => {
         const next = { ...prev };
@@ -346,7 +402,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
         videoRefs.current[elemId]!.srcObject = null;
       }
     } else {
-      // Turn on
       try {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const facing = requestedFacingMode || selectedElement?.properties?.facingMode || 'user';
@@ -378,7 +433,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  // SCREEN CAPTURE CONTROL
+  // SCREEN CAPTURE CONTROL (getDisplayMedia)
   const handleToggleScreenCapture = async () => {
     if (screenCaptureStream) {
       screenCaptureStream.getTracks().forEach((t) => t.stop());
@@ -412,10 +467,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Add Element with strictly mapped auto-triggers and defaults
   const handleAddQuickElement = (type: SourceType, defaultName: string) => {
-    // Generate guaranteed unique ID
     const uniqueId = `elem_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    // Set sensible default dimensions & auto-trigger according to element type
     let defaultWidth = 80;
     let defaultHeight = 12;
     let defaultX = 10;
@@ -425,7 +477,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
     switch (type) {
       case 'camera':
-        // Count how many cameras already exist
         const cameraCount = elements.filter((e) => e.type === 'camera').length + 1;
         defaultName = `Kamera ${cameraCount} (${cameraCount === 1 ? 'Depan / Facecam' : 'Belakang / Tablecam'})`;
         defaultWidth = 42;
@@ -437,8 +488,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           borderWidth: 2,
           aspectFit: 'cover',
         };
-        // Cameras never triggered by gift/chat
-        defaultTrigger = undefined;
         break;
 
       case 'screen_capture':
@@ -450,7 +499,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           fps: 60,
           borderRadius: 12,
         };
-        defaultTrigger = undefined;
         break;
 
       case 'event_alert':
@@ -464,7 +512,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           soundEffect: true,
           badgeColor: '#F59E0B',
         };
-        // Auto-triggers on Gift
         defaultTrigger = {
           eventType: 'gift',
           action: 'bounce',
@@ -482,7 +529,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           showBadges: true,
           bgOpacity: 85,
         };
-        // Auto-triggers on New Comment
         defaultTrigger = {
           eventType: 'chat',
           action: 'text_update',
@@ -532,8 +578,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           textColor: '#60A5FA',
           bgColor: '#0B1120',
         };
-        // Continuous ticker, no burst trigger
-        defaultTrigger = undefined;
         break;
 
       case 'song_request':
@@ -554,7 +598,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
       case 'image':
       case 'sticker':
-        defaultName = 'Logo / Sponsor Banner';
+        defaultName = 'Gambar / Logo Sponsor';
         defaultWidth = 28;
         defaultHeight = 16;
         defaultProps = {
@@ -626,7 +670,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    // If camera, stop stream
     if (activeCameraStreams[id]) {
       activeCameraStreams[id].getTracks().forEach((t) => t.stop());
       setActiveCameraStreams((prev) => {
@@ -659,124 +702,244 @@ export const StudioView: React.FC<StudioViewProps> = ({
     commitElements(reordered);
   };
 
-  // Canvas Drag & Resize Handlers (Preserves Out-of-Bounds Positions)
-  const handleElementMouseDown = (e: React.MouseEvent | React.TouchEvent, elem: StudioElement) => {
+  // UNIFIED POINTER DRAG & RESIZE SYSTEM (FIXES HORIZONTAL & VERTICAL MOVEMENT)
+  const handleElementPointerDown = (e: React.PointerEvent, elem: StudioElement) => {
     if (elem.locked) return;
+    if (e.button !== 0) return; // Only primary button
     e.stopPropagation();
     setSelectedId(elem.id);
 
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const targetEl = e.currentTarget as HTMLElement;
+    try {
+      targetEl.setPointerCapture(e.pointerId);
+    } catch (_) {}
 
     dragRef.current = {
       isDragging: true,
       isResizing: false,
       resizeHandle: null,
       elementId: elem.id,
-      startX: clientX,
-      startY: clientY,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
       origX: elem.x,
       origY: elem.y,
       origW: elem.width,
       origH: elem.height,
     };
-
-    window.addEventListener('mousemove', handleElementMouseMove);
-    window.addEventListener('mouseup', handleElementMouseUp);
-    window.addEventListener('touchmove', handleElementTouchMove, { passive: false });
-    window.addEventListener('touchend', handleElementMouseUp);
   };
 
-  const handleResizeMouseDown = (e: React.MouseEvent | React.TouchEvent, elem: StudioElement, handle: string) => {
+  const handleResizePointerDown = (e: React.PointerEvent, elem: StudioElement, handle: string) => {
     if (elem.locked) return;
+    if (e.button !== 0) return;
     e.stopPropagation();
     setSelectedId(elem.id);
 
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const targetEl = e.currentTarget as HTMLElement;
+    try {
+      targetEl.setPointerCapture(e.pointerId);
+    } catch (_) {}
 
     dragRef.current = {
       isDragging: false,
       isResizing: true,
       resizeHandle: handle,
       elementId: elem.id,
-      startX: clientX,
-      startY: clientY,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
       origX: elem.x,
       origY: elem.y,
       origW: elem.width,
       origH: elem.height,
     };
-
-    window.addEventListener('mousemove', handleElementMouseMove);
-    window.addEventListener('mouseup', handleElementMouseUp);
-    window.addEventListener('touchmove', handleElementTouchMove, { passive: false });
-    window.addEventListener('touchend', handleElementMouseUp);
   };
 
-  const handleElementMouseMove = (e: MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
     if (!canvasRef.current || !dragRef.current.elementId) return;
-    const rect = canvasRef.current.getBoundingClientRect();
+    if (!dragRef.current.isDragging && !dragRef.current.isResizing) return;
+    if (dragRef.current.pointerId !== null && e.pointerId !== dragRef.current.pointerId) return;
 
-    if (dragRef.current.isDragging) {
-      const deltaX = ((e.clientX - dragRef.current.startX) / rect.width) * 100;
-      const deltaY = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
-
-      const newX = Math.round((dragRef.current.origX + deltaX) * 10) / 10;
-      const newY = Math.round((dragRef.current.origY + deltaY) * 10) / 10;
-
-      updateElementField(dragRef.current.elementId, 'x', newX);
-      updateElementField(dragRef.current.elementId, 'y', newY);
-    } else if (dragRef.current.isResizing) {
-      const deltaW = ((e.clientX - dragRef.current.startX) / rect.width) * 100;
-      const deltaH = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
-
-      const newW = Math.max(5, Math.round((dragRef.current.origW + deltaW) * 10) / 10);
-      const newH = Math.max(3, Math.round((dragRef.current.origH + deltaH) * 10) / 10);
-
-      updateElementField(dragRef.current.elementId, 'width', newW);
-      updateElementField(dragRef.current.elementId, 'height', newH);
-    }
-  };
-
-  const handleElementTouchMove = (e: TouchEvent) => {
-    if (!canvasRef.current || !dragRef.current.elementId) return;
     e.preventDefault();
-    const touch = e.touches[0];
     const rect = canvasRef.current.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    // Accurate calculation relative to canvas screen dimensions
+    // rect.width and rect.height already reflect zoom/scale on the viewport
+    const deltaX = ((e.clientX - dragRef.current.startX) / rect.width) * 100;
+    const deltaY = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
 
     if (dragRef.current.isDragging) {
-      const deltaX = ((touch.clientX - dragRef.current.startX) / rect.width) * 100;
-      const deltaY = ((touch.clientY - dragRef.current.startY) / rect.height) * 100;
-
+      // Free movement in both horizontal (X) and vertical (Y) directions
       const newX = Math.round((dragRef.current.origX + deltaX) * 10) / 10;
       const newY = Math.round((dragRef.current.origY + deltaY) * 10) / 10;
 
       updateElementField(dragRef.current.elementId, 'x', newX);
       updateElementField(dragRef.current.elementId, 'y', newY);
     } else if (dragRef.current.isResizing) {
-      const deltaW = ((touch.clientX - dragRef.current.startX) / rect.width) * 100;
-      const deltaH = ((touch.clientY - dragRef.current.startY) / rect.height) * 100;
+      const handle = dragRef.current.resizeHandle || 'bottom-right';
+      let newW = dragRef.current.origW;
+      let newH = dragRef.current.origH;
+      let newX = dragRef.current.origX;
+      let newY = dragRef.current.origY;
 
-      const newW = Math.max(5, Math.round((dragRef.current.origW + deltaW) * 10) / 10);
-      const newH = Math.max(3, Math.round((dragRef.current.origH + deltaH) * 10) / 10);
+      if (handle.includes('right')) {
+        newW = Math.max(5, Math.round((dragRef.current.origW + deltaX) * 10) / 10);
+      }
+      if (handle.includes('bottom')) {
+        newH = Math.max(3, Math.round((dragRef.current.origH + deltaY) * 10) / 10);
+      }
+      if (handle.includes('left')) {
+        const proposedW = Math.max(5, Math.round((dragRef.current.origW - deltaX) * 10) / 10);
+        newX = Math.round((dragRef.current.origX + (dragRef.current.origW - proposedW)) * 10) / 10;
+        newW = proposedW;
+      }
+      if (handle.includes('top')) {
+        const proposedH = Math.max(3, Math.round((dragRef.current.origH - deltaY) * 10) / 10);
+        newY = Math.round((dragRef.current.origY + (dragRef.current.origH - proposedH)) * 10) / 10;
+        newH = proposedH;
+      }
 
-      updateElementField(dragRef.current.elementId, 'width', newW);
-      updateElementField(dragRef.current.elementId, 'height', newH);
+      const elemId = dragRef.current.elementId;
+      const updated = elements.map((elem) => {
+        if (elem.id === elemId) {
+          return { ...elem, x: newX, y: newY, width: newW, height: newH };
+        }
+        return elem;
+      });
+      commitElements(updated);
     }
   };
 
-  const handleElementMouseUp = () => {
-    dragRef.current.isDragging = false;
-    dragRef.current.isResizing = false;
-    dragRef.current.elementId = null;
-    window.removeEventListener('mousemove', handleElementMouseMove);
-    window.removeEventListener('mouseup', handleElementMouseUp);
-    window.removeEventListener('touchmove', handleElementTouchMove);
-    window.removeEventListener('touchend', handleElementMouseUp);
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (dragRef.current.pointerId !== null && e.pointerId === dragRef.current.pointerId) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (_) {}
+      dragRef.current.isDragging = false;
+      dragRef.current.isResizing = false;
+      dragRef.current.elementId = null;
+      dragRef.current.pointerId = null;
+    }
   };
 
-  // Quick Event Simulators for Preview & Test
+  // LOCAL MEDIA IMPORT HANDLERS (ACTUAL HTML5 FILE SELECTOR)
+  const handleLocalImageSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMediaUploadError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setMediaUploadError('File yang dipilih bukan format gambar yang valid.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const newItem: LocalMediaItem = {
+        id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: file.name,
+        type: 'image',
+        url: dataUrl,
+        sizeBytes: file.size,
+        addedAt: Date.now(),
+      };
+      setMediaLibrary((prev) => [newItem, ...prev]);
+      setPreviewMediaUrl(dataUrl);
+      setPreviewMediaType('image');
+    };
+    reader.onerror = () => {
+      setMediaUploadError('Gagal membaca file gambar dari media penyimpanan.');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleLocalVideoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMediaUploadError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('video/')) {
+      setMediaUploadError('File yang dipilih bukan format video yang valid.');
+      return;
+    }
+
+    const objUrl = URL.createObjectURL(file);
+    const newItem: LocalMediaItem = {
+      id: `vid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: file.name,
+      type: 'video',
+      url: objUrl,
+      sizeBytes: file.size,
+      addedAt: Date.now(),
+    };
+    setMediaLibrary((prev) => [newItem, ...prev]);
+    setPreviewMediaUrl(objUrl);
+    setPreviewMediaType('video');
+    e.target.value = '';
+  };
+
+  const handleAddMediaToCanvas = (item: LocalMediaItem) => {
+    if (item.type === 'image') {
+      const newElem: StudioElement = {
+        id: `elem_image_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: item.name.slice(0, 24),
+        type: 'image',
+        x: 15,
+        y: 25,
+        width: 35,
+        height: 20,
+        layer: elements.length + 1,
+        visible: true,
+        locked: false,
+        opacity: 100,
+        rotation: 0,
+        properties: {
+          imageUrl: item.url,
+          borderRadius: 8,
+        },
+      };
+      commitElements([...elements, newElem]);
+      setSelectedId(newElem.id);
+      setActiveSidePanel('properties');
+    } else {
+      const newElem: StudioElement = {
+        id: `elem_video_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: item.name.slice(0, 24),
+        type: 'video',
+        x: 10,
+        y: 20,
+        width: 60,
+        height: 35,
+        layer: elements.length + 1,
+        visible: true,
+        locked: false,
+        opacity: 100,
+        rotation: 0,
+        properties: {
+          videoUrl: item.url,
+          loop: true,
+          muted: true,
+        },
+      };
+      commitElements([...elements, newElem]);
+      setSelectedId(newElem.id);
+      setActiveSidePanel('properties');
+    }
+  };
+
+  const handleApplyMediaToSelectedElement = (url: string) => {
+    if (!selectedElement) return;
+    if (selectedElement.type === 'image' || selectedElement.type === 'sticker') {
+      updateElementProperty(selectedElement.id, 'imageUrl', url);
+    } else if (selectedElement.type === 'video') {
+      updateElementProperty(selectedElement.id, 'videoUrl', url);
+    }
+  };
+
+  // Event Simulator Emitter
   const triggerSimulation = (type: StreamEventType, user: string, detail: string, amount?: number) => {
     streamEventBus.emit({
       id: `sim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -789,14 +952,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
     });
   };
 
+  // Run explicit 7-Stage Song Request Test
+  const handleRun7StageSongTest = () => {
+    const query = testQueryInput.trim() || 'Neon Horizon';
+    const pipeline = songRequestEngine.execute7StageTestPipeline(query, 'Tester_Streamer', true);
+    setActiveTestPipeline(pipeline);
+
+    // Also emit command into event bus so live canvas widgets react
+    streamEventBus.emit({
+      id: `sim_sr_${Date.now()}`,
+      type: 'chat',
+      username: 'Tester_Streamer',
+      detail: `!play ${query}`,
+      timestamp: Date.now(),
+      isSimulation: true,
+    });
+  };
+
+  // Preset Application
+  const handleApplyPresetToScene = (preset: StudioPreset) => {
+    if (onSelectPreset) {
+      onSelectPreset(preset.id);
+    } else {
+      onChangeOrientation(preset.canvasOrientation);
+      commitElements(ensureUniqueElementIds(preset.elements));
+    }
+  };
+
   // Render Element on Canvas
   const renderElementContent = (elem: StudioElement) => {
-    const isCamera = elem.type === 'camera';
-    const isScreen = elem.type === 'screen_capture';
     const isCameraActive = !!activeCameraStreams[elem.id];
     const reaction = activeReactions[elem.id];
 
-    // Reaction animation class
     let animClass = '';
     if (reaction) {
       if (reaction.action === 'bounce') animClass = 'animate-bounce ring-4 ring-amber-400 shadow-2xl';
@@ -808,7 +995,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       case 'camera':
         return (
           <div
-            className={`w-full h-full rounded-xl bg-slate-950 border border-blue-500/40 relative overflow-hidden flex flex-col items-center justify-center transition-all ${animClass}`}
+            className={`w-full h-full rounded-xl bg-slate-950 border relative overflow-hidden flex flex-col items-center justify-center transition-all ${animClass}`}
             style={{
               borderColor: elem.properties.borderColor || '#2563EB',
               borderRadius: `${elem.properties.borderRadius || 14}px`,
@@ -837,6 +1024,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   {elem.properties.facingMode === 'environment' ? 'Kamera Belakang' : 'Kamera Depan'}
                 </span>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleToggleCameraForElement(elem.id, elem.properties.facingMode);
@@ -880,6 +1068,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <span className="text-xs font-bold text-white">Tangkapan Layar Android</span>
                 <span className="text-[9px] text-slate-400 mt-0.5">MediaProjection 60 FPS</span>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleToggleScreenCapture();
@@ -1025,7 +1214,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <img
             src={elem.properties.imageUrl}
             alt={elem.name}
-            className={`w-full h-full object-contain rounded select-none ${animClass}`}
+            className={`w-full h-full object-contain rounded select-none pointer-events-none ${animClass}`}
           />
         ) : (
           <div className="w-full h-full rounded bg-blue-950/40 border border-blue-900/50 flex flex-col items-center justify-center text-blue-400">
@@ -1035,7 +1224,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
         );
 
       case 'video':
-        return (
+        return elem.properties.videoUrl ? (
+          <video
+            src={elem.properties.videoUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="w-full h-full object-cover rounded pointer-events-none"
+          />
+        ) : (
           <div className="w-full h-full rounded-xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center text-indigo-400">
             <Video className="w-6 h-6 mb-1" />
             <span className="text-[9px] font-bold">Video Background Loop</span>
@@ -1051,12 +1249,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  // Canvas aspect ratio classes
   const getCanvasAspectClass = () => {
     if (canvasOrientation === '9:16') return 'aspect-[9/16] w-[270px] sm:w-[320px]';
     if (canvasOrientation === '16:9') return 'aspect-video w-full max-w-[580px]';
     return 'aspect-square w-[320px]';
   };
+
+  const filteredPresets = presets.filter((p) => {
+    if (presetFilterCategory === 'favorites') return p.isFavorite;
+    if (presetFilterCategory === 'all') return true;
+    return p.category === presetFilterCategory;
+  });
 
   return (
     <div className="space-y-6 pb-20 md:pb-8">
@@ -1064,16 +1267,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-blue-400 uppercase">
-            <span>Editor Studio SYNTXRR</span>
+            <span>Workspace Visual Tunggal</span>
             <span className="text-slate-500">·</span>
-            <span>Compositor &amp; Auto-Trigger Terpadu</span>
+            <span>SYNTXRR STUDIO</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2 mt-0.5">
             <Tv className="w-6 h-6 text-blue-400" />
-            Studio Produksi &amp; Overlay
+            Studio Produksi &amp; Presets
           </h1>
           <p className="text-xs text-slate-400">
-            Tata letak video multi-kamera, pemicu event penonton otomatis, dan simulator siaran real-time
+            Pusat penyusunan visual siaran, preset bersama, import media lokal, multi-kamera, dan uji live pipeline
           </p>
         </div>
 
@@ -1082,6 +1285,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           {/* Orientation Selector */}
           <div className="flex items-center p-1 bg-[#0e1626] rounded-xl border border-slate-800 text-xs font-semibold">
             <button
+              type="button"
               onClick={() => onChangeOrientation('9:16')}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 canvasOrientation === '9:16'
@@ -1092,6 +1296,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               9:16 Vertikal
             </button>
             <button
+              type="button"
               onClick={() => onChangeOrientation('16:9')}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 canvasOrientation === '16:9'
@@ -1102,6 +1307,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               16:9 Horisontal
             </button>
             <button
+              type="button"
               onClick={() => onChangeOrientation('1:1')}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 canvasOrientation === '1:1'
@@ -1114,6 +1320,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
 
           <button
+            type="button"
             onClick={onSaveAsPreset}
             className="min-h-[38px] px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md"
           >
@@ -1122,9 +1329,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
       </div>
 
-      {/* Main Studio Viewport Split (Canvas on Left, Modular Single Panel on Right) */}
+      {/* Main Studio Viewport Split (Canvas on Left, Modular Consolidated Panel on Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* SECTION A: INTERACTIVE CANVAS VIEWPORT */}
+        {/* SECTION 1: CANVAS EDITOR */}
         <div className="lg:col-span-7 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col items-center justify-between space-y-4">
           {/* Viewport Toolbar */}
           <div className="w-full flex items-center justify-between text-xs text-slate-400 px-1 border-b border-slate-800/80 pb-3">
@@ -1137,6 +1344,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
             <div className="flex items-center gap-1">
               <button
+                type="button"
                 onClick={handleUndo}
                 disabled={history.length === 0}
                 className="p-1.5 rounded-lg bg-[#0e1626] border border-slate-800 text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1145,6 +1353,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <Undo2 className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
                 onClick={handleRedo}
                 disabled={redoStack.length === 0}
                 className="p-1.5 rounded-lg bg-[#0e1626] border border-slate-800 text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1156,6 +1365,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <div className="h-4 w-px bg-slate-800 mx-1" />
 
               <button
+                type="button"
                 onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
                 className="p-1.5 rounded-lg bg-[#0e1626] border border-slate-800 text-slate-300 hover:text-white"
                 title="Zoom Out"
@@ -1164,6 +1374,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </button>
               <span className="font-mono text-[11px] px-1 text-slate-300">{zoomLevel}%</span>
               <button
+                type="button"
                 onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
                 className="p-1.5 rounded-lg bg-[#0e1626] border border-slate-800 text-slate-300 hover:text-white"
                 title="Zoom In"
@@ -1171,6 +1382,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setZoomLevel(100);
                   setPanOffset({ x: 0, y: 0 });
@@ -1185,7 +1397,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Interactive Screen Stage Container */}
           <div
-            className="w-full overflow-hidden flex items-center justify-center p-2 sm:p-4 bg-[#050811] rounded-xl border border-slate-900 relative min-h-[380px] sm:min-h-[460px] cursor-grab active:cursor-grabbing select-none"
+            className="w-full overflow-hidden flex items-center justify-center p-2 sm:p-4 bg-[#050811] rounded-xl border border-slate-900 relative min-h-[380px] sm:min-h-[460px] select-none"
+            style={{ touchAction: 'none' }}
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) {
                 setIsPanning(true);
@@ -1209,9 +1422,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
               style={{
                 transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel / 100})`,
                 transformOrigin: 'center center',
+                touchAction: 'none',
               }}
               className={`relative bg-[#020408] border-2 border-slate-800 rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()}`}
               onClick={() => setSelectedId(null)}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
               <div className="absolute inset-x-2 top-2 h-7 border border-dashed border-blue-500/30 rounded flex items-center justify-center pointer-events-none">
@@ -1221,7 +1438,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <span className="text-[8px] font-mono text-red-400/50">SAFE ZONE FOOTER (CHAT / GIFTS AREA)</span>
               </div>
 
-              {/* Elements Layer Rendering */}
+              {/* Elements Layer Rendering with UNIFIED POINTER EVENTS */}
               {elements.map((elem, idx) => {
                 if (!elem.visible) return null;
                 const isSelected = selectedId === elem.id;
@@ -1229,8 +1446,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 return (
                   <div
                     key={`${elem.id}_${idx}`}
-                    onMouseDown={(e) => handleElementMouseDown(e, elem)}
-                    onTouchStart={(e) => handleElementMouseDown(e, elem)}
+                    onPointerDown={(e) => handleElementPointerDown(e, elem)}
                     style={{
                       position: 'absolute',
                       left: `${elem.x}%`,
@@ -1240,6 +1456,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       zIndex: elem.layer,
                       opacity: elem.opacity / 100,
                       transform: `rotate(${elem.rotation}deg)`,
+                      touchAction: 'none',
+                      userSelect: 'none',
                     }}
                     className={`group cursor-move transition-shadow ${
                       isSelected
@@ -1250,13 +1468,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     {/* Render Content */}
                     {renderElementContent(elem)}
 
-                    {/* Resize Handle on Selected Element */}
+                    {/* Resize Handles on Selected Element (4 corners & 2 edges) */}
                     {isSelected && !elem.locked && (
-                      <div
-                        onMouseDown={(e) => handleResizeMouseDown(e, elem, 'bottom-right')}
-                        onTouchStart={(e) => handleResizeMouseDown(e, elem, 'bottom-right')}
-                        className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-blue-500 border-2 border-white rounded-full cursor-se-resize shadow-md"
-                      />
+                      <>
+                        {/* Bottom-Right Handle */}
+                        <div
+                          onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-right')}
+                          style={{ touchAction: 'none' }}
+                          className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-blue-500 border-2 border-white rounded-full cursor-se-resize shadow-md z-30"
+                          title="Resize Sudut Kanan-Bawah"
+                        />
+                        {/* Top-Right Handle */}
+                        <div
+                          onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-right')}
+                          style={{ touchAction: 'none' }}
+                          className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-blue-500 border border-white rounded-full cursor-ne-resize shadow-sm z-30"
+                          title="Resize Sudut Kanan-Atas"
+                        />
+                        {/* Bottom-Left Handle */}
+                        <div
+                          onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-left')}
+                          style={{ touchAction: 'none' }}
+                          className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-blue-500 border border-white rounded-full cursor-sw-resize shadow-sm z-30"
+                          title="Resize Sudut Kiri-Bawah"
+                        />
+                        {/* Top-Left Handle */}
+                        <div
+                          onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-left')}
+                          style={{ touchAction: 'none' }}
+                          className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-blue-500 border border-white rounded-full cursor-nw-resize shadow-sm z-30"
+                          title="Resize Sudut Kiri-Atas"
+                        />
+                      </>
                     )}
 
                     {/* Selected Badge */}
@@ -1273,18 +1516,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Quick Helper Legend */}
           <div className="w-full flex items-center justify-between text-[11px] text-slate-400 px-2">
-            <span>💡 Klik &amp; drag elemen untuk reposisi (termasuk keluar batas layar).</span>
-            <span className="font-mono text-blue-400">1080p Target</span>
+            <span>💡 Geser elemen bebas horizontal &amp; vertikal (mouse/sentuhan Android).</span>
+            <span className="font-mono text-blue-400">1080p Produksi</span>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: 4-SECTION MODULAR STUDIO SUITE */}
+        {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
         <div className="lg:col-span-5 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4">
-          {/* Main Module Tabs (Properties, Elements, Layers, Simulator) */}
-          <div className="grid grid-cols-4 gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-xs font-semibold">
+          {/* Main Module Tabs (Properties, Elements, Presets, Media, Layers, Simulator) */}
+          <div className="grid grid-cols-6 gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px] font-semibold">
             <button
+              type="button"
               onClick={() => setActiveSidePanel('properties')}
-              className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
                 activeSidePanel === 'properties'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -1294,8 +1538,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <span>Properti</span>
             </button>
             <button
+              type="button"
               onClick={() => setActiveSidePanel('elements')}
-              className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
                 activeSidePanel === 'elements'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -1305,8 +1550,33 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <span>Elemen</span>
             </button>
             <button
+              type="button"
+              onClick={() => setActiveSidePanel('presets')}
+              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+                activeSidePanel === 'presets'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>Preset</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSidePanel('media')}
+              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+                activeSidePanel === 'media'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>Media</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveSidePanel('layers')}
-              className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
                 activeSidePanel === 'layers'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -1316,8 +1586,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <span>Lapisan</span>
             </button>
             <button
+              type="button"
               onClick={() => setActiveSidePanel('simulator')}
-              className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
                 activeSidePanel === 'simulator'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -1328,12 +1599,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </button>
           </div>
 
-          {/* SECTION B: CONTEXTUAL PROPERTIES PANEL */}
+          {/* TAB 1: CONTEXTUAL PROPERTIES PANEL */}
           {activeSidePanel === 'properties' && (
             <div className="space-y-4">
               {selectedElement ? (
                 <>
-                  {/* Element Header & Quick Actions */}
                   <div className="p-3 bg-[#080c16] rounded-xl border border-slate-800 flex items-center justify-between">
                     <div>
                       <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -1347,6 +1617,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     <div className="flex items-center gap-1">
                       <button
+                        type="button"
                         onClick={() => updateElementField(selectedElement.id, 'visible', !selectedElement.visible)}
                         className={`p-1.5 rounded-lg border text-xs ${
                           selectedElement.visible
@@ -1358,6 +1629,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         {selectedElement.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                       </button>
                       <button
+                        type="button"
                         onClick={() => updateElementField(selectedElement.id, 'locked', !selectedElement.locked)}
                         className={`p-1.5 rounded-lg border text-xs ${
                           selectedElement.locked
@@ -1369,6 +1641,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         {selectedElement.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDuplicate(selectedElement.id)}
                         className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white"
                         title="Duplikasi Elemen"
@@ -1376,6 +1649,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <Copy className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDelete(selectedElement.id)}
                         className="p-1.5 rounded-lg bg-rose-950/50 border border-rose-900 text-rose-400 hover:bg-rose-900"
                         title="Hapus Elemen"
@@ -1387,7 +1661,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                   {/* Contextual Form Body strictly tailored to Selected Type */}
                   <div className="space-y-4 max-h-[440px] overflow-y-auto pr-1">
-                    {/* 1. CAMERA CONTEXTUAL INSPECTOR */}
+                    {/* Camera */}
                     {selectedElement.type === 'camera' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-blue-900/40 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1404,7 +1678,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             onChange={(e) => {
                               const facing = e.target.value as 'user' | 'environment';
                               updateElementProperty(selectedElement.id, 'facingMode', facing);
-                              // If stream is active, reload with new facing mode
                               if (activeCameraStreams[selectedElement.id]) {
                                 handleToggleCameraForElement(selectedElement.id, facing);
                               }
@@ -1419,6 +1692,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <div className="flex items-center justify-between pt-2">
                           <span className="text-xs text-slate-300">Uji Live Feed Kamera:</span>
                           <button
+                            type="button"
                             onClick={() => handleToggleCameraForElement(selectedElement.id, selectedElement.properties.facingMode)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                               activeCameraStreams[selectedElement.id]
@@ -1454,7 +1728,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* 2. SCREEN CAPTURE INSPECTOR */}
+                    {/* Screen Capture */}
                     {selectedElement.type === 'screen_capture' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-rose-900/40 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1466,6 +1740,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           Menangkap feed game Android atau tampilan layar dengan MediaProjection 60 FPS.
                         </p>
                         <button
+                          type="button"
                           onClick={handleToggleScreenCapture}
                           className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
                             screenCaptureStream ? 'bg-red-600 text-white' : 'bg-rose-600 text-white hover:bg-rose-500'
@@ -1477,7 +1752,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* 3. EVENT ALERT INSPECTOR (AUTO TRIGGERED BY GIFT/FOLLOW) */}
+                    {/* Event Alert */}
                     {selectedElement.type === 'event_alert' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-amber-900/40 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1532,7 +1807,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* 4. CHAT MESSAGE INSPECTOR (AUTO TRIGGERED BY COMMENTS) */}
+                    {/* Chat Message */}
                     {selectedElement.type === 'chat_message' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-sky-900/40 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1546,7 +1821,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-[11px] font-bold text-slate-300">Maks. Pesan Ditampilkan</label>
+                            <label className="text-[11px] font-bold text-slate-300">Maks. Pesan</label>
                             <input
                               type="number"
                               min="2"
@@ -1572,6 +1847,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <div className="flex items-center justify-between pt-1">
                           <span className="text-xs text-slate-300">Tampilkan Lencana VIP / Sub</span>
                           <button
+                            type="button"
                             onClick={() => updateElementProperty(selectedElement.id, 'showBadges', !selectedElement.properties.showBadges)}
                             className={`px-3 py-1 rounded-lg text-xs font-semibold ${
                               selectedElement.properties.showBadges !== false
@@ -1585,7 +1861,43 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* 5. SONG REQUEST WIDGET INSPECTOR (AUTO-LINKED TO BACKGROUND ENGINE) */}
+                    {/* Image / Video / Media Replacement */}
+                    {(selectedElement.type === 'image' || selectedElement.type === 'sticker' || selectedElement.type === 'video') && (
+                      <div className="p-3.5 rounded-xl bg-[#080c16] border border-emerald-900/40 space-y-3">
+                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                          <ImageIcon className="w-4 h-4" /> Sumber Media (Lokal &amp; URL)
+                        </span>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-300">
+                            {selectedElement.type === 'video' ? 'URL Video (MP4/WebM)' : 'URL Gambar (PNG/JPG)'}
+                          </label>
+                          <input
+                            type="text"
+                            value={selectedElement.type === 'video' ? selectedElement.properties.videoUrl || '' : selectedElement.properties.imageUrl || ''}
+                            onChange={(e) => {
+                              if (selectedElement.type === 'video') {
+                                updateElementProperty(selectedElement.id, 'videoUrl', e.target.value);
+                              } else {
+                                updateElementProperty(selectedElement.id, 'imageUrl', e.target.value);
+                              }
+                            }}
+                            placeholder="https://... atau ganti dari tab Media"
+                            className="w-full mt-1 px-3 py-2 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setActiveSidePanel('media')}
+                          className="w-full py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" /> Pilih dari Media Library Lokal
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Song Request Widget Inspector */}
                     {selectedElement.type === 'song_request' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-purple-900/40 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1608,6 +1920,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </div>
                           <div className="flex items-center gap-1">
                             <button
+                              type="button"
                               onClick={() => songRequestEngine.togglePlayPause()}
                               className="p-1.5 rounded-lg bg-purple-600 text-white"
                               title={srState.isPlaying ? 'Jeda' : 'Putar'}
@@ -1615,6 +1928,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               {srState.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                             </button>
                             <button
+                              type="button"
                               onClick={() => songRequestEngine.skipTrack()}
                               className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
                               title="Skip Lagu"
@@ -1627,6 +1941,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <div className="flex items-center justify-between pt-1">
                           <span className="text-xs text-slate-300">Tampilkan Nama Pengirim Request</span>
                           <button
+                            type="button"
                             onClick={() => updateElementProperty(selectedElement.id, 'showRequester', !selectedElement.properties.showRequester)}
                             className={`px-3 py-1 rounded-lg text-xs font-semibold ${
                               selectedElement.properties.showRequester !== false ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'
@@ -1638,7 +1953,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* 6. RUNNING TEXT / TICKER INSPECTOR */}
+                    {/* Running Text */}
                     {selectedElement.type === 'running_text' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
                         <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
@@ -1678,47 +1993,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* 7. LIKE / GOAL COUNTER INSPECTOR */}
-                    {(selectedElement.type === 'counter' || selectedElement.type === 'combo_counter' || selectedElement.type === 'live_viewer_counter') && (
-                      <div className="p-3.5 rounded-xl bg-[#080c16] border border-emerald-900/40 space-y-3">
-                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                          <TrendingUp className="w-4 h-4" /> Auto-Trigger: Penghitung Interaksi
-                        </span>
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-300">Label Target</label>
-                          <input
-                            type="text"
-                            value={selectedElement.properties.label || selectedElement.name}
-                            onChange={(e) => updateElementProperty(selectedElement.id, 'label', e.target.value)}
-                            className="w-full mt-1 px-3 py-2 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 8. IMAGE / LOGO / VIDEO INSPECTOR */}
-                    {(selectedElement.type === 'image' || selectedElement.type === 'sticker') && (
-                      <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
-                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                          <ImageIcon className="w-4 h-4" /> Sumber Gambar / Watermark
-                        </span>
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-300">URL Gambar (PNG/JPG)</label>
-                          <input
-                            type="url"
-                            value={selectedElement.properties.imageUrl || ''}
-                            onChange={(e) => updateElementProperty(selectedElement.id, 'imageUrl', e.target.value)}
-                            className="w-full mt-1 px-3 py-2 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* COMMON GEOMETRY & TRANSFORM CONTROLS (TIDY ACCORDION) */}
+                    {/* Common Geometry & Transform (Editable X, Y, Width, Height) */}
                     <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
                       <div className="flex items-center justify-between text-xs font-bold text-slate-300">
-                        <span>Geometri &amp; Tata Letak Layar</span>
-                        <span className="text-[10px] text-slate-500 font-mono">Bisa di luar kanvas</span>
+                        <span>Geometri &amp; Tata Letak Kanvas</span>
+                        <span className="text-[10px] text-blue-400 font-mono">Bisa di luar batas layar</span>
                       </div>
 
                       {/* Position & Size */}
@@ -1802,12 +2081,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <span className="text-[11px] text-slate-400">Urutan Lapisan (Layer #{selectedElement.layer})</span>
                         <div className="flex items-center gap-1.5">
                           <button
+                            type="button"
                             onClick={() => handleMoveLayer(selectedElement.id, 'up')}
                             className="px-2.5 py-1 rounded bg-[#0e1626] border border-slate-700 text-xs text-slate-300 hover:text-white"
                           >
                             Ke Atas
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleMoveLayer(selectedElement.id, 'down')}
                             className="px-2.5 py-1 rounded bg-[#0e1626] border border-slate-700 text-xs text-slate-300 hover:text-white"
                           >
@@ -1823,23 +2104,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <Sliders className="w-8 h-8 text-slate-600 mx-auto mb-1" />
                   <p className="text-xs font-semibold text-slate-300">Tidak ada elemen yang dipilih</p>
                   <p className="text-[11px] text-slate-500">
-                    Klik salah satu elemen di canvas atau buka tab &quot;Elemen&quot; untuk menambahkan elemen baru.
+                    Klik salah satu elemen di canvas untuk mengatur properti, style, dan trigger-nya.
                   </p>
                 </div>
               )}
             </div>
           )}
 
-          {/* SECTION C: ELEMENTS DRAWER / SELECTOR */}
+          {/* TAB 2: ELEMENT LIBRARY */}
           {activeSidePanel === 'elements' && (
             <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
               <div>
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Tv className="w-3.5 h-3.5 text-blue-400" />
-                  Sumber Tangkapan Video (Multi-Source)
+                  Sumber Video (Multi-Kamera)
                 </h3>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('camera', 'Kamera Siaran')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-blue-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1850,10 +2132,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Kamera / Facecam</span>
-                    <span className="text-[10px] text-slate-400">Kamera depan/belakang smartphone</span>
+                    <span className="text-[10px] text-slate-400">Depan / belakang mandiri</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('screen_capture', 'Tangkapan Layar (Game)')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-rose-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1864,7 +2147,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Tangkapan Layar</span>
-                    <span className="text-[10px] text-slate-400">MediaProjection screen share</span>
+                    <span className="text-[10px] text-slate-400">MediaProjection game capture</span>
                   </button>
                 </div>
               </div>
@@ -1876,6 +2159,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </h3>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('event_alert', 'Alert Gift & Follow')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-amber-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1886,10 +2170,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Alert Pop-up</span>
-                    <span className="text-[10px] text-slate-400">Animasi gift mawar/paus &amp; follow</span>
+                    <span className="text-[10px] text-slate-400">Hadiah mawar/paus &amp; follow</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('chat_message', 'Live Chatbox')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-sky-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1900,10 +2185,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Kotak Chat Live</span>
-                    <span className="text-[10px] text-slate-400">Komentar penonton dengan badge</span>
+                    <span className="text-[10px] text-slate-400">Komentar dengan VIP badge</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('combo_counter', 'Combo Gift Counter')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-orange-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1914,10 +2200,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Combo Counter</span>
-                    <span className="text-[10px] text-slate-400">Multiplier gift berturut-turut</span>
+                    <span className="text-[10px] text-slate-400">Multiplier gift penonton</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('counter', 'Penghitung Like')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-emerald-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1928,10 +2215,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Goal / Tap Counter</span>
-                    <span className="text-[10px] text-slate-400">Hitungan like &amp; target interaksi</span>
+                    <span className="text-[10px] text-slate-400">Hitungan like &amp; tap layar</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('song_request', 'Now Playing Song')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-purple-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1942,10 +2230,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <span className="font-bold text-white mt-1">Song Request Widget</span>
-                    <span className="text-[10px] text-slate-400">Judul lagu chat !play real-time</span>
+                    <span className="text-[10px] text-slate-400">Display judul &amp; requester</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('running_text', 'Running Text (Ticker)')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-blue-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -1964,10 +2253,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <div>
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
-                  Grafis Statis &amp; Teks
+                  Grafis Statis &amp; Video
                 </h3>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <button
+                    type="button"
                     onClick={() => handleAddQuickElement('image', 'Logo Siaran')}
                     className="p-2.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-emerald-500 text-left flex items-center gap-2"
                   >
@@ -1979,13 +2269,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </button>
 
                   <button
-                    onClick={() => handleAddQuickElement('text', 'Teks Statis')}
-                    className="p-2.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-blue-500 text-left flex items-center gap-2"
+                    type="button"
+                    onClick={() => handleAddQuickElement('video', 'Video Background')}
+                    className="p-2.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-indigo-500 text-left flex items-center gap-2"
                   >
-                    <Type className="w-4 h-4 text-blue-400 shrink-0" />
+                    <Video className="w-4 h-4 text-indigo-400 shrink-0" />
                     <div>
-                      <span className="font-semibold text-white block">Teks Bebas</span>
-                      <span className="text-[9px] text-slate-400">Judul &amp; keterangan siaran</span>
+                      <span className="font-semibold text-white block">Video Loop</span>
+                      <span className="text-[9px] text-slate-400">Background MP4/WebM</span>
                     </div>
                   </button>
                 </div>
@@ -1993,7 +2284,351 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           )}
 
-          {/* SECTION D: LAYERS LIST */}
+          {/* TAB 3: ONE SHARED PRESET SYSTEM */}
+          {activeSidePanel === 'presets' && (
+            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <FolderOpen className="w-4 h-4 text-blue-400" /> Pustaka Preset Bersama
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    Pilih preset untuk langsung diterapkan ke canvas atau simpan scene aktif
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewPresetModalOpen(true)}
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Baru
+                </button>
+              </div>
+
+              {/* Preset Category Filter */}
+              <div className="flex items-center p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[10px] font-semibold">
+                {(['all', 'hp_screen', 'landscape', 'favorites'] as PresetCategory[]).map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setPresetFilterCategory(cat)}
+                    className={`flex-1 py-1 rounded-md transition-colors capitalize ${
+                      presetFilterCategory === cat ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {cat === 'all' ? 'Semua' : cat === 'hp_screen' ? '9:16 HP' : cat === 'landscape' ? '16:9 PC' : 'Favorit'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Presets List */}
+              <div className="space-y-2">
+                {filteredPresets.map((preset) => {
+                  const isActive = preset.id === activePresetId;
+
+                  return (
+                    <div
+                      key={preset.id}
+                      className={`p-3 rounded-xl border transition-all ${
+                        isActive
+                          ? 'bg-blue-950/60 border-blue-500 shadow-md ring-1 ring-blue-500/50'
+                          : 'bg-[#080c16] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-white truncate">{preset.name}</span>
+                            <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono text-[9px]">
+                              {preset.canvasOrientation}
+                            </span>
+                            {isActive && (
+                              <span className="px-1.5 py-0.2 rounded bg-blue-500/30 text-blue-300 font-bold text-[8px]">
+                                Aktif
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 line-clamp-1">{preset.description}</p>
+                          <div className="text-[9px] text-slate-500 mt-0.5">
+                            {preset.elements.length} elemen visual tersimpan
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {onToggleFavoritePreset && (
+                            <button
+                              type="button"
+                              onClick={() => onToggleFavoritePreset(preset.id)}
+                              className={`p-1.5 rounded-lg border text-xs ${
+                                preset.isFavorite ? 'text-amber-400 border-amber-500/30 bg-amber-950/30' : 'text-slate-500 border-slate-800'
+                              }`}
+                              title="Favorit"
+                            >
+                              <Star className="w-3.5 h-3.5 fill-current" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleApplyPresetToScene(preset)}
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold"
+                          >
+                            Terapkan
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Modal Save Scene as New Preset */}
+              {newPresetModalOpen && (
+                <div className="p-3.5 rounded-xl bg-[#080c16] border border-blue-900/60 space-y-3">
+                  <div className="text-xs font-bold text-blue-400">Simpan Scene Sebagai Preset Baru</div>
+                  <div>
+                    <label className="text-[10px] text-slate-300">Nama Preset</label>
+                    <input
+                      type="text"
+                      value={newPresetNameInput}
+                      onChange={(e) => setNewPresetNameInput(e.target.value)}
+                      placeholder="Contoh: Mobile Legends Pro 9:16"
+                      className="w-full mt-0.5 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-300">Keterangan Singkat</label>
+                    <input
+                      type="text"
+                      value={newPresetDescInput}
+                      onChange={(e) => setNewPresetDescInput(e.target.value)}
+                      placeholder="Deskripsi tata letak elemen..."
+                      className="w-full mt-0.5 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewPresetModalOpen(false)}
+                      className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (newPresetNameInput.trim()) {
+                          if (onCreatePreset) {
+                            onCreatePreset({
+                              name: newPresetNameInput.trim(),
+                              category: canvasOrientation === '9:16' ? 'hp_screen' : canvasOrientation === '16:9' ? 'landscape' : 'portrait',
+                              canvasOrientation,
+                              elements: ensureUniqueElementIds([...elements]),
+                              isFavorite: false,
+                              description: newPresetDescInput.trim() || 'Preset kustom Studio',
+                              thumbnailColor: '#2563EB',
+                            });
+                          } else {
+                            onSaveAsPreset();
+                          }
+                          setNewPresetNameInput('');
+                          setNewPresetDescInput('');
+                          setNewPresetModalOpen(false);
+                        }
+                      }}
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold"
+                    >
+                      Simpan
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: MEDIA LIBRARY & LOCAL IMPORT */}
+          {activeSidePanel === 'media' && (
+            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
+              <div>
+                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <ImageIcon className="w-4 h-4 text-emerald-400" /> Pustaka Media Lokal &amp; Import
+                </h3>
+                <p className="text-[10px] text-slate-400">
+                  Pilih file gambar atau video langsung dari galeri Android atau masukkan URL
+                </p>
+              </div>
+
+              {/* Hidden Native File Inputs */}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleLocalImageSelected}
+              />
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={handleLocalVideoSelected}
+              />
+
+              {/* Actual File Picker Buttons */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-emerald-500 text-left flex flex-col gap-1 transition-all group"
+                >
+                  <Upload className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                  <span className="font-bold text-xs text-white">Import Gambar HP</span>
+                  <span className="text-[9px] text-slate-400">Galeri / PNG / JPG / WebP</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => videoInputRef.current?.click()}
+                  className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-indigo-500 text-left flex flex-col gap-1 transition-all group"
+                >
+                  <Film className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
+                  <span className="font-bold text-xs text-white">Import Video HP</span>
+                  <span className="text-[9px] text-slate-400">MP4 / WebM lokal</span>
+                </button>
+              </div>
+
+              {mediaUploadError && (
+                <div className="p-2 rounded bg-red-950/40 border border-red-800 text-[11px] text-red-300 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {mediaUploadError}
+                </div>
+              )}
+
+              {/* URL Manual Input Alternative */}
+              <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
+                <label className="text-[10px] font-bold text-slate-300">Atau Gunakan Tautan URL Media</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={manualMediaUrlInput}
+                    onChange={(e) => setManualMediaUrlInput(e.target.value)}
+                    placeholder="https://.../gambar.png"
+                    className="flex-1 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (manualMediaUrlInput.trim()) {
+                        const isVid = manualMediaUrlInput.includes('.mp4') || manualMediaUrlInput.includes('.webm');
+                        const newItem: LocalMediaItem = {
+                          id: `url_${Date.now()}`,
+                          name: isVid ? 'Video Eksternal' : 'Gambar Eksternal',
+                          type: isVid ? 'video' : 'image',
+                          url: manualMediaUrlInput.trim(),
+                          addedAt: Date.now(),
+                        };
+                        setMediaLibrary((prev) => [newItem, ...prev]);
+                        setPreviewMediaUrl(newItem.url);
+                        setPreviewMediaType(newItem.type);
+                        setManualMediaUrlInput('');
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold"
+                  >
+                    Tambah
+                  </button>
+                </div>
+              </div>
+
+              {/* Media Preview Box */}
+              {previewMediaUrl && (
+                <div className="p-3 rounded-xl bg-[#080c16] border border-emerald-900/40 space-y-2">
+                  <div className="text-[11px] font-bold text-emerald-400">Pratinjau Media Baru:</div>
+                  <div className="w-full h-32 rounded bg-black/60 flex items-center justify-center overflow-hidden border border-slate-800">
+                    {previewMediaType === 'image' ? (
+                      <img src={previewMediaUrl} alt="Preview" className="max-h-full max-w-full object-contain" />
+                    ) : (
+                      <video src={previewMediaUrl} controls className="max-h-full max-w-full object-contain" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleAddMediaToCanvas({
+                          id: `item_${Date.now()}`,
+                          name: previewMediaType === 'image' ? 'Gambar Lokal' : 'Video Lokal',
+                          type: previewMediaType,
+                          url: previewMediaUrl,
+                          addedAt: Date.now(),
+                        });
+                      }}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Pasang Sebagai Elemen Baru
+                    </button>
+                    {selectedElement && (selectedElement.type === 'image' || selectedElement.type === 'video') && (
+                      <button
+                        type="button"
+                        onClick={() => handleApplyMediaToSelectedElement(previewMediaUrl)}
+                        className="py-1.5 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold"
+                        title="Terapkan ke elemen yang sedang dipilih di canvas"
+                      >
+                        Ganti Elemen Terpilih
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Media Items Catalog */}
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Daftar Media Tersimpan ({mediaLibrary.length})
+                </div>
+                {mediaLibrary.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-2.5 rounded-xl bg-[#080c16] border border-slate-800 flex items-center justify-between gap-3"
+                  >
+                    <div className="w-10 h-10 rounded bg-slate-900 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center">
+                      {item.type === 'image' ? (
+                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <Film className="w-5 h-5 text-indigo-400" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-white truncate">{item.name}</div>
+                      <div className="text-[9px] text-slate-500 capitalize">{item.type} lokal</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewMediaUrl(item.url);
+                          setPreviewMediaType(item.type);
+                        }}
+                        className="p-1.5 rounded bg-slate-800 text-slate-300 hover:text-white text-xs"
+                        title="Lihat Pratinjau"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddMediaToCanvas(item)}
+                        className="p-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 text-xs"
+                        title="Tambahkan ke Kanvas"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: LAYERS LIST */}
           {activeSidePanel === 'layers' && (
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
               <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
@@ -2046,6 +2681,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                       <div className="flex items-center gap-1">
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             updateElementField(elem.id, 'visible', !elem.visible);
@@ -2057,6 +2693,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           {elem.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                         </button>
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             updateElementField(elem.id, 'locked', !elem.locked);
@@ -2075,98 +2712,147 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           )}
 
-          {/* SECTION E: PREVIEW & EVENT SIMULATOR PANEL */}
+          {/* TAB 6: PREVIEW & 7-STAGE TEST SIMULATOR */}
           {activeSidePanel === 'simulator' && (
             <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
               <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-900/60 text-xs text-blue-200 flex items-start gap-2.5">
                 <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <p>
-                  Uji respon elemen canvas langsung dengan menekan tombol simulasi di bawah. Event akan disalurkan melalui{' '}
-                  <span className="font-mono text-white">streamEventBus</span> dan memicu reaksi visual elemen terkait secara real-time.
+                  Uji respon elemen canvas langsung dengan simulasi interaktif. Semua event ditandai secara jujur sebagai{' '}
+                  <span className="font-mono text-amber-300 font-bold">[SIMULASI]</span> agar terpisah dari event LIVE asli.
                 </p>
               </div>
 
               {/* Event Simulator Grid */}
               <div className="space-y-2">
                 <button
+                  type="button"
                   onClick={() => triggerSimulation('gift', 'RizkyKing', 'mengirim Paus Biru (2.150 Koin)!', 2150)}
-                  className="w-full p-3 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white text-xs font-bold flex items-center justify-between shadow-lg transition-all"
+                  className="w-full p-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-yellow-200 animate-spin" />
-                    <span>Simulasi Gift (Paus Biru - 2.150 Koin)</span>
+                    <span>[SIMULASI] Gift Paus (2.150 Koin)</span>
                   </div>
                   <span className="text-[10px] bg-black/30 px-2 py-0.5 rounded">Pemicu Alert</span>
                 </button>
 
                 <button
-                  onClick={() => triggerSimulation('gift', 'Dewi_Cantik', 'mengirim 50x Mawar!', 50)}
-                  className="w-full p-3 rounded-xl bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white text-xs font-bold flex items-center justify-between shadow-lg transition-all"
-                >
-                  <div className="flex items-center gap-2">
-                    <Flame className="w-4 h-4 text-yellow-300 animate-bounce" />
-                    <span>Simulasi Combo Gift (50x Mawar)</span>
-                  </div>
-                  <span className="text-[10px] bg-black/30 px-2 py-0.5 rounded">Pemicu Combo</span>
-                </button>
-
-                <button
+                  type="button"
                   onClick={() => triggerSimulation('follow', 'Fajar_Streamer', 'mulai mengikuti siaran!')}
-                  className="w-full p-3 rounded-xl bg-[#080c16] border border-blue-800 hover:border-blue-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
+                  className="w-full p-2.5 rounded-xl bg-[#080c16] border border-blue-800 hover:border-blue-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <Bell className="w-4 h-4 text-blue-400" />
-                    <span>Simulasi Follower Baru (@Fajar_Streamer)</span>
+                    <span>[SIMULASI] Follower Baru (@Fajar_Streamer)</span>
                   </div>
-                  <span className="text-[10px] bg-blue-950 px-2 py-0.5 rounded text-blue-300">Follow Event</span>
+                  <span className="text-[10px] bg-blue-950 px-2 py-0.5 rounded text-blue-300">Follow</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => triggerSimulation('like', 'Viewer_Tap', 'mengetuk layar', 10)}
-                  className="w-full p-3 rounded-xl bg-[#080c16] border border-emerald-800 hover:border-emerald-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
+                  className="w-full p-2.5 rounded-xl bg-[#080c16] border border-emerald-800 hover:border-emerald-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <TrendingUp className="w-4 h-4 text-emerald-400" />
-                    <span>Simulasi Tap Layar / Like (+10 Likes)</span>
+                    <span>[SIMULASI] Tap Layar / Like (+10 Likes)</span>
                   </div>
-                  <span className="text-[10px] bg-emerald-950 px-2 py-0.5 rounded text-emerald-300">Like Event</span>
+                  <span className="text-[10px] bg-emerald-950 px-2 py-0.5 rounded text-emerald-300">Like</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => triggerSimulation('chat', 'Budi_Gamer', 'Keren bang, setting overlaynya rapi banget! 🔥')}
-                  className="w-full p-3 rounded-xl bg-[#080c16] border border-sky-800 hover:border-sky-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
+                  className="w-full p-2.5 rounded-xl bg-[#080c16] border border-sky-800 hover:border-sky-500 text-white text-xs font-bold flex items-center justify-between shadow transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <MessageSquare className="w-4 h-4 text-sky-400" />
-                    <span>Simulasi Komentar Live Chat</span>
+                    <span>[SIMULASI] Komentar Live Chat</span>
                   </div>
-                  <span className="text-[10px] bg-sky-950 px-2 py-0.5 rounded text-sky-300">Chat Event</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    const songs = ['Lofi Midnight Drive', 'Cyberpunk Sakura', 'Neon Rain Beat', 'Tokyo Cafe Chill'];
-                    const randomSong = songs[Math.floor(Math.random() * songs.length)];
-                    triggerSimulation('chat', 'Rian_Viewer', `!play ${randomSong}`);
-                  }}
-                  className="w-full p-3 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white text-xs font-bold flex items-center justify-between shadow-lg transition-all"
-                >
-                  <div className="flex items-center gap-2">
-                    <Music className="w-4 h-4 text-purple-200" />
-                    <span>Simulasi Chat Song Request (!play &lt;lagu&gt;)</span>
-                  </div>
-                  <span className="text-[10px] bg-black/30 px-2 py-0.5 rounded">Command !play</span>
+                  <span className="text-[10px] bg-sky-950 px-2 py-0.5 rounded text-sky-300">Chat</span>
                 </button>
               </div>
 
-              {/* Status Log Box */}
-              <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 text-[11px] space-y-1">
-                <div className="font-bold text-slate-300 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-400" /> Status Event-to-Element Engine:
+              {/* 7-STAGE SONG REQUEST TEST WORKFLOW */}
+              <div className="p-3.5 rounded-xl bg-[#080c16] border border-purple-900/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                    <Music className="w-4 h-4" /> Uji Alur Song Request (7 Tahap Terpisah)
+                  </div>
+                  <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono text-[9px]">
+                    7-Stage Pipeline
+                  </span>
                 </div>
-                <div className="text-slate-400 pl-5">
-                  Reaksi aktif di canvas: <span className="font-mono text-blue-400 font-bold">{Object.keys(activeReactions).length}</span> elemen sedang bereaksi.
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={testQueryInput}
+                    onChange={(e) => setTestQueryInput(e.target.value)}
+                    placeholder="Judul lagu test (e.g. Neon Horizon)"
+                    className="flex-1 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRun7StageSongTest}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold shrink-0"
+                  >
+                    Jalankan Uji 7 Tahap
+                  </button>
                 </div>
+
+                {/* 7-Stage Detailed Pipeline Results */}
+                {activeTestPipeline && (
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800">
+                      <span className="font-bold text-white">Hasil Uji: {activeTestPipeline.command}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                          activeTestPipeline.overallSuccess
+                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                            : 'bg-red-950 text-red-400 border border-red-800'
+                        }`}
+                      >
+                        {activeTestPipeline.overallSuccess ? '7 TAHAP SUKSES' : 'TAHAP GAGAL'}
+                      </span>
+                    </div>
+
+                    {Object.values(activeTestPipeline.stages).map((stage) => (
+                      <div
+                        key={stage.stageNumber}
+                        className="p-2 rounded-lg bg-[#0e1626] border border-slate-800/80 text-[10px] space-y-0.5"
+                      >
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-slate-300">
+                            Tahap {stage.stageNumber}: {stage.name}
+                          </span>
+                          <span
+                            className={
+                              stage.status === 'success'
+                                ? 'text-emerald-400 font-mono'
+                                : stage.status === 'warning'
+                                ? 'text-amber-400 font-mono'
+                                : 'text-red-400 font-mono'
+                            }
+                          >
+                            {stage.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="text-slate-400">{stage.summary}</div>
+                        <div className="text-[9px] text-slate-500 font-mono truncate">{stage.technicalDetail}</div>
+                      </div>
+                    ))}
+
+                    {/* YouTube ToS Compliance Notice */}
+                    <div className="p-2 rounded bg-slate-900/80 border border-slate-800 text-[9px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Kepatuhan Hukum YouTube:</strong> Pemisahan audio dari video tanpa layar melanggar Ketentuan Layanan YouTube. SYNTXRR STREAM menggunakan file audio lokal streamer dan sumber bebas royalti untuk routing audio streaming yang sah.
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

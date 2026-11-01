@@ -301,13 +301,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80">
             <div className="flex items-center gap-1.5 text-slate-400 mb-1">
-              <Layers className="w-3.5 h-3.5 text-purple-400" />
-              <span>Preset &amp; Canvas</span>
+              <Tv className="w-3.5 h-3.5 text-purple-400" />
+              <span>Status Scene Studio</span>
             </div>
-            <div className="text-sm font-bold text-white font-mono">
-              {activePreset ? `${activePreset.canvasOrientation} (${visibleElementsCount}/${elementsCount} Elemen)` : '9:16 Portrait'}
+            <div className="text-sm font-bold text-white font-mono truncate">
+              {activePreset ? activePreset.name : 'Mobile Gaming (9:16)'}
             </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">{activePreset?.name || 'Mobile Gaming'}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              {visibleElementsCount} elemen aktif ({activePreset?.canvasOrientation || '9:16'})
+            </div>
           </div>
 
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80">

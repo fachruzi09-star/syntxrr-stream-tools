@@ -740,6 +740,13 @@ export default function App() {
             onChangeOrientation={handleOrientationChange}
             onUpdateElements={handleUpdateStudioElements}
             onSaveAsPreset={handleSaveCanvasAsPreset}
+            presets={presets}
+            activePresetId={activePresetId}
+            onSelectPreset={handleSelectPreset}
+            onCreatePreset={handleCreatePreset}
+            onDuplicatePreset={handleDuplicatePreset}
+            onDeletePreset={handleDeletePreset}
+            onToggleFavoritePreset={handleToggleFavoritePreset}
           />
         )}
 
