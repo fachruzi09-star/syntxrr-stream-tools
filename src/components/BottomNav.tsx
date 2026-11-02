@@ -31,9 +31,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'studio', label: 'Studio', icon: Tv },
-    { id: 'presets', label: 'Preset', icon: Layers },
     { id: 'live_center', label: 'Live', icon: Radio },
-    { id: 'music', label: 'Musik', icon: Music2, badge: pendingRequestsCount },
     { id: 'menu', label: 'Menu', icon: Menu, action: onOpenDrawer },
   ];
 
@@ -42,7 +40,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       aria-label="Navigasi bawah mobile"
       className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080c16]/95 backdrop-blur-lg border-t border-slate-800/90 pb-safe"
     >
-      <div className="grid grid-cols-6 items-center h-14 px-1 max-w-lg mx-auto">
+      <div className="grid grid-cols-4 items-center h-14 px-2 max-w-md mx-auto">
         {quickTabs.map((item) => {
           const Icon = item.icon;
           const isActive = item.id !== 'menu' && activeNav === item.id;

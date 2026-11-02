@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { streamEventBus } from '../services/eventBus';
 import { soundSynth } from '../services/audioSimulator';
+import { audioEngine } from '../services/localAudioEngine';
 import {
   songRequestEngine,
   SongRequestState,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Copy,
   Lock,
+  Volume2,
   Unlock,
   Eye,
   EyeOff,
@@ -151,6 +153,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [srState, setSrState] = useState<SongRequestState>(songRequestEngine.getState());
   const [testQueryInput, setTestQueryInput] = useState<string>('Neon Horizon');
   const [activeTestPipeline, setActiveTestPipeline] = useState<SongRequestTestPipelineResult | null>(null);
+  const [isSongTestModalOpen, setIsSongTestModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     return songRequestEngine.subscribe((state) => {
@@ -158,6 +161,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (state.lastTestPipelineResult) {
         setActiveTestPipeline(state.lastTestPipelineResult);
       }
+    });
+  }, []);
+
+  // Manual Audio Test State
+  const [isTestingAudio, setIsTestingAudio] = useState(false);
+
+  useEffect(() => {
+    return audioEngine.subscribe((state) => {
+      setIsTestingAudio(state.isPlaying);
     });
   }, []);
 
@@ -182,6 +194,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [selectorFilterCategory, setSelectorFilterCategory] = useState<PresetCategory>('all');
   const [editingPresetIdInSelector, setEditingPresetIdInSelector] = useState<string | null>(null);
   const [editingNameInSelector, setEditingNameInSelector] = useState('');
+
+  // Preset rename in sidebar
+  const [editingPresetIdInSidebar, setEditingPresetIdInSidebar] = useState<string | null>(null);
+  const [editingNameInSidebar, setEditingNameInSidebar] = useState<string>('');
+
+  // Manual Audio File Picker State
+  const audioFileInputRef = useRef<HTMLInputElement | null>(null);
+  const manualAudioFilesRef = useRef<Map<string, File>>(new Map());
+  const [manualAudioFilesState, setManualAudioFilesState] = useState<Record<string, { name: string; size: number; type: string }>>({});
 
   // Media Library State
   const [mediaLibrary, setMediaLibrary] = useState<LocalMediaItem[]>([
@@ -502,6 +523,100 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
+  // MANUAL AUDIO FILE & PLAYBACK HANDLERS
+  const handleManualAudioFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedElement) return;
+
+    const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'];
+    const lowerName = file.name.toLowerCase();
+    const isAudio = file.type.startsWith('audio/') || validExts.some((ext) => lowerName.endsWith(ext));
+
+    if (!isAudio) {
+      alert('Format file audio tidak didukung. Harap pilih file audio MP3, WAV, OGG, M4A, atau AAC.');
+      e.target.value = '';
+      return;
+    }
+
+    manualAudioFilesRef.current.set(selectedElement.id, file);
+    setManualAudioFilesState((prev) => ({
+      ...prev,
+      [selectedElement.id]: {
+        name: file.name,
+        size: file.size,
+        type: file.type || 'audio/mpeg',
+      },
+    }));
+
+    const cleanTitle = file.name.replace(/\.[^/.]+$/, '').trim();
+    updateElementProperty(selectedElement.id, 'localFileName', file.name);
+    updateElementProperty(selectedElement.id, 'localFileSize', file.size);
+    updateElementProperty(selectedElement.id, 'audioSourceType', 'local');
+
+    if (
+      !selectedElement.properties.title ||
+      selectedElement.properties.title === 'Audio Manual (BGM)' ||
+      selectedElement.properties.title === 'Audio Manual Track'
+    ) {
+      updateElementProperty(selectedElement.id, 'title', cleanTitle);
+    }
+
+    e.target.value = '';
+  };
+
+  const handlePlayManualAudio = async () => {
+    if (!selectedElement) return;
+    const current = audioEngine.getState();
+    const isCurrentTrack = current.currentTrackId === selectedElement.id;
+
+    if (isCurrentTrack && isTestingAudio) {
+      audioEngine.pause();
+      setIsTestingAudio(false);
+      return;
+    }
+
+    if (isCurrentTrack && !isTestingAudio && current.currentTime > 0) {
+      await audioEngine.play();
+      setIsTestingAudio(true);
+      return;
+    }
+
+    const vol = (selectedElement.properties.volume ?? 85) / 100;
+    audioEngine.setVolume(vol);
+    audioEngine.setLoop(selectedElement.properties.loop !== false);
+
+    const localFile = manualAudioFilesRef.current.get(selectedElement.id);
+    if (localFile) {
+      const trackTitle = selectedElement.properties.title || localFile.name;
+      const channelLabel = (selectedElement.properties.channel || 'bgm').toUpperCase();
+      const success = await audioEngine.loadAndPlayFile(
+        selectedElement.id,
+        trackTitle,
+        `Manual Audio (${channelLabel})`,
+        localFile
+      );
+      setIsTestingAudio(success);
+    } else {
+      const audioUrl =
+        selectedElement.properties.audioUrl ||
+        'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg';
+      const trackTitle = selectedElement.properties.title || selectedElement.name;
+      const channelLabel = (selectedElement.properties.channel || 'bgm').toUpperCase();
+      const success = await audioEngine.loadAndPlayUrl(
+        selectedElement.id,
+        trackTitle,
+        `Manual Audio (${channelLabel})`,
+        audioUrl
+      );
+      setIsTestingAudio(success);
+    }
+  };
+
+  const handleStopManualAudio = () => {
+    audioEngine.stop();
+    setIsTestingAudio(false);
+  };
+
   // Add Element with strictly mapped auto-triggers and defaults
   const handleAddQuickElement = (type: SourceType, defaultName: string) => {
     const uniqueId = `elem_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -630,6 +745,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
           eventType: 'chat',
           action: 'pulse',
           durationSec: 4,
+        };
+        break;
+
+      case 'audio':
+        defaultName = 'Audio Manual (BGM)';
+        defaultWidth = 65;
+        defaultHeight = 12;
+        defaultProps = {
+          title: 'Audio Manual (BGM)',
+          channel: 'bgm',
+          volume: 85,
+          loop: true,
+          audioUrl: 'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg',
         };
         break;
 
@@ -1232,6 +1360,34 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
         );
 
+      case 'audio':
+        return (
+          <div
+            className={`w-full h-full p-2.5 rounded-xl bg-[#091322]/95 border border-cyan-500/50 flex items-center gap-2.5 text-left transition-all ${animClass}`}
+          >
+            <div className="w-8 h-8 rounded-lg bg-cyan-600/30 border border-cyan-500/50 flex items-center justify-center shrink-0 text-cyan-400 shadow">
+              <Volume2 className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] text-cyan-300 font-bold truncate">
+                {elem.properties.title || elem.name || 'Audio Manual (BGM)'}
+              </div>
+              <div className="text-[8px] text-slate-400 truncate flex items-center gap-1.5 mt-0.5">
+                <span className="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 font-mono uppercase text-[7px] font-bold">
+                  {elem.properties.channel || 'bgm'}
+                </span>
+                {elem.properties.localFileName && (
+                  <span className="px-1 py-0.2 rounded bg-slate-800 text-slate-300 truncate max-w-[90px]">
+                    📁 {elem.properties.localFileName}
+                  </span>
+                )}
+                <span>Vol: {elem.properties.volume ?? 85}%</span>
+                {elem.properties.loop !== false && <span className="text-cyan-400">↻ Loop</span>}
+              </div>
+            </div>
+          </div>
+        );
+
       case 'text':
       case 'dynamic_text':
         return (
@@ -1368,6 +1524,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setEditingPresetIdInSelector(null);
   };
 
+  const handleSidebarSaveRename = (presetId: string) => {
+    if (editingNameInSidebar.trim() && onRenamePreset) {
+      onRenamePreset(presetId, editingNameInSidebar.trim());
+    }
+    setEditingPresetIdInSidebar(null);
+  };
+
   return (
     <div className="space-y-6 pb-20 md:pb-8">
       {/* === PRESET SELECTION ENTRY SCREEN === */}
@@ -1476,19 +1639,31 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </div>
 
                     {editingPresetIdInSelector === preset.id ? (
-                      <div className="flex items-center space-x-2 my-1">
+                      <div className="flex items-center space-x-1.5 my-1">
                         <input
                           type="text"
                           value={editingNameInSelector}
                           onChange={(e) => setEditingNameInSelector(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSelectorSaveRename(preset.id);
+                            if (e.key === 'Escape') setEditingPresetIdInSelector(null);
+                          }}
                           className="flex-1 bg-[#080c16] border border-[#2563EB] rounded px-2 py-1 text-sm text-white focus:outline-none font-bold"
                           autoFocus
                         />
                         <button
+                          type="button"
                           onClick={() => handleSelectorSaveRename(preset.id)}
-                          className="px-2 py-1 bg-[#2563EB] text-white text-xs rounded hover:bg-blue-600 font-bold"
+                          className="px-2.5 py-1 bg-[#2563EB] text-white text-xs rounded hover:bg-blue-600 font-bold shrink-0"
                         >
                           Simpan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingPresetIdInSelector(null)}
+                          className="px-2 py-1 bg-slate-800 text-slate-300 text-xs rounded hover:bg-slate-700 shrink-0"
+                        >
+                          Batal
                         </button>
                       </div>
                     ) : (
@@ -1746,7 +1921,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       {/* Main Studio Viewport Split (Canvas on Left, Modular Consolidated Panel on Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* SECTION 1: CANVAS EDITOR */}
-        <div className="lg:col-span-7 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col items-center justify-between space-y-4">
+        <div
+          className="lg:col-span-7 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col items-center justify-between space-y-4 overscroll-y-contain"
+          style={{ overscrollBehaviorY: 'contain' }}
+        >
           {/* Viewport Toolbar */}
           <div className="w-full flex items-center justify-between text-xs text-slate-400 px-1 border-b border-slate-800/80 pb-3">
             <div className="flex items-center gap-2">
@@ -1811,8 +1989,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Interactive Screen Stage Container */}
           <div
-            className="w-full overflow-hidden flex items-center justify-center p-2 sm:p-4 bg-[#050811] rounded-xl border border-slate-900 relative min-h-[380px] sm:min-h-[460px] select-none"
-            style={{ touchAction: 'none' }}
+            className="w-full overflow-hidden flex items-center justify-center p-2 sm:p-4 bg-[#050811] rounded-xl border border-slate-900 relative min-h-[380px] sm:min-h-[460px] select-none overscroll-y-contain"
+            style={{
+              touchAction: 'none',
+              overscrollBehaviorY: 'contain',
+            }}
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) {
                 setIsPanning(true);
@@ -1837,8 +2018,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel / 100})`,
                 transformOrigin: 'center center',
                 touchAction: 'none',
+                overscrollBehaviorY: 'contain',
               }}
-              className={`relative bg-[#020408] border-2 border-slate-800 rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()}`}
+              className={`relative bg-[#020408] border-2 border-slate-800 rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()} overscroll-y-contain`}
               onClick={() => setSelectedId(null)}
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
@@ -1938,77 +2120,80 @@ export const StudioView: React.FC<StudioViewProps> = ({
         {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
         <div className="lg:col-span-5 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4">
           {/* Main Module Tabs (Properties, Elements, Presets, Media, Layers, Simulator) */}
-          <div className="grid grid-cols-6 gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px] font-semibold">
+          <div
+            className="flex lg:grid lg:grid-cols-6 overflow-x-auto no-scrollbar gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px] font-semibold select-none"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
             <button
               type="button"
               onClick={() => setActiveSidePanel('properties')}
-              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'properties'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Sliders className="w-3.5 h-3.5" />
+              <Sliders className="w-3.5 h-3.5 shrink-0" />
               <span>Properti</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveSidePanel('elements')}
-              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'elements'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5 shrink-0" />
               <span>Elemen</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveSidePanel('presets')}
-              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'presets'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <FolderOpen className="w-3.5 h-3.5" />
+              <FolderOpen className="w-3.5 h-3.5 shrink-0" />
               <span>Preset</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveSidePanel('media')}
-              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'media'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <ImageIcon className="w-3.5 h-3.5" />
+              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
               <span>Media</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveSidePanel('layers')}
-              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'layers'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Layers className="w-3.5 h-3.5" />
+              <Layers className="w-3.5 h-3.5 shrink-0" />
               <span>Lapisan</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveSidePanel('simulator')}
-              className={`py-2 rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'simulator'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>Uji Live</span>
             </button>
           </div>
@@ -2367,6 +2552,266 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
+                    {/* Dedicated Audio Manual Inspector */}
+                    {selectedElement.type === 'audio' && (
+                      <div className="p-3.5 rounded-xl bg-[#080c16] border border-cyan-900/50 space-y-3.5">
+                        {/* Hidden Native Audio File Input */}
+                        <input
+                          ref={audioFileInputRef}
+                          type="file"
+                          accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac"
+                          className="hidden"
+                          onChange={handleManualAudioFileSelect}
+                        />
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
+                            <Volume2 className="w-4 h-4" /> Audio Manual Player (BGM / SFX)
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[9px] uppercase font-mono">
+                            {selectedElement.properties.channel || 'bgm'}
+                          </span>
+                        </div>
+
+                        <p className="text-[11px] text-slate-400">
+                          Elemen audio terdedikasi untuk background music siaran atau sound effect yang dikontrol langsung via audio engine perangkat secara mandiri (terpisah dari antrean Song Request).
+                        </p>
+
+                        {/* 1. LOCAL AUDIO FILE PICKER */}
+                        <div className="p-3 rounded-xl bg-[#0e1626] border border-cyan-800/60 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <FileAudio className="w-4 h-4 text-cyan-400" /> Sumber File Audio Lokal
+                            </span>
+                            <span className="text-[9px] text-slate-400">MP3 / WAV / OGG / M4A / AAC</span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => audioFileInputRef.current?.click()}
+                            className="w-full py-2.5 px-3 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/50 text-cyan-300 font-bold text-xs flex items-center justify-center gap-2 transition active:scale-98 shadow-sm"
+                          >
+                            <Upload className="w-4 h-4" />
+                            <span>Pilih File Audio dari Perangkat Android</span>
+                          </button>
+
+                          {/* Display selected file status */}
+                          {selectedElement.properties.localFileName ? (
+                            <div className="p-2.5 rounded-lg bg-[#080c16] border border-cyan-500/40 flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2 min-w-0 pr-2">
+                                <div className="w-7 h-7 rounded-lg bg-cyan-950 flex items-center justify-center text-cyan-400 shrink-0">
+                                  <FileAudio className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-white truncate text-[11px]">
+                                    {selectedElement.properties.localFileName}
+                                  </div>
+                                  <div className="text-[9px] text-cyan-300 flex items-center gap-1 mt-0.5">
+                                    <span className="px-1.5 py-0.2 rounded bg-cyan-950 font-semibold">File Lokal Sesi</span>
+                                    {selectedElement.properties.localFileSize && (
+                                      <span className="text-slate-400">
+                                        · {(selectedElement.properties.localFileSize / (1024 * 1024)).toFixed(2)} MB
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  manualAudioFilesRef.current.delete(selectedElement.id);
+                                  setManualAudioFilesState((prev) => {
+                                    const next = { ...prev };
+                                    delete next[selectedElement.id];
+                                    return next;
+                                  });
+                                  updateElementProperty(selectedElement.id, 'localFileName', '');
+                                  updateElementProperty(selectedElement.id, 'audioSourceType', 'url');
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition"
+                                title="Hapus file dan beralih ke URL"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-400">
+                              Belum ada file lokal dipilih untuk elemen ini. Anda dapat memilih file audio dari penyimpanan HP atau mengisi URL di bawah.
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 2. ALTERNATIVE URL INPUT */}
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-slate-300">
+                              Atau Gunakan Tautan URL Audio Online
+                            </label>
+                            {selectedElement.properties.localFileName && (
+                              <span className="text-[9px] text-slate-500">(File lokal diprioritaskan)</span>
+                            )}
+                          </div>
+                          <div className="flex gap-2 mt-1">
+                            <input
+                              type="text"
+                              value={selectedElement.properties.audioUrl || ''}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'audioUrl', e.target.value)}
+                              placeholder="https://... file MP3 / OGG"
+                              className="flex-1 px-3 py-2 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'audioUrl',
+                                  'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg'
+                                );
+                                updateElementProperty(selectedElement.id, 'localFileName', '');
+                                updateElementProperty(selectedElement.id, 'audioSourceType', 'url');
+                              }}
+                              className="px-2.5 py-1.5 bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-800 text-[10px] text-cyan-300 font-semibold rounded-lg shrink-0"
+                              title="Muat sample audio bebas royalti"
+                            >
+                              Sample BGM
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Title Input */}
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-300">Judul / Label Trek</label>
+                          <input
+                            type="text"
+                            value={selectedElement.properties.title || ''}
+                            onChange={(e) => updateElementProperty(selectedElement.id, 'title', e.target.value)}
+                            placeholder="Contoh: Lo-Fi Chill Stream BGM"
+                            className="w-full mt-1 px-3 py-2 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white"
+                          />
+                        </div>
+
+                        {/* Channel & Volume */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-300">Kanal Audio</label>
+                            <select
+                              value={selectedElement.properties.channel || 'bgm'}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'channel', e.target.value)}
+                              className="w-full mt-1 px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white font-medium"
+                            >
+                              <option value="bgm">BGM (Musik Latar)</option>
+                              <option value="sfx">SFX (Efek Suara)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[11px] font-bold text-slate-300">Volume</label>
+                              <span className="text-[11px] font-mono text-cyan-400">
+                                {selectedElement.properties.volume ?? 85}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={selectedElement.properties.volume ?? 85}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                updateElementProperty(selectedElement.id, 'volume', val);
+                                if (audioEngine.getState().currentTrackId === selectedElement.id) {
+                                  audioEngine.setVolume(val / 100);
+                                }
+                              }}
+                              className="w-full mt-1.5 accent-cyan-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Loop Toggle */}
+                        <div className="flex items-center justify-between pt-1">
+                          <div>
+                            <span className="text-xs text-slate-300 block">Putar Berulang (Loop Playback)</span>
+                            <span className="text-[10px] text-slate-500">Audio akan otomatis mengulang saat habis</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextLoop = selectedElement.properties.loop === false ? true : false;
+                              updateElementProperty(selectedElement.id, 'loop', nextLoop);
+                              if (audioEngine.getState().currentTrackId === selectedElement.id) {
+                                audioEngine.setLoop(nextLoop);
+                              }
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                              selectedElement.properties.loop !== false
+                                ? 'bg-cyan-600 text-white shadow'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {selectedElement.properties.loop !== false ? 'Aktif' : 'Nonaktif'}
+                          </button>
+                        </div>
+
+                        {/* Active Playback Status Indicator */}
+                        <div className="p-2.5 rounded-lg bg-[#0e1626] border border-slate-800 text-xs flex items-center justify-between">
+                          <div className="min-w-0 pr-2">
+                            <span className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold block">
+                              Sumber Aktif
+                            </span>
+                            <span className="font-bold text-white truncate block text-[11px] mt-0.5">
+                              {selectedElement.properties.localFileName
+                                ? `📁 ${selectedElement.properties.localFileName}`
+                                : selectedElement.properties.audioUrl
+                                ? `🌐 ${selectedElement.properties.audioUrl.slice(0, 35)}...`
+                                : '🎵 Sample BGM Bawaan'}
+                            </span>
+                          </div>
+                          <div className="shrink-0">
+                            {audioEngine.getState().currentTrackId === selectedElement.id && isTestingAudio ? (
+                              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800 text-cyan-300 text-[10px] font-bold">
+                                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                                Memutar
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-400 text-[10px] font-semibold">
+                                Standby
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Play and Stop Buttons */}
+                        <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-slate-400">Kontrol Pemutaran Audio:</span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={handlePlayManualAudio}
+                              className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+                            >
+                              {audioEngine.getState().currentTrackId === selectedElement.id && isTestingAudio ? (
+                                <>
+                                  <Pause className="w-3.5 h-3.5" /> Jeda
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-3.5 h-3.5" /> Putar Audio
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleStopManualAudio}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+                              title="Hentikan dan reset posisi playback ke awal"
+                            >
+                              <Square className="w-3 h-3 fill-current" /> Stop
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Running Text */}
                     {selectedElement.type === 'running_text' && (
                       <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
@@ -2649,6 +3094,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => handleAddQuickElement('audio', 'Audio Manual (BGM)')}
+                    className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-cyan-500 text-left flex flex-col gap-1 transition-all group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <Volume2 className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                      <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-300 text-[8px] font-bold rounded">
+                        Manual BGM
+                      </span>
+                    </div>
+                    <span className="font-bold text-white mt-1">Audio Manual (BGM)</span>
+                    <span className="text-[10px] text-slate-400">Musik latar &amp; SFX independen</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => handleAddQuickElement('running_text', 'Running Text (Ticker)')}
                     className="p-3 rounded-xl bg-[#080c16] border border-slate-800 hover:border-blue-500 text-left flex flex-col gap-1 transition-all group"
                   >
@@ -2751,17 +3211,58 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs text-white truncate">{preset.name}</span>
-                            <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono text-[9px]">
-                              {preset.canvasOrientation}
-                            </span>
-                            {isActive && (
-                              <span className="px-1.5 py-0.2 rounded bg-blue-500/30 text-blue-300 font-bold text-[8px]">
-                                Aktif
+                          {editingPresetIdInSidebar === preset.id ? (
+                            <div className="flex items-center space-x-1.5 my-1">
+                              <input
+                                type="text"
+                                value={editingNameInSidebar}
+                                onChange={(e) => setEditingNameInSidebar(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSidebarSaveRename(preset.id);
+                                  if (e.key === 'Escape') setEditingPresetIdInSidebar(null);
+                                }}
+                                className="flex-1 bg-[#0e1626] border border-blue-500 rounded px-2 py-0.5 text-xs text-white focus:outline-none font-bold"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSidebarSaveRename(preset.id)}
+                                className="px-2 py-0.5 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-500 font-bold shrink-0"
+                              >
+                                Simpan
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPresetIdInSidebar(null)}
+                                className="px-1.5 py-0.5 bg-slate-800 text-slate-300 text-[10px] rounded hover:bg-slate-700 shrink-0"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs text-white truncate">{preset.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingPresetIdInSidebar(preset.id);
+                                  setEditingNameInSidebar(preset.name);
+                                }}
+                                className="text-slate-500 hover:text-blue-400 p-0.5"
+                                title="Ganti Nama Preset"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono text-[9px]">
+                                {preset.canvasOrientation}
                               </span>
-                            )}
-                          </div>
+                              {isActive && (
+                                <span className="px-1.5 py-0.2 rounded bg-blue-500/30 text-blue-300 font-bold text-[8px]">
+                                  Aktif
+                                </span>
+                              )}
+                            </div>
+                          )}
                           <p className="text-[10px] text-slate-400 mt-1 line-clamp-1">{preset.description}</p>
                           <div className="text-[9px] text-slate-500 mt-0.5">
                             {preset.elements.length} elemen visual tersimpan
@@ -3188,90 +3689,175 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </button>
               </div>
 
-              {/* 7-STAGE SONG REQUEST TEST WORKFLOW */}
-              <div className="p-3.5 rounded-xl bg-[#080c16] border border-purple-900/60 space-y-3">
+              {/* 7-STAGE SONG REQUEST TEST WORKFLOW (COMPACT DIAGNOSTIC TRIGGER) */}
+              <div className="p-3.5 rounded-xl bg-[#080c16] border border-purple-900/60 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
-                    <Music className="w-4 h-4" /> Uji Alur Song Request (7 Tahap Terpisah)
+                    <Music className="w-4 h-4" /> Uji Alur Song Request
                   </div>
                   <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono text-[9px]">
                     7-Stage Pipeline
                   </span>
                 </div>
 
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={testQueryInput}
-                    onChange={(e) => setTestQueryInput(e.target.value)}
-                    placeholder="Judul lagu test (e.g. Neon Horizon)"
-                    className="flex-1 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
-                  />
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Diagnostik lengkap pemisahan audio lokal, antrean penonton, TTS announcer, dan kepatuhan hukum YouTube ToS.
+                </p>
+
+                <div className="flex items-center gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={handleRun7StageSongTest}
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold shrink-0"
+                    onClick={() => setIsSongTestModalOpen(true)}
+                    className="w-full py-2.5 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm"
                   >
-                    Jalankan Uji 7 Tahap
-                  </button>
-                </div>
-
-                {/* 7-Stage Detailed Pipeline Results */}
-                {activeTestPipeline && (
-                  <div className="space-y-2 pt-1">
-                    <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800">
-                      <span className="font-bold text-white">Hasil Uji: {activeTestPipeline.command}</span>
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>Buka Diagnostik Pipeline</span>
+                    {activeTestPipeline && (
                       <span
-                        className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold ${
                           activeTestPipeline.overallSuccess
                             ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
                             : 'bg-red-950 text-red-400 border border-red-800'
                         }`}
                       >
-                        {activeTestPipeline.overallSuccess ? '7 TAHAP SUKSES' : 'TAHAP GAGAL'}
+                        {activeTestPipeline.overallSuccess ? '7 TAHAP OK' : 'GAGAL'}
                       </span>
-                    </div>
-
-                    {Object.values(activeTestPipeline.stages).map((stage) => (
-                      <div
-                        key={stage.stageNumber}
-                        className="p-2 rounded-lg bg-[#0e1626] border border-slate-800/80 text-[10px] space-y-0.5"
-                      >
-                        <div className="flex items-center justify-between font-bold">
-                          <span className="text-slate-300">
-                            Tahap {stage.stageNumber}: {stage.name}
-                          </span>
-                          <span
-                            className={
-                              stage.status === 'success'
-                                ? 'text-emerald-400 font-mono'
-                                : stage.status === 'warning'
-                                ? 'text-amber-400 font-mono'
-                                : 'text-red-400 font-mono'
-                            }
-                          >
-                            {stage.status.toUpperCase()}
-                          </span>
-                        </div>
-                        <div className="text-slate-400">{stage.summary}</div>
-                        <div className="text-[9px] text-slate-500 font-mono truncate">{stage.technicalDetail}</div>
-                      </div>
-                    ))}
-
-                    {/* YouTube ToS Compliance Notice */}
-                    <div className="p-2 rounded bg-slate-900/80 border border-slate-800 text-[9px] text-slate-400 leading-relaxed flex items-start gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                      <span>
-                        <strong>Kepatuhan Hukum YouTube:</strong> Pemisahan audio dari video tanpa layar melanggar Ketentuan Layanan YouTube. SYNTXRR STREAM menggunakan file audio lokal streamer dan sumber bebas royalti untuk routing audio streaming yang sah.
-                      </span>
-                    </div>
-                  </div>
-                )}
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* 7-STAGE SONG REQUEST DIAGNOSTIC MODAL */}
+      {isSongTestModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overscroll-contain"
+          onClick={() => setIsSongTestModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg bg-[#0e1626] border border-purple-900/80 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400 shrink-0">
+                  <Music className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Diagnostik Pipeline Song Request
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Pengujian 7-Tahap Alur & Kepatuhan Layanan</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSongTestModalOpen(false)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                title="Tutup Diagnostik"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Input & Run Test */}
+            <div className="flex gap-2 shrink-0">
+              <input
+                type="text"
+                value={testQueryInput}
+                onChange={(e) => setTestQueryInput(e.target.value)}
+                placeholder="Judul lagu test (e.g. Neon Horizon)"
+                className="flex-1 px-3 py-2 bg-[#080c16] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+              />
+              <button
+                type="button"
+                onClick={handleRun7StageSongTest}
+                className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold shrink-0 flex items-center gap-1.5 transition-colors shadow"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>Jalankan Uji 7 Tahap</span>
+              </button>
+            </div>
+
+            {/* Scrollable Pipeline Stage Results */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[140px]">
+              {activeTestPipeline ? (
+                <>
+                  <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800">
+                    <span className="font-bold text-white">Hasil Uji: {activeTestPipeline.command}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                        activeTestPipeline.overallSuccess
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                          : 'bg-red-950 text-red-400 border border-red-800'
+                      }`}
+                    >
+                      {activeTestPipeline.overallSuccess ? '7 TAHAP SUKSES' : 'TAHAP GAGAL'}
+                    </span>
+                  </div>
+
+                  {Object.values(activeTestPipeline.stages).map((stage) => (
+                    <div
+                      key={stage.stageNumber}
+                      className="p-2.5 rounded-lg bg-[#080c16] border border-slate-800/80 text-[10px] space-y-0.5"
+                    >
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="text-slate-300">
+                          Tahap {stage.stageNumber}: {stage.name}
+                        </span>
+                        <span
+                          className={
+                            stage.status === 'success'
+                              ? 'text-emerald-400 font-mono'
+                              : stage.status === 'warning'
+                              ? 'text-amber-400 font-mono'
+                              : 'text-red-400 font-mono'
+                          }
+                        >
+                          {stage.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="text-slate-400">{stage.summary}</div>
+                      <div className="text-[9px] text-slate-500 font-mono truncate">{stage.technicalDetail}</div>
+                    </div>
+                  ))}
+
+                  {/* YouTube ToS Compliance Notice */}
+                  <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[9px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Kepatuhan Hukum YouTube:</strong> Pemisahan audio dari video tanpa layar melanggar Ketentuan Layanan YouTube. SYNTXRR STREAM menggunakan file audio lokal streamer dan sumber bebas royalti untuk routing audio streaming yang sah.
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="p-8 text-center text-slate-500 text-xs flex flex-col items-center justify-center space-y-2">
+                  <Music className="w-8 h-8 text-slate-600 mb-1" />
+                  <p className="font-medium text-slate-400">Belum ada hasil pengujian pipeline</p>
+                  <p className="text-[10px] text-slate-500 max-w-xs">
+                    Ketik judul lagu di atas dan klik &ldquo;Jalankan Uji 7 Tahap&rdquo; untuk memeriksa setiap tahap alur Song Request.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-2 border-t border-slate-800 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsSongTestModalOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </>
       )}
     </div>

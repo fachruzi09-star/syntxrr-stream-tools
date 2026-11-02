@@ -61,9 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
           { id: 'dashboard' as NavigationTab, label: 'Dashboard' },
           { id: 'studio' as NavigationTab, label: 'Studio' },
           { id: 'sources' as NavigationTab, label: 'Sumber' },
-          { id: 'presets' as NavigationTab, label: 'Preset' },
           { id: 'live_center' as NavigationTab, label: 'Live Center' },
-          { id: 'music' as NavigationTab, label: 'Music Center' },
           { id: 'marketplace' as NavigationTab, label: 'Marketplace' },
           { id: 'integrations' as NavigationTab, label: 'Integrasi' },
           { id: 'settings' as NavigationTab, label: 'Pengaturan' },
@@ -92,9 +90,9 @@ export const Header: React.FC<HeaderProps> = ({
 
         {activePreset && (
           <button
-            onClick={() => onNavigate('presets')}
+            onClick={() => onNavigate('studio')}
             className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border border-blue-900/40 text-[11px] text-blue-300 hover:border-blue-700/60 transition-colors"
-            title="Ganti Preset Studio"
+            title="Kelola Preset di Studio"
           >
             <Layers className="w-3.5 h-3.5 text-blue-400" />
             <span className="truncate max-w-[100px]">{activePreset.name}</span>

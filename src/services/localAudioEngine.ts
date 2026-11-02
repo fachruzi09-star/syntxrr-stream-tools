@@ -135,6 +135,38 @@ class LocalAudioEngine {
     }
   }
 
+  async loadAndPlayUrl(id: string, title: string, artist: string, url: string): Promise<boolean> {
+    if (!this.audio) return false;
+
+    try {
+      this.updateState({
+        isLoading: true,
+        error: null,
+        currentTrackId: id,
+        title,
+        artist,
+        currentTime: 0,
+        duration: 0,
+      });
+
+      if (this.currentObjectUrl) {
+        URL.revokeObjectURL(this.currentObjectUrl);
+        this.currentObjectUrl = null;
+      }
+
+      this.audio.src = url;
+      this.audio.load();
+
+      await this.audio.play();
+      this.updateState({ isPlaying: true, isLoading: false });
+      return true;
+    } catch (err: any) {
+      const msg = err?.message || 'Playback failed. Format or URL may not be supported.';
+      this.updateState({ isPlaying: false, isLoading: false, error: msg });
+      return false;
+    }
+  }
+
   async play(): Promise<void> {
     if (!this.audio || !this.audio.src) return;
     try {
@@ -171,6 +203,23 @@ class LocalAudioEngine {
     const clamped = Math.max(0, Math.min(1, vol));
     this.audio.volume = clamped;
     this.updateState({ volume: clamped, isMuted: clamped === 0 });
+  }
+
+  setLoop(loop: boolean): void {
+    if (this.audio) {
+      this.audio.loop = loop;
+    }
+  }
+
+  isLoop(): boolean {
+    return this.audio?.loop || false;
+  }
+
+  stop(): void {
+    if (!this.audio) return;
+    this.audio.pause();
+    this.audio.currentTime = 0;
+    this.updateState({ isPlaying: false, currentTime: 0 });
   }
 
   toggleMute(): void {

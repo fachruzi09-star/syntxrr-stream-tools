@@ -201,7 +201,7 @@ class SongRequestEngine {
 
       if (command === '!play' || command === '!sr' || command === '!songrequest') {
         this.handlePlayCommand(event.username, query, isSim);
-      } else if (command === '!skip') {
+      } else if (command === '!skip' || command === '!next') {
         this.handleSkipCommand(event.username, isSim);
       } else if (command === '!queue') {
         this.handleQueueCommand(isSim);

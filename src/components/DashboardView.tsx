@@ -299,7 +299,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[10px] text-slate-500 mt-0.5">Audio internal didukung</div>
           </div>
 
-          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80">
+          <div
+            onClick={() => onNavigate('studio')}
+            className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80 hover:border-blue-500/60 transition-colors cursor-pointer"
+            title="Buka Preset di Studio Editor"
+          >
             <div className="flex items-center gap-1.5 text-slate-400 mb-1">
               <Tv className="w-3.5 h-3.5 text-purple-400" />
               <span>Status Scene Studio</span>

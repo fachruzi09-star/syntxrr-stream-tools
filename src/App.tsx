@@ -763,6 +763,7 @@ export default function App() {
             onDuplicatePreset={handleDuplicatePreset}
             onDeletePreset={handleDeletePreset}
             onToggleFavoritePreset={handleToggleFavoritePreset}
+            onRenamePreset={handleRenamePreset}
           />
         )}
 
