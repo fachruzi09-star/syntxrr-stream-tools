@@ -180,8 +180,9 @@ class TTSService {
       };
 
       utterance.onerror = (e) => {
-        // not_allowed or interrupted are common on Android during rapid events
-        if (e.error !== 'interrupted' && e.error !== 'not_allowed' && e.error !== 'canceled') {
+        // not-allowed, canceled or interrupted are common during rapid events
+        const err = e.error as string;
+        if (err !== 'interrupted' && err !== 'not-allowed' && err !== 'canceled') {
           console.warn('TTS utterance error:', e.error);
         }
       };

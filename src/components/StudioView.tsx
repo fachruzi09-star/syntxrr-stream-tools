@@ -58,6 +58,12 @@ import {
   ShieldCheck,
   FileAudio,
   Film,
+  Layout,
+  Smartphone,
+  Square,
+  Edit2,
+  ArrowRight,
+  X,
 } from 'lucide-react';
 
 interface StudioViewProps {
@@ -842,10 +848,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch (_) {}
       if (isLiveDragRef.current && preDragElementsRef.current) {
+        const savedSnapshot = preDragElementsRef.current;
         isLiveDragRef.current = false;
-        setHistory((prev) => [...prev.slice(-15), preDragElementsRef.current]);
-        setRedoStack([]);
         preDragElementsRef.current = null;
+        setHistory((prev) => [...prev.slice(-15), savedSnapshot]);
+        setRedoStack([]);
       }
       dragRef.current.isDragging = false;
       dragRef.current.isResizing = false;
