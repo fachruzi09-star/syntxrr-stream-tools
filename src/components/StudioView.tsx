@@ -3265,6 +3265,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };
