@@ -7,6 +7,8 @@ import {
   StreamEvent,
   StudioPreset,
   PresetCategory,
+  MarketplaceItem,
+  MarketplaceCategory,
 } from '../types';
 import { streamEventBus } from '../services/eventBus';
 import { soundSynth } from '../services/audioSimulator';
@@ -16,7 +18,8 @@ import {
   SongRequestState,
   SongRequestTestPipelineResult,
 } from '../services/songRequestEngine';
-import { ensureUniqueElementIds } from '../services/storage';
+import { ensureUniqueElementIds, DEFAULT_MARKETPLACE_ITEMS } from '../services/storage';
+import { SOURCE_CATALOG } from './SourcesLibraryView';
 import {
   Tv,
   Layers,
@@ -66,6 +69,10 @@ import {
   Edit2,
   ArrowRight,
   X,
+  ShoppingBag,
+  Box,
+  Search,
+  Download,
 } from 'lucide-react';
 
 interface StudioViewProps {
@@ -83,6 +90,9 @@ interface StudioViewProps {
   onDeletePreset?: (presetId: string) => void;
   onToggleFavoritePreset?: (presetId: string) => void;
   onRenamePreset?: (presetId: string, newName: string) => void;
+  // Production Hub Integration
+  marketplaceItems?: MarketplaceItem[];
+  onInstallMarketplaceElements?: (elements: StudioElement[]) => void;
 }
 
 // Active trigger reaction state for canvas animation
@@ -118,12 +128,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onDeletePreset,
   onToggleFavoritePreset,
   onRenamePreset,
+  marketplaceItems = DEFAULT_MARKETPLACE_ITEMS,
+  onInstallMarketplaceElements,
 }) => {
   // Selected Element
   const [selectedId, setSelectedId] = useState<string | null>(elements[0]?.id || null);
 
-  // Studio Sub-Sections: 'properties' | 'elements' | 'presets' | 'media' | 'layers' | 'simulator'
-  const [activeSidePanel, setActiveSidePanel] = useState<'properties' | 'elements' | 'presets' | 'media' | 'layers' | 'simulator'>('properties');
+  // Studio Sub-Sections: 'properties' | 'elements' | 'sources' | 'presets' | 'media' | 'layers' | 'simulator' | 'marketplace'
+  const [activeSidePanel, setActiveSidePanel] = useState<
+    'properties' | 'elements' | 'sources' | 'presets' | 'media' | 'layers' | 'simulator' | 'marketplace'
+  >('properties');
+
+  // Sources Catalog Filter & Search States
+  const [sourceCategoryFilter, setSourceCategoryFilter] = useState<'all' | 'basic' | 'dynamic'>('all');
+  const [sourceSearchQuery, setSourceSearchQuery] = useState('');
+
+  // Marketplace Filter & Search States
+  const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('all');
+  const [marketplaceSearchQuery, setMarketplaceSearchQuery] = useState('');
 
   // Canvas Pan & Zoom
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -1145,6 +1167,43 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
+  // Filtered Sources from SOURCE_CATALOG
+  const filteredSourcesList = SOURCE_CATALOG.filter((src) => {
+    if (sourceCategoryFilter !== 'all' && src.category !== sourceCategoryFilter) return false;
+    if (sourceSearchQuery.trim() !== '') {
+      const q = sourceSearchQuery.toLowerCase();
+      return src.name.toLowerCase().includes(q) || src.description.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  // Filtered Marketplace Items
+  const filteredMarketplaceList = (marketplaceItems || DEFAULT_MARKETPLACE_ITEMS).filter((item) => {
+    if (marketplaceCategoryFilter !== 'all' && item.category !== marketplaceCategoryFilter) return false;
+    if (marketplaceSearchQuery.trim() !== '') {
+      const q = marketplaceSearchQuery.toLowerCase();
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.author.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const handleInstallMarketplacePack = (item: MarketplaceItem) => {
+    if (onInstallMarketplaceElements) {
+      onInstallMarketplaceElements(item.elementsPayload);
+    } else {
+      const freshElements = item.elementsPayload.map((elem) => ({
+        ...elem,
+        id: `elem_${elem.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      }));
+      commitElements([...elements, ...freshElements]);
+    }
+    setActiveSidePanel('properties');
+  };
+
   // Render Element on Canvas
   const renderElementContent = (elem: StudioElement) => {
     const isCameraActive = !!activeCameraStreams[elem.id];
@@ -2119,15 +2178,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
         {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
         <div className="lg:col-span-5 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4">
-          {/* Main Module Tabs (Properties, Elements, Presets, Media, Layers, Simulator) */}
+          {/* Main Module Tabs (Properties, Elements, Sources, Presets, Media, Layers, Simulator, Marketplace) */}
           <div
-            className="flex lg:grid lg:grid-cols-6 overflow-x-auto no-scrollbar gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px] font-semibold select-none"
+            className="flex overflow-x-auto no-scrollbar gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px] font-semibold select-none"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             <button
               type="button"
               onClick={() => setActiveSidePanel('properties')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'properties'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2139,7 +2198,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('elements')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'elements'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2150,8 +2209,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setActiveSidePanel('sources')}
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                activeSidePanel === 'sources'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Box className="w-3.5 h-3.5 shrink-0" />
+              <span>Sumber</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveSidePanel('presets')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'presets'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2163,7 +2234,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('media')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'media'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2175,7 +2246,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('layers')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'layers'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2187,7 +2258,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('simulator')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[80px] lg:min-w-0 lg:px-1 rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'simulator'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2195,6 +2266,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
             >
               <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>Uji Live</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSidePanel('marketplace')}
+              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                activeSidePanel === 'marketplace'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ShoppingBag className="w-3.5 h-3.5 shrink-0 text-purple-400" />
+              <span>Marketplace</span>
             </button>
           </div>
 
@@ -2973,6 +3056,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
           {/* TAB 2: ELEMENT LIBRARY */}
           {activeSidePanel === 'elements' && (
             <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
+              {/* Shortcut Banner to Full Sources Catalog */}
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('sources')}
+                className="w-full p-2.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-blue-900/40 to-indigo-950/60 border border-blue-500/40 text-blue-200 text-xs font-semibold flex items-center justify-between hover:border-blue-400 transition-all shadow-sm group"
+              >
+                <div className="flex items-center gap-2">
+                  <Box className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+                  <span>Katalog 25 Sumber Siaran Lengkap</span>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-blue-400 group-hover:translate-x-1 transition-transform" />
+              </button>
+
               <div>
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Tv className="w-3.5 h-3.5 text-blue-400" />
@@ -3154,6 +3250,83 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </div>
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: SOURCES CATALOG (INTEGRATED SOURCES LIBRARY) */}
+          {activeSidePanel === 'sources' && (
+            <div className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
+              <div className="p-3 bg-blue-950/30 border border-blue-900/50 rounded-xl text-xs text-blue-200 flex items-start gap-2.5">
+                <Box className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                <p>
+                  Pustaka 25 sumber overlay siaran terkurasi. Klik <strong>Tambah</strong> untuk memasukkan sumber langsung ke kanvas dengan ukuran dan auto-trigger yang sesuai.
+                </p>
+              </div>
+
+              {/* Category Filter & Search */}
+              <div className="space-y-2">
+                <div className="flex gap-1.5 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-xs">
+                  {(['all', 'basic', 'dynamic'] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSourceCategoryFilter(cat)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
+                        sourceCategoryFilter === cat
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cat === 'all' ? 'Semua (25)' : cat === 'basic' ? 'Dasar (11)' : 'Dinamis (14)'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={sourceSearchQuery}
+                    onChange={(e) => setSourceSearchQuery(e.target.value)}
+                    placeholder="Cari sumber (kamera, teks, timer, chat...)"
+                    className="w-full pl-8 pr-3 py-1.5 bg-[#080c16] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+                </div>
+              </div>
+
+              {/* Source List */}
+              <div className="space-y-2">
+                {filteredSourcesList.map((src) => (
+                  <div
+                    key={src.name}
+                    className="p-3 bg-[#080c16] border border-slate-800 hover:border-blue-500/60 rounded-xl transition-all flex items-center justify-between gap-2 group"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                        {src.icon}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span className="truncate">{src.name}</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-normal shrink-0">
+                            {src.category === 'basic' ? 'Dasar' : 'Dinamis'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 truncate mt-0.5">{src.description}</p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleAddQuickElement(src.type, src.name)}
+                      className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah</span>
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -3725,6 +3898,89 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     )}
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 8: MARKETPLACE OVERLAYS & SCENE PACKS */}
+          {activeSidePanel === 'marketplace' && (
+            <div className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
+              <div className="p-3 bg-purple-950/30 border border-purple-900/50 rounded-xl text-xs text-purple-200 flex items-start gap-2.5">
+                <ShoppingBag className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                <p>
+                  Katalog pack overlay, alert, dan widget siap pakai. Klik <strong>Pasang</strong> untuk menerapkan elemen desain langsung ke kanvas siaran Anda.
+                </p>
+              </div>
+
+              {/* Category Filter & Search */}
+              <div className="space-y-2">
+                <div className="flex gap-1 overflow-x-auto no-scrollbar p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px]">
+                  {(['all', 'scene', 'alert', 'goal', 'chat', 'widget'] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setMarketplaceCategoryFilter(cat)}
+                      className={`shrink-0 px-2.5 py-1 rounded-lg font-semibold capitalize transition-colors ${
+                        marketplaceCategoryFilter === cat
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cat === 'all' ? 'Semua' : cat}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={marketplaceSearchQuery}
+                    onChange={(e) => setMarketplaceSearchQuery(e.target.value)}
+                    placeholder="Cari tema, pack, author..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-[#080c16] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div className="space-y-2.5">
+                {filteredMarketplaceList.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 bg-[#080c16] border border-slate-800 hover:border-purple-500/60 rounded-xl transition-all space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>{item.name}</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 font-mono">
+                            {item.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2">{item.description}</p>
+                        <div className="text-[9px] text-slate-500 mt-1 flex items-center gap-2">
+                          <span>Oleh {item.author}</span>
+                          <span>·</span>
+                          <span className="text-amber-400 flex items-center gap-0.5">
+                            ★ {item.rating}
+                          </span>
+                          <span>·</span>
+                          <span>{item.elementsPayload.length} Elemen</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleInstallMarketplacePack(item)}
+                        className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1 shrink-0 transition-colors shadow"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Pasang</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

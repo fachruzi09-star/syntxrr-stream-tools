@@ -3,7 +3,6 @@ import { NavigationTab, OperatingMode, StudioPreset } from '../types';
 import {
   Radio,
   Monitor,
-  Menu,
   ShieldAlert,
   Layers,
   Sparkles,
@@ -16,7 +15,7 @@ interface HeaderProps {
   activePreset: StudioPreset | null;
   onNavigate: (nav: NavigationTab) => void;
   onOpenModeModal: () => void;
-  onOpenDrawer: () => void;
+  onOpenDrawer?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,7 +24,6 @@ export const Header: React.FC<HeaderProps> = ({
   activePreset,
   onNavigate,
   onOpenModeModal,
-  onOpenDrawer,
 }) => {
   const isModeA = operatingMode === 'MODE_A_TIKTOK_COMPANION' || operatingMode === 'MODE_A_OVERLAY';
 
@@ -60,19 +58,17 @@ export const Header: React.FC<HeaderProps> = ({
         {[
           { id: 'dashboard' as NavigationTab, label: 'Dashboard' },
           { id: 'studio' as NavigationTab, label: 'Studio' },
-          { id: 'sources' as NavigationTab, label: 'Sumber' },
-          { id: 'live_center' as NavigationTab, label: 'Live Center' },
-          { id: 'marketplace' as NavigationTab, label: 'Marketplace' },
+          { id: 'live_center' as NavigationTab, label: 'Live' },
+          { id: 'remote_deck' as NavigationTab, label: 'Remote Deck' },
           { id: 'integrations' as NavigationTab, label: 'Integrasi' },
           { id: 'settings' as NavigationTab, label: 'Pengaturan' },
-          { id: 'remote_deck' as NavigationTab, label: 'Remote Deck' },
         ].map((item) => (
           <button
             key={item.id}
             onClick={() => onNavigate(item.id)}
-            className={`transition-colors whitespace-nowrap px-2 py-1 rounded-md ${
+            className={`transition-colors whitespace-nowrap px-2.5 py-1 rounded-md ${
               activeNav === item.id
-                ? 'text-blue-400 font-bold bg-blue-950/50'
+                ? 'text-blue-400 font-bold bg-blue-950/50 border border-blue-800/40'
                 : 'hover:text-blue-400'
             }`}
           >
@@ -81,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
         ))}
       </div>
 
-      {/* Zone 3: Connection status, Active Preset, Mode Switcher, and Drawer Trigger */}
+      {/* Zone 3: Connection status, Active Preset, Mode Switcher */}
       <div className="flex items-center gap-2 shrink-0">
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border border-amber-900/60 text-[11px]">
           <div className="w-2 h-2 rounded-full bg-amber-400" />
@@ -108,16 +104,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="whitespace-nowrap">
             {isModeA ? 'Mode A: TikTok' : 'Mode B: Encoder'}
           </span>
-        </button>
-
-        {/* Mobile All-Modules Drawer Menu Trigger */}
-        <button
-          onClick={onOpenDrawer}
-          className="xl:hidden min-h-[38px] min-w-[38px] rounded-lg bg-[#0e1626] border border-slate-700 hover:border-blue-500 text-slate-300 hover:text-white flex items-center justify-center transition-colors"
-          title="Buka Menu Semua Modul"
-          aria-label="Menu navigasi"
-        >
-          <Menu className="w-4 h-4" />
         </button>
       </div>
     </header>

@@ -25,7 +25,6 @@ import {
   Share2,
   ExternalLink,
   Sliders,
-  Smartphone,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -346,69 +345,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <p className="leading-relaxed text-[11px] text-slate-300">
           Izin <code>SYSTEM_ALERT_WINDOW</code> (Jendela Mengambang) diperlukan untuk Mode A (TikTok Companion). Izin <code>READ_MEDIA_AUDIO</code> dan <code>RECORD_AUDIO</code> diperlukan untuk pemutar lagu lokal dan penangkapan mikrofon siaran.
         </p>
-      </section>
-
-      {/* Tombol Pintasan Cepat ke Studio, Live Center, dan Remote Deck */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div
-          onClick={() => onNavigate('studio')}
-          className="p-5 rounded-2xl bg-[#0e1626] border border-blue-900/60 hover:border-blue-500 transition-all cursor-pointer flex items-center justify-between shadow-lg group"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0">
-              <Tv className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
-                Studio Editor
-              </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                Atur canvas &amp; layer compositor
-              </div>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0" />
-        </div>
-
-        <div
-          onClick={() => onNavigate('live_center')}
-          className="p-5 rounded-2xl bg-[#0e1626] border border-sky-900/60 hover:border-sky-500 transition-all cursor-pointer flex items-center justify-between shadow-lg group"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400 group-hover:bg-sky-600 group-hover:text-white transition-colors shrink-0">
-              <Radio className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-white group-hover:text-sky-300 transition-colors">
-                Live Center &amp; TTS
-              </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                Simulator event, gift, dan TTS suara
-              </div>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0" />
-        </div>
-
-        <div
-          onClick={() => onNavigate('remote_deck')}
-          className="p-5 rounded-2xl bg-[#0e1626] border border-indigo-900/60 hover:border-indigo-500 transition-all cursor-pointer flex items-center justify-between shadow-lg group"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors">
-                Remote Stream Deck
-              </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                Kontrol nirkabel LAN via HP kedua
-              </div>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0" />
-        </div>
       </section>
     </div>
   );

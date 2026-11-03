@@ -764,6 +764,8 @@ export default function App() {
             onDeletePreset={handleDeletePreset}
             onToggleFavoritePreset={handleToggleFavoritePreset}
             onRenamePreset={handleRenamePreset}
+            marketplaceItems={marketplaceItems}
+            onInstallMarketplaceElements={handleInstallMarketplaceElements}
           />
         )}
 
