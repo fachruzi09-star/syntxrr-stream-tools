@@ -34,12 +34,11 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- Mode A TikTok LIVE Companion Foreground Service -->
+        <!-- Mode A TikTok LIVE Companion Service (Lifecycle & Status Controller) -->
         <service
             android:name=".CompanionService"
             android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->
@@ -55,7 +54,5 @@
 
     <!-- Mode A Companion Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

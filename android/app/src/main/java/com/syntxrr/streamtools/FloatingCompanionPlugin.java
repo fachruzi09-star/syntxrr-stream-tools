@@ -133,27 +133,35 @@ public class FloatingCompanionPlugin extends Plugin {
     public void startCompanion(PluginCall call) {
         Context context = getContext();
 
-        // 1. Validasi Izin Overlay
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
-            call.reject("Izin Tampilkan di Atas Aplikasi Lain (Overlay) belum aktif.");
+        // 1. Baca opsi requireOverlay (default false untuk fleksibilitas)
+        boolean requireOverlay = call.getBoolean("requireOverlay", false);
+
+        // 2. Evaluasi status izin overlay secara aktual
+        boolean overlayGranted = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            overlayGranted = Settings.canDrawOverlays(context);
+        }
+
+        // 3. Jika pemanggil mewajibkan overlay dan belum ada izin, tolak secara tegas
+        if (requireOverlay && !overlayGranted) {
+            call.reject("Izin Tampilkan di Atas Aplikasi Lain (Overlay) wajib diaktifkan untuk mode ini.");
             return;
         }
 
-        // 2. Start Foreground Companion Service
+        // 4. Start Companion Service
         try {
             Intent intent = new Intent(context, CompanionService.class);
             intent.setAction(CompanionService.ACTION_START);
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent);
-            } else {
-                context.startService(intent);
-            }
+            context.startService(intent);
 
             JSObject ret = new JSObject();
             ret.put("success", true);
             ret.put("isRunning", true);
-            ret.put("message", "Companion Service berhasil diaktifkan.");
+            ret.put("overlayActive", false); // UI overlay belum dirender di Phase 4.2
+            ret.put("overlayPermissionGranted", overlayGranted);
+            ret.put("message", overlayGranted
+                ? "Companion Service aktif dengan izin overlay tersedia."
+                : "Companion Service aktif tanpa izin overlay (background controller mode).");
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("Gagal menjalankan Companion Service: " + e.getMessage());
@@ -167,11 +175,12 @@ public class FloatingCompanionPlugin extends Plugin {
         try {
             Intent intent = new Intent(context, CompanionService.class);
             intent.setAction(CompanionService.ACTION_STOP);
-            context.stopService(intent);
+            context.startService(intent);
 
             JSObject ret = new JSObject();
             ret.put("success", true);
             ret.put("isRunning", false);
+            ret.put("overlayActive", false);
             ret.put("message", "Companion Service dihentikan.");
             call.resolve(ret);
         } catch (Exception e) {

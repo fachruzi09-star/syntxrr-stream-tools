@@ -19,9 +19,15 @@ export interface NotificationPermissionResult {
   message?: string;
 }
 
+export interface StartCompanionOptions {
+  requireOverlay?: boolean;
+}
+
 export interface CompanionStatusResult {
   isRunning: boolean;
   success?: boolean;
+  overlayActive?: boolean;
+  overlayPermissionGranted?: boolean;
   message?: string;
 }
 
@@ -30,8 +36,19 @@ export interface FloatingCompanionPluginInterface {
   requestOverlayPermission(): Promise<{ granted: boolean; openedSettings: boolean }>;
   checkNotificationPermission(): Promise<{ granted: boolean }>;
   requestNotificationPermission(): Promise<{ granted: boolean }>;
-  startCompanion(): Promise<{ success: boolean; isRunning: boolean; message: string }>;
-  stopCompanion(): Promise<{ success: boolean; isRunning: boolean; message: string }>;
+  startCompanion(options?: { requireOverlay?: boolean }): Promise<{
+    success: boolean;
+    isRunning: boolean;
+    overlayActive?: boolean;
+    overlayPermissionGranted?: boolean;
+    message: string;
+  }>;
+  stopCompanion(): Promise<{
+    success: boolean;
+    isRunning: boolean;
+    overlayActive?: boolean;
+    message: string;
+  }>;
   isCompanionRunning(): Promise<{ isRunning: boolean }>;
 }
 
@@ -149,42 +166,51 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 /**
- * Start the native Android Foreground Companion Service.
+ * Start the native Android Companion Service.
  * Does NOT fake success in non-Android environments.
  */
-export async function startCompanion(): Promise<CompanionStatusResult> {
+export async function startCompanion(options?: StartCompanionOptions): Promise<CompanionStatusResult> {
   if (!isNativeAndroid()) {
     return {
       isRunning: false,
       success: false,
+      overlayActive: false,
+      overlayPermissionGranted: false,
       message: 'Companion Service hanya dapat dijalankan pada perangkat Android (Mode A). Di browser desktop atau OBS, gunakan Mode B.',
     };
   }
 
   try {
-    const res = await FloatingCompanion.startCompanion();
+    const res = await FloatingCompanion.startCompanion({
+      requireOverlay: options?.requireOverlay ?? false,
+    });
     return {
       isRunning: !!res?.isRunning,
       success: !!res?.success,
+      overlayActive: !!res?.overlayActive,
+      overlayPermissionGranted: !!res?.overlayPermissionGranted,
       message: res?.message || 'Companion Service berhasil diaktifkan.',
     };
   } catch (error: any) {
     return {
       isRunning: false,
       success: false,
+      overlayActive: false,
+      overlayPermissionGranted: false,
       message: error?.message || 'Gagal menjalankan Companion Service.',
     };
   }
 }
 
 /**
- * Stop the native Android Foreground Companion Service.
+ * Stop the native Android Companion Service.
  */
 export async function stopCompanion(): Promise<CompanionStatusResult> {
   if (!isNativeAndroid()) {
     return {
       isRunning: false,
       success: false,
+      overlayActive: false,
       message: 'Companion Service tidak aktif pada browser.',
     };
   }
@@ -194,12 +220,14 @@ export async function stopCompanion(): Promise<CompanionStatusResult> {
     return {
       isRunning: !!res?.isRunning,
       success: !!res?.success,
+      overlayActive: false,
       message: res?.message || 'Companion Service telah dihentikan.',
     };
   } catch (error: any) {
     return {
       isRunning: false,
       success: false,
+      overlayActive: false,
       message: error?.message || 'Gagal menghentikan Companion Service.',
     };
   }

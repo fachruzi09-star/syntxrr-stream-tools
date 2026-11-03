@@ -7,7 +7,6 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -16,9 +15,12 @@ import androidx.core.app.NotificationCompat;
 
 /**
  * CompanionService
- * Lightweight Foreground Service for SYNTXRR STREAM Mode A (TikTok LIVE Companion).
- * Maintains background process execution, notification bar presence, and readiness
- * for companion operations while TikTok is active in the foreground.
+ * Defensive Lifecycle & Status Controller for SYNTXRR STREAM Mode A (TikTok LIVE Companion).
+ * 
+ * Architecture Note (Phase 4.2E):
+ * Operates as a lightweight background lifecycle and status tracker.
+ * Defers claiming FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK until native audio playback / MediaSession
+ * is compiled into native Java. Status is safely reflected via Android NotificationManager.
  */
 public class CompanionService extends Service {
 
@@ -43,69 +45,88 @@ public class CompanionService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            Log.i(TAG, "Received STOP action. Terminating CompanionService.");
-            stopForegroundService();
+        // Defensive check: handle null intent safely if OS restarts the service
+        if (intent == null) {
+            Log.w(TAG, "onStartCommand received null intent. Stopping service safely.");
+            sIsRunning = false;
+            stopSelf();
             return START_NOT_STICKY;
         }
 
-        Log.i(TAG, "Received START action. Starting foreground notification.");
-        startAsForeground();
-        sIsRunning = true;
+        String action = intent.getAction();
+
+        // Handle STOP action
+        if (ACTION_STOP.equals(action)) {
+            Log.i(TAG, "Received STOP action. Terminating CompanionService.");
+            stopCompanionService();
+            return START_NOT_STICKY;
+        }
+
+        // Handle START action
+        if (ACTION_START.equals(action)) {
+            if (sIsRunning) {
+                Log.i(TAG, "CompanionService is already active. Ignoring redundant START.");
+                return START_NOT_STICKY;
+            }
+
+            Log.i(TAG, "Received START action. Displaying companion status notification.");
+            showStatusNotification();
+            sIsRunning = true;
+            return START_NOT_STICKY;
+        }
+
+        // Unknown action fallback
+        Log.w(TAG, "Received unknown action: " + action + ". Stopping service.");
+        stopSelf();
         return START_NOT_STICKY;
     }
 
-    private void startAsForeground() {
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    private void showStatusNotification() {
+        try {
+            Intent notificationIntent = new Intent(this, MainActivity.class);
+            notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
-        int pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            pendingIntentFlags |= PendingIntent.FLAG_IMMUTABLE;
-        }
+            int pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                pendingIntentFlags |= PendingIntent.FLAG_IMMUTABLE;
+            }
 
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            notificationIntent,
-            pendingIntentFlags
-        );
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SYNTXRR Companion Aktif")
-            .setContentText("Mode A TikTok LIVE Companion sedang berjalan di latar belakang")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setOngoing(true)
-            .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE);
-
-        Notification notification = builder.build();
-
-        // Handle Android 14+ (API 34+) and Android 10+ (API 29+) foreground service type requirement
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34+
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                pendingIntentFlags
             );
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { // API 29-33
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            );
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("SYNTXRR Companion Aktif")
+                .setContentText("Mode A TikTok LIVE Companion sedang berjalan di latar belakang")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setOngoing(true)
+                .setContentIntent(pendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE);
+
+            Notification notification = builder.build();
+
+            NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager != null) {
+                notificationManager.notify(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Gagal memunculkan notifikasi companion: " + e.getMessage());
         }
     }
 
-    private void stopForegroundService() {
+    private void stopCompanionService() {
         sIsRunning = false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE);
-        } else {
-            stopForeground(true);
+        try {
+            NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager != null) {
+                notificationManager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error cancelling notification: " + e.getMessage());
         }
         stopSelf();
     }
@@ -113,7 +134,7 @@ public class CompanionService extends Service {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             CharSequence name = "SYNTXRR Companion Service";
-            String description = "Notifikasi status foreground service untuk Mode A TikTok LIVE Companion";
+            String description = "Notifikasi status kontroler Mode A TikTok LIVE Companion";
             int importance = NotificationManager.IMPORTANCE_LOW;
 
             NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
@@ -130,6 +151,13 @@ public class CompanionService extends Service {
     @Override
     public void onDestroy() {
         sIsRunning = false;
+        try {
+            NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager != null) {
+                notificationManager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception ignored) {
+        }
         Log.i(TAG, "CompanionService destroyed");
         super.onDestroy();
     }
