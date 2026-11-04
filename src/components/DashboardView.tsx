@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   AppSettings,
   OperatingMode,
@@ -25,7 +25,20 @@ import {
   Share2,
   ExternalLink,
   Sliders,
+  Eye,
+  EyeOff,
+  Loader2,
+  Smartphone,
 } from 'lucide-react';
+import {
+  isNativeAndroid,
+  checkOverlayPermission,
+  requestOverlayPermission,
+  showFloatingHud,
+  hideFloatingHud,
+  isFloatingHudVisible,
+  onFloatingHudClick,
+} from '../services/nativeCompanionBridge';
 
 interface DashboardViewProps {
   settings: AppSettings;
@@ -51,6 +64,155 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const connectedCount = integrations.filter((i) => i.status === 'ACTIVE').length;
   const elementsCount = activePreset?.elements.length || 0;
   const visibleElementsCount = activePreset?.elements.filter((e) => e.visible).length || 0;
+
+  // Native Floating HUD State (Phase 4.3C)
+  const [isHudVisible, setIsHudVisible] = useState(false);
+  const [isOverlayGranted, setIsOverlayGranted] = useState(false);
+  const [isHudActionPending, setIsHudActionPending] = useState(false);
+  const [hudFeedback, setHudFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [lastHudClickTime, setLastHudClickTime] = useState<string | null>(null);
+
+  // Check initial HUD status and overlay permission when Mode A is active
+  const refreshHudStatus = useCallback(async () => {
+    try {
+      const [hudRes, overlayRes] = await Promise.all([
+        isFloatingHudVisible(),
+        checkOverlayPermission(),
+      ]);
+      setIsHudVisible(!!hudRes?.isVisible);
+      setIsOverlayGranted(!!overlayRes?.granted);
+    } catch (err: any) {
+      console.warn('Gagal membaca status HUD:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    if (isModeA) {
+      refreshHudStatus();
+    }
+
+    // Subscribe to native floating HUD click events
+    let listenerHandle: any = null;
+
+    async function setupClickListener() {
+      try {
+        listenerHandle = await onFloatingHudClick((data) => {
+          if (!isSubscribed) return;
+          const timeStr = new Date(data.timestamp || Date.now()).toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+          setLastHudClickTime(timeStr);
+          setHudFeedback({
+            type: 'info',
+            message: `Bubble HUD disentuh pada layar HP (${timeStr}).`,
+          });
+          setTimeout(() => {
+            if (isSubscribed) {
+              setHudFeedback(null);
+            }
+          }, 4000);
+        });
+      } catch (err) {
+        console.warn('Error setting up HUD click listener:', err);
+      }
+    }
+
+    if (isModeA) {
+      setupClickListener();
+    }
+
+    return () => {
+      isSubscribed = false;
+      if (listenerHandle && typeof listenerHandle.remove === 'function') {
+        listenerHandle.remove();
+      }
+    };
+  }, [isModeA, refreshHudStatus]);
+
+  const handleShowHud = async () => {
+    setIsHudActionPending(true);
+    setHudFeedback(null);
+    try {
+      // 1. Check overlay permission first
+      const permRes = await checkOverlayPermission();
+      setIsOverlayGranted(!!permRes.granted);
+
+      if (!permRes.granted && isNativeAndroid()) {
+        setHudFeedback({
+          type: 'error',
+          message: 'Izin Tampilkan di Atas Aplikasi Lain (SYSTEM_ALERT_WINDOW) belum aktif. Silakan buka izin terlebih dahulu.',
+        });
+        setIsHudActionPending(false);
+        return;
+      }
+
+      // 2. Call showFloatingHud
+      const res = await showFloatingHud();
+      if (res.success || res.isVisible) {
+        setIsHudVisible(true);
+        setHudFeedback({
+          type: 'success',
+          message: res.message || 'Floating HUD berhasil ditampilkan di atas layar.',
+        });
+      } else {
+        setHudFeedback({
+          type: 'error',
+          message: res.message || 'Gagal menampilkan Floating HUD.',
+        });
+      }
+    } catch (err: any) {
+      setHudFeedback({
+        type: 'error',
+        message: err?.message || 'Terjadi kesalahan saat memanggil Floating HUD.',
+      });
+    } finally {
+      setIsHudActionPending(false);
+    }
+  };
+
+  const handleHideHud = async () => {
+    setIsHudActionPending(true);
+    setHudFeedback(null);
+    try {
+      const res = await hideFloatingHud();
+      setIsHudVisible(false);
+      setHudFeedback({
+        type: 'success',
+        message: res.message || 'Floating HUD telah disembunyikan.',
+      });
+    } catch (err: any) {
+      setHudFeedback({
+        type: 'error',
+        message: err?.message || 'Gagal menyembunyikan Floating HUD.',
+      });
+    } finally {
+      setIsHudActionPending(false);
+    }
+  };
+
+  const handleRequestOverlay = async () => {
+    try {
+      setHudFeedback({
+        type: 'info',
+        message: 'Membuka pengaturan izin sistem Android...',
+      });
+      const res = await requestOverlayPermission();
+      if (res.openedSettings) {
+        setHudFeedback({
+          type: 'info',
+          message: 'Aktifkan toggle "Izinkan ditampilkan di atas aplikasi lain", lalu kembali ke aplikasi SYNTXRR STREAM.',
+        });
+      }
+    } catch (err: any) {
+      setHudFeedback({
+        type: 'error',
+        message: err?.message || 'Gagal membuka halaman pengaturan izin.',
+      });
+    }
+  };
 
   return (
     <div className="space-y-6 pb-20 md:pb-8">
@@ -261,6 +423,155 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </section>
+
+      {/* Mode A: Native Floating HUD Companion Controller (Visible only in Mode A) */}
+      {isModeA && (
+        <section className="bg-gradient-to-br from-[#0e172a] via-[#0f1b35] to-[#0a1120] rounded-2xl border border-blue-500/40 p-5 sm:p-6 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-blue-400 uppercase">
+                <span>Mode A Companion</span>
+                <span className="text-slate-500">·</span>
+                <span>Native Android WindowManager</span>
+              </div>
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 mt-0.5">
+                <Layers className="w-5 h-5 text-blue-400" />
+                Kontroler Native Floating HUD
+              </h2>
+              <p className="text-xs text-slate-300 mt-0.5 max-w-xl">
+                Bubble mengambang 56dp di atas aplikasi TikTok LIVE untuk kontrol cepat dan pemantauan siaran.
+              </p>
+            </div>
+
+            {/* Live Status Badge */}
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+              {isHudVisible ? (
+                <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-950/90 text-emerald-400 border border-emerald-600/60 flex items-center gap-2 shadow-sm">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  HUD Aktif di Layar
+                </span>
+              ) : (
+                <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-900/90 text-slate-400 border border-slate-700 flex items-center gap-2 shadow-sm">
+                  <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
+                  HUD Nonaktif
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Action Buttons Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+            <button
+              type="button"
+              onClick={handleShowHud}
+              disabled={isHudActionPending || isHudVisible}
+              className={`py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                isHudVisible
+                  ? 'bg-slate-900/60 border border-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 active:scale-[0.98]'
+              }`}
+            >
+              {isHudActionPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Eye className="w-4 h-4 text-blue-200" />
+              )}
+              <span>Tampilkan Floating HUD</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleHideHud}
+              disabled={isHudActionPending || !isHudVisible}
+              className={`py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                !isHudVisible
+                  ? 'bg-slate-900/60 border border-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-rose-900/60 hover:bg-rose-800/80 border border-rose-600 text-rose-200 shadow-lg shadow-rose-950/40 active:scale-[0.98]'
+              }`}
+            >
+              {isHudActionPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <EyeOff className="w-4 h-4 text-rose-300" />
+              )}
+              <span>Sembunyikan Floating HUD</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={refreshHudStatus}
+              disabled={isHudActionPending}
+              className="py-3 px-4 rounded-xl bg-[#080c16] hover:bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white flex items-center justify-center gap-2 transition-colors"
+            >
+              <CheckCircle2 className="w-4 h-4 text-slate-400" />
+              <span>Cek Status Native</span>
+            </button>
+          </div>
+
+          {/* Overlay Permission Warning if not granted on native Android */}
+          {!isOverlayGranted && isNativeAndroid() && (
+            <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-600/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-amber-300">Izin Overlay Belum Diaktifkan</div>
+                  <div className="text-slate-300 text-[11px] leading-relaxed">
+                    Android memerlukan izin "Tampilkan di atas aplikasi lain" agar bubble dapat melayang di atas TikTok.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleRequestOverlay}
+                className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shrink-0 self-start sm:self-auto transition-colors flex items-center gap-1.5"
+              >
+                <span>Buka Izin Overlay</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Feedback Banner */}
+          {hudFeedback && (
+            <div
+              className={`p-3 rounded-xl border text-xs flex items-center gap-2 transition-all ${
+                hudFeedback.type === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-600/70 text-emerald-200'
+                  : hudFeedback.type === 'error'
+                  ? 'bg-rose-950/60 border-rose-600/70 text-rose-200'
+                  : 'bg-blue-950/60 border-blue-600/70 text-blue-200'
+              }`}
+            >
+              {hudFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              ) : hudFeedback.type === 'error' ? (
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              ) : (
+                <Smartphone className="w-4 h-4 shrink-0 text-blue-400" />
+              )}
+              <span className="flex-1">{hudFeedback.message}</span>
+            </div>
+          )}
+
+          {/* Touch Interaction Feedback Strip */}
+          <div className="p-3 rounded-xl bg-[#080c16]/90 border border-slate-800 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-slate-400">
+              <Smartphone className="w-3.5 h-3.5 text-blue-400" />
+              <span>Respon Interaksi Native:</span>
+              <span className="text-slate-200 font-medium">
+                {lastHudClickTime
+                  ? `Sentuhan bubble terdeteksi pada HP (${lastHudClickTime})`
+                  : 'Ketuk bubble floating di HP untuk menguji respons klik bridge'}
+              </span>
+            </div>
+            {!isNativeAndroid() && (
+              <span className="text-slate-500 text-[10px]">
+                Simulasi web: Aktifkan di APK untuk overlay di atas TikTok nyata
+              </span>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Status Kesiapan Hardware & Pipa Produksi */}
       <section className="bg-[#0e1626] rounded-2xl border border-slate-800/90 p-5 space-y-4">

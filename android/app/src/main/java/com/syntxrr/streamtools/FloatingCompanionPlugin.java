@@ -194,4 +194,111 @@ public class FloatingCompanionPlugin extends Plugin {
         ret.put("isRunning", CompanionService.isRunning());
         call.resolve(ret);
     }
+
+    // =========================================================================
+    // NATIVE FLOATING HUD INTEGRATION (PHASE 4.3B)
+    // =========================================================================
+
+    @Nullable
+    private FloatingHudManager mHudManager;
+
+    private synchronized FloatingHudManager getHudManager() {
+        if (mHudManager == null) {
+            Context appContext = getContext().getApplicationContext();
+            mHudManager = new FloatingHudManager(appContext);
+            mHudManager.setOnHudClickListener(new FloatingHudManager.OnHudClickListener() {
+                @Override
+                public void onHudClick() {
+                    JSObject data = new JSObject();
+                    data.put("timestamp", System.currentTimeMillis());
+                    notifyListeners("floatingHudClick", data);
+                }
+            });
+        }
+        return mHudManager;
+    }
+
+    @PluginMethod
+    public void showFloatingHud(PluginCall call) {
+        Context context = getContext();
+
+        // 1. Verifikasi izin overlay terlebih dahulu
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+            call.reject("Izin Tampilkan di Atas Aplikasi Lain (Overlay) belum aktif.");
+            return;
+        }
+
+        // 2. Operasi WindowManager harus dijalankan pada UI Thread
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        boolean shown = getHudManager().showHud();
+                        JSObject ret = new JSObject();
+                        ret.put("success", shown);
+                        ret.put("isVisible", shown);
+                        ret.put("message", shown
+                            ? "Floating HUD berhasil ditampilkan."
+                            : "Gagal menampilkan Floating HUD.");
+                        call.resolve(ret);
+                    } catch (Exception e) {
+                        call.reject("Gagal menampilkan Floating HUD: " + e.getMessage());
+                    }
+                }
+            });
+        } else {
+            call.reject("Activity tidak tersedia untuk menampilkan Floating HUD.");
+        }
+    }
+
+    @PluginMethod
+    public void hideFloatingHud(PluginCall call) {
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        boolean hidden = getHudManager().hideHud();
+                        JSObject ret = new JSObject();
+                        ret.put("success", hidden);
+                        ret.put("isVisible", false);
+                        ret.put("message", "Floating HUD disembunyikan.");
+                        call.resolve(ret);
+                    } catch (Exception e) {
+                        call.reject("Gagal menyembunyikan Floating HUD: " + e.getMessage());
+                    }
+                }
+            });
+        } else {
+            // Fallback jika activity dilepas, tetap jalankan hide
+            try {
+                boolean hidden = getHudManager().hideHud();
+                JSObject ret = new JSObject();
+                ret.put("success", hidden);
+                ret.put("isVisible", false);
+                ret.put("message", "Floating HUD disembunyikan.");
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("Gagal menyembunyikan Floating HUD: " + e.getMessage());
+            }
+        }
+    }
+
+    @PluginMethod
+    public void isFloatingHudVisible(PluginCall call) {
+        boolean visible = mHudManager != null && mHudManager.isHudVisible();
+        JSObject ret = new JSObject();
+        ret.put("isVisible", visible);
+        call.resolve(ret);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (mHudManager != null) {
+            mHudManager.destroy();
+            mHudManager = null;
+        }
+        super.handleOnDestroy();
+    }
 }

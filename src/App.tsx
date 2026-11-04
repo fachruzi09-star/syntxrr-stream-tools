@@ -55,6 +55,7 @@ import { Radio } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { hideFloatingHud } from './services/nativeCompanionBridge';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -240,6 +241,21 @@ export default function App() {
 
   // Mode Selection
   const handleSelectMode = async (mode: OperatingMode) => {
+    const isCurrentModeA =
+      settings.operatingMode === 'MODE_A_TIKTOK_COMPANION' ||
+      settings.operatingMode === 'MODE_A_OVERLAY';
+    const isTargetModeB =
+      mode === 'MODE_B_STREAMING_ENCODER' ||
+      mode === 'MODE_B_ENCODER';
+
+    if (isCurrentModeA && isTargetModeB) {
+      try {
+        await hideFloatingHud();
+      } catch (err) {
+        console.warn('Gagal menyembunyikan Floating HUD saat berpindah ke Mode B:', err);
+      }
+    }
+
     const updated = { ...settings, operatingMode: mode };
     setSettings(updated);
     await StorageService.saveSettings(updated);

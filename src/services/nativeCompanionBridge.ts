@@ -6,7 +6,7 @@
  * Provides safe, truthful fallbacks for desktop and standard browser environments.
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 export interface OverlayPermissionResult {
   granted: boolean;
@@ -31,6 +31,12 @@ export interface CompanionStatusResult {
   message?: string;
 }
 
+export interface FloatingHudStatusResult {
+  success?: boolean;
+  isVisible: boolean;
+  message?: string;
+}
+
 export interface FloatingCompanionPluginInterface {
   checkOverlayPermission(): Promise<{ granted: boolean }>;
   requestOverlayPermission(): Promise<{ granted: boolean; openedSettings: boolean }>;
@@ -50,6 +56,14 @@ export interface FloatingCompanionPluginInterface {
     message: string;
   }>;
   isCompanionRunning(): Promise<{ isRunning: boolean }>;
+  // Phase 4.3B: Native Floating HUD Methods
+  showFloatingHud(): Promise<FloatingHudStatusResult>;
+  hideFloatingHud(): Promise<FloatingHudStatusResult>;
+  isFloatingHudVisible(): Promise<{ isVisible: boolean }>;
+  addListener(
+    eventName: 'floatingHudClick',
+    listenerFunc: (data: { timestamp: number }) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 // Register the custom Capacitor native plugin
@@ -257,6 +271,109 @@ export async function isCompanionRunning(): Promise<CompanionStatusResult> {
   }
 }
 
+/**
+ * Display the native Android Floating HUD bubble overlay over other apps.
+ * Fallback gracefully in web/browser environment.
+ */
+export async function showFloatingHud(): Promise<FloatingHudStatusResult> {
+  if (!isNativeAndroid()) {
+    return {
+      success: false,
+      isVisible: false,
+      message: 'Floating HUD native hanya didukung saat dijalankan di aplikasi Android (APK).',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.showFloatingHud();
+    return {
+      success: !!res?.success,
+      isVisible: !!res?.isVisible,
+      message: res?.message || 'Floating HUD berhasil ditampilkan.',
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      isVisible: false,
+      message: error?.message || 'Gagal menampilkan Floating HUD.',
+    };
+  }
+}
+
+/**
+ * Hide and remove the native Android Floating HUD bubble overlay from screen.
+ */
+export async function hideFloatingHud(): Promise<FloatingHudStatusResult> {
+  if (!isNativeAndroid()) {
+    return {
+      success: true,
+      isVisible: false,
+      message: 'Floating HUD tidak aktif pada browser.',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.hideFloatingHud();
+    return {
+      success: !!res?.success,
+      isVisible: false,
+      message: res?.message || 'Floating HUD disembunyikan.',
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      isVisible: false,
+      message: error?.message || 'Gagal menyembunyikan Floating HUD.',
+    };
+  }
+}
+
+/**
+ * Check whether the native Android Floating HUD is currently attached and visible.
+ */
+export async function isFloatingHudVisible(): Promise<FloatingHudStatusResult> {
+  if (!isNativeAndroid()) {
+    return {
+      success: true,
+      isVisible: false,
+      message: 'Floating HUD tidak berjalan di lingkungan browser.',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.isFloatingHudVisible();
+    return {
+      success: true,
+      isVisible: !!res?.isVisible,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      isVisible: false,
+      message: error?.message || 'Gagal memeriksa status Floating HUD.',
+    };
+  }
+}
+
+/**
+ * Subscribe to native Floating HUD click events.
+ * Returns a PluginListenerHandle for unsubscribing, or null in non-native environments.
+ */
+export async function onFloatingHudClick(
+  callback: (data: { timestamp: number }) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('floatingHudClick', callback);
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener floatingHudClick:', error);
+    return null;
+  }
+}
+
 export const nativeCompanionBridge = {
   isNativeAndroid,
   checkOverlayPermission,
@@ -266,6 +383,11 @@ export const nativeCompanionBridge = {
   startCompanion,
   stopCompanion,
   isCompanionRunning,
+  // Phase 4.3B HUD Methods
+  showFloatingHud,
+  hideFloatingHud,
+  isFloatingHudVisible,
+  onFloatingHudClick,
 };
 
 export default nativeCompanionBridge;
