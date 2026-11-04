@@ -70,6 +70,14 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify Node version
+        run: node --version
+
       - name: Setup Java
         uses: actions/setup-java@v6
         with:
@@ -94,3 +102,4 @@ jobs:
         with:
           build-root-directory: android
           dependency-graph: generate-and-submit
+          cache-provider: basic
