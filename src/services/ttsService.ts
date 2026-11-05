@@ -247,7 +247,18 @@ class TTSService {
   }
 
   speak(text: string, force = false): boolean {
-    if (!this.synth || (!this.config.enabled && !force)) {
+    if (!this.config.enabled && !force) {
+      return false;
+    }
+
+    if (this.native) {
+      // Fire-and-forget so the public synchronous API is preserved; the
+      // promise updates this.status truthfully once resolved.
+      void this.speakNative(text);
+      return true;
+    }
+
+    if (!this.synth) {
       return false;
     }
 
