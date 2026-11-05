@@ -65,4 +65,11 @@
     <!-- Mode A Companion Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Camera & Microphone Permissions (Studio camera element, WebView getUserMedia) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 </manifest>
