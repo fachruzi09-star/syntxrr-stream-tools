@@ -160,16 +160,28 @@ class TTSService {
   }
 
   isAvailable(): boolean {
-    return this.synth !== null;
+    return this.native || this.synth !== null;
   }
 
   /**
-   * Unlocks the speech synthesis engine via a user gesture.
-   * On Android WebView, speechSynthesis is blocked until the first
-   * user interaction triggers a speak() call. This sends a silent
-   * utterance to prime the engine.
+   * Primes the engine.
+   * - Native Android: initializes NativeTtsManager and reads back the real
+   *   engine state. Never returns true unless the engine confirms readiness.
+   * - Web: unlocks the speech synthesis engine via a user gesture. On Android
+   *   WebView, speechSynthesis is blocked until the first user interaction
+   *   triggers a speak() call. This sends a silent utterance to prime it.
    */
   prime(): boolean {
+    if (this.native) {
+      // The native engine initializes lazily inside the plugin; an async
+      // refresh is the only truthful source of readiness.
+      this.attachNativeListeners();
+      void this.refreshStatus();
+      // Readiness is confirmed later via events/refreshStatus, so do not
+      // claim success at this point unless it was already verified.
+      return this.nativeReady;
+    }
+
     if (!this.synth) {
       this.status = 'unavailable';
       return false;
@@ -185,10 +197,13 @@ class TTSService {
         this.status = 'ready';
         this.startResumeTimer();
       };
-      primer.onerror = () => {
-        this.primed = true;
-        this.status = 'ready';
-        this.startResumeTimer();
+      primer.onerror = (e) => {
+        // A failed primer means the engine produced no audio: report it
+        // honestly instead of pretending the engine is ready.
+        this.primed = false;
+        this.status = 'error';
+        this.stopResumeTimer();
+        console.warn('TTS primer gagal:', e.error);
       };
       this.synth.speak(primer);
       return true;
