@@ -335,6 +335,13 @@ class TTSService {
   }
 
   stop() {
+    if (this.native) {
+      void nativeStopSpeaking().catch((err) => {
+        console.warn('TTS native tidak dapat dihentikan:', err);
+      });
+      return;
+    }
+
     if (this.synth) {
       this.synth.cancel();
       this.stopResumeTimer();
