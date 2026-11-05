@@ -8,6 +8,7 @@ import {
 import { streamEventBus } from '../services/eventBus';
 import { ttsService } from '../services/ttsService';
 import { soundboardEngine } from '../services/soundboardEngine';
+import { StorageService } from '../services/storage';
 import {
   STATUS_DEFINITIONS,
 } from '../theme/designSystem';
@@ -29,6 +30,7 @@ import {
   Sliders,
   Bell,
   Trash2,
+  Star,
   Check,
   Zap,
 } from 'lucide-react';
@@ -37,12 +39,14 @@ interface LiveCenterViewProps {
   ttsConfig: TTSConfig;
   onUpdateTTSConfig: (config: TTSConfig) => void;
   soundboardItems: SoundboardItem[];
+  onSoundboardItemsChange: (items: SoundboardItem[]) => Promise<void>;
 }
 
 export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   ttsConfig,
   onUpdateTTSConfig,
   soundboardItems,
+  onSoundboardItemsChange,
 }) => {
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [customUsername, setCustomUsername] = useState('Sultan_Streaming');
@@ -86,10 +90,87 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     ttsService.speak(testVoiceText, true);
   };
 
-  const handlePlaySoundboard = (synthType?: 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell') => {
-    if (synthType) {
-      soundboardEngine.playSynthesizedSFX(synthType);
+  const handlePlaySoundboard = (itemOrType: SoundboardItem | 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell') => {
+    if (typeof itemOrType === 'string') {
+      soundboardEngine.playSynthesizedSFX(itemOrType);
+      return;
     }
+    if (itemOrType.audioUrl) {
+      soundboardEngine.playCustomFile(itemOrType.id, itemOrType.audioUrl);
+    } else if (itemOrType.synthType) {
+      soundboardEngine.playSynthesizedSFX(itemOrType.synthType);
+    }
+  };
+
+  const handleImportSound = async (file: File) => {
+    if (!file.type.startsWith('audio/')) return;
+
+    const id = `sb_custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const metadataUrl = URL.createObjectURL(file);
+    const audio = new Audio(metadataUrl);
+    let metadataUrlCleaned = false;
+    const cleanupMetadataAudio = () => {
+      if (metadataUrlCleaned) return;
+      metadataUrlCleaned = true;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      URL.revokeObjectURL(metadataUrl);
+    };
+    const durationSec = await new Promise<number>((resolve) => {
+      let settled = false;
+      let timeoutId = 0;
+      const settle = (duration: number) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        cleanupMetadataAudio();
+        resolve(duration);
+      };
+
+      audio.onloadedmetadata = () => {
+        settle(Math.max(1, Math.round(audio.duration || 1)));
+      };
+      audio.onerror = () => {
+        settle(1);
+      };
+      timeoutId = window.setTimeout(() => {
+        settle(1);
+      }, 10_000);
+    });
+
+    const item: SoundboardItem = {
+      id,
+      name: file.name.replace(/\.[^/.]+$/, '') || 'Imported sound',
+      category: 'SFX',
+      icon: 'Volume2',
+      durationSec,
+      isQuickSlot: false,
+    };
+    const nextItems = [...soundboardItems, item];
+    const audioUrl = URL.createObjectURL(file);
+    try {
+      await StorageService.saveSoundboardAudio(id, file);
+      await onSoundboardItemsChange([...nextItems.slice(0, -1), { ...item, audioUrl }]);
+    } catch (error) {
+      URL.revokeObjectURL(audioUrl);
+      await StorageService.deleteSoundboardAudio(id);
+      throw error;
+    }
+  };
+
+  const handleDeleteSound = async (item: SoundboardItem) => {
+    if (!item.id.startsWith('sb_custom_')) return;
+    soundboardEngine.removeCustomFile(item.id);
+    await StorageService.deleteSoundboardAudio(item.id);
+    await onSoundboardItemsChange(soundboardItems.filter((candidate) => candidate.id !== item.id));
+  };
+
+  const updateImportedSound = async (item: SoundboardItem, updates: Partial<SoundboardItem>) => {
+    const nextItems = soundboardItems.map((candidate) =>
+      candidate.id === item.id ? { ...candidate, ...updates } : candidate,
+    );
+    await onSoundboardItemsChange(nextItems);
   };
 
   const handleClearHistory = () => {
@@ -470,9 +551,22 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                     <span>Soundboard Efek Suara Prosedural</span>
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Efek suara disintesis langsung menggunakan Web Audio API tanpa perlu unduhan file berat.
+                    Efek prosedural tetap tersedia, dan file audio pendek dapat diimpor lalu disimpan di perangkat ini.
                   </p>
                 </div>
+                <label className="shrink-0 px-3 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold cursor-pointer transition">
+                  Impor Audio
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void handleImportSound(file);
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                </label>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
@@ -499,6 +593,56 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   </button>
                 ))}
               </div>
+
+              {soundboardItems.some((item) => item.id.startsWith('sb_custom_')) && (
+                <div className="pt-3 border-t border-[#1e293b] space-y-2">
+                  <h4 className="text-xs font-bold text-slate-300">Audio Diimpor</h4>
+                  <div className="space-y-2">
+                    {soundboardItems.filter((item) => item.id.startsWith('sb_custom_')).map((item) => (
+                      <div key={item.id} className="flex items-center gap-2 rounded-xl bg-[#080c16] border border-[#1e293b] p-2.5">
+                        <button
+                          onClick={() => handlePlaySoundboard(item)}
+                          className="flex-1 min-w-0 flex items-center gap-2 text-left hover:text-blue-300 transition"
+                          aria-label={`Putar ${item.name}`}
+                        >
+                          <Play className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+                          <span className="text-xs font-semibold text-white truncate">{item.name}</span>
+                          <span className="text-[10px] text-slate-500 shrink-0">{item.durationSec}s</span>
+                        </button>
+                        <button
+                          onClick={() => void updateImportedSound(item, { isFavorite: !item.isFavorite })}
+                          className={`p-1.5 transition ${item.isFavorite ? 'text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
+                          aria-label={`${item.isFavorite ? 'Hapus dari' : 'Tambahkan ke'} favorit ${item.name}`}
+                          aria-pressed={item.isFavorite}
+                        >
+                          <Star className={`w-3.5 h-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
+                        </button>
+                        <select
+                          value={item.isQuickSlot ? String(item.quickSlotKey ?? '') : ''}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            void updateImportedSound(item, value ? { isQuickSlot: true, quickSlotKey: Number(value) } : { isQuickSlot: false, quickSlotKey: undefined });
+                          }}
+                          className="bg-[#111b2e] border border-[#1e293b] rounded-md px-1.5 py-1 text-[10px] text-slate-300"
+                          aria-label={`Quick Slot untuk ${item.name}`}
+                        >
+                          <option value="">Slot</option>
+                          {[1, 2, 3, 4].map((slot) => (
+                            <option key={slot} value={slot}>Q{slot}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => void handleDeleteSound(item)}
+                          className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                          aria-label={`Hapus ${item.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

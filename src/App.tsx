@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ActiveNav,
   NavigationTab,
@@ -34,6 +34,7 @@ import {
 } from './services/storage';
 import { audioEngine } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
+import { dispatchSoundboard } from './services/soundboardDispatcher';
 import { ttsService, DEFAULT_TTS_CONFIG } from './services/ttsService';
 import { streamEventBus } from './services/eventBus';
 import { Header } from './components/Header';
@@ -73,6 +74,7 @@ export default function App() {
 
   // Soundboard & TTS State
   const [soundboardItems, setSoundboardItems] = useState<SoundboardItem[]>(DEFAULT_SOUNDBOARD);
+  const previousSoundboardUrls = useRef<Map<string, string>>(new Map());
   const [ttsConfig, setTTSConfig] = useState<TTSConfig>(DEFAULT_TTS_CONFIG);
 
   // Marketplace & Integrations State
@@ -137,7 +139,13 @@ export default function App() {
         setActivePresetId(savedActivePresetId);
         const sanitizedElements = ensureUniqueElementIds(savedStudioElements);
         setStudioElements(sanitizedElements);
-        setSoundboardItems(savedSoundboard);
+        const hydratedSoundboard = await Promise.all(
+          savedSoundboard.map(async (item) => {
+            const audioBlob = await StorageService.getSoundboardAudio(item.id);
+            return audioBlob ? { ...item, audioUrl: URL.createObjectURL(audioBlob) } : item;
+          }),
+        );
+        setSoundboardItems(hydratedSoundboard);
         setMarketplaceItems(savedMarketplace);
         setIntegrations(savedIntegrations);
         setTTSConfig(savedTTSConfig);
@@ -164,6 +172,29 @@ export default function App() {
     }
 
     loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    const activeUrls = new Map(
+      soundboardItems
+        .filter((item) => item.audioUrl)
+        .map((item) => [item.id, item.audioUrl as string]),
+    );
+    previousSoundboardUrls.current.forEach((url, id) => {
+      if (activeUrls.get(id) !== url) {
+        soundboardEngine.removeCustomFile(id);
+        URL.revokeObjectURL(url);
+      }
+    });
+    previousSoundboardUrls.current = activeUrls;
+  }, [soundboardItems]);
+
+  useEffect(() => () => {
+    previousSoundboardUrls.current.forEach((url, id) => {
+      soundboardEngine.removeCustomFile(id);
+      URL.revokeObjectURL(url);
+    });
+    previousSoundboardUrls.current.clear();
   }, []);
 
   // Subscribe to Stream Event Bus to display floating overlay alerts
@@ -201,6 +232,47 @@ export default function App() {
       window.removeEventListener('keydown', primeTTS);
     };
   }, []);
+
+  // Quick Slots keyboard shortcuts
+  useEffect(() => {
+    const handleQuickSlotKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.isComposing) return;
+
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable ||
+          target.closest(
+            '[contenteditable="true"], button, a[href], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="slider"], [role="dialog"], [aria-haspopup], [tabindex]:not([tabindex="-1"])'
+          )
+        )
+      ) {
+        return;
+      }
+
+      const slot = Number(event.key);
+      if (!Number.isInteger(slot) || slot < 1 || slot > 4) return;
+
+      void dispatchSoundboard(slot, soundboardItems, settings.soundboardVolume ?? 0.85).then((result) => {
+        switch (result.status) {
+          case 'played':
+            return;
+          case 'not_found':
+            if (result.reason === 'slot_collision') return;
+            return;
+          case 'invalid_audio':
+          case 'error':
+            return;
+        }
+      });
+    };
+
+    window.addEventListener('keydown', handleQuickSlotKeyDown);
+    return () => window.removeEventListener('keydown', handleQuickSlotKeyDown);
+  }, [settings.soundboardVolume, soundboardItems]);
 
   // Android Native Hardware Back Button & Status Bar Handling (Capacitor)
   useEffect(() => {
@@ -646,6 +718,11 @@ export default function App() {
 
   const handleResetDefaults = async () => {
     if (window.confirm('Apakah Anda yakin ingin mengembalikan seluruh pengaturan ke default?')) {
+      soundboardItems.forEach((item) => {
+        soundboardEngine.removeCustomFile(item.id);
+        if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
+      });
+      previousSoundboardUrls.current.clear();
       await StorageService.resetToDefaults();
       setSettings(DEFAULT_SETTINGS);
       setPresets(DEFAULT_PRESETS);
@@ -807,11 +884,15 @@ export default function App() {
         )}
 
         {(activeNav === 'live_center' || (activeNav as string) === 'alerts') && (
-          <LiveCenterView
-            ttsConfig={ttsConfig}
-            onUpdateTTSConfig={handleUpdateTTSConfig}
-            soundboardItems={soundboardItems}
-          />
+        <LiveCenterView
+          ttsConfig={ttsConfig}
+          onUpdateTTSConfig={handleUpdateTTSConfig}
+          soundboardItems={soundboardItems}
+          onSoundboardItemsChange={async (items) => {
+            setSoundboardItems(items);
+            await StorageService.saveSoundboard(items);
+          }}
+        />
         )}
 
         {activeNav === 'music' && (
