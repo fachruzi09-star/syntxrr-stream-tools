@@ -1,7 +1,18 @@
 // Layanan Text-to-Speech (TTS) — SYNTXRR STREAM
-// Web Speech API with Android WebView gesture-unlock, queue management, and resume logic.
+// Native Android engine (NativeAudioPlugin / NativeTtsManager) as the primary
+// path, with the Web Speech API kept as the fallback for non-Android runtimes.
+// The service never reports 'ready' unless the engine state is confirmed.
 
 import { TTSConfig } from '../types';
+import {
+  isNativeAndroid,
+  speak as nativeSpeak,
+  stopSpeaking as nativeStopSpeaking,
+  getAudioStatus,
+  onTtsStart,
+  onTtsDone,
+  onTtsError,
+} from './nativeAudioBridge';
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   enabled: true,
