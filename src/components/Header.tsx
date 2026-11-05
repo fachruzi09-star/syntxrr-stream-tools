@@ -28,7 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isModeA = operatingMode === 'MODE_A_TIKTOK_COMPANION' || operatingMode === 'MODE_A_OVERLAY';
 
   return (
-    <header className="sticky top-0 z-30 bg-[#080c16]/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3">
+    <header className="pt-safe sticky top-0 z-30 bg-[#080c16]/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3">
       {/* Zone 1: Single element brand wordmark */}
       <div className="flex items-center gap-2.5 shrink-0">
         <button

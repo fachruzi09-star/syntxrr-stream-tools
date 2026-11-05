@@ -47,6 +47,10 @@ body {
 .animate-bar-5 { animation: barBounce 0.95s ease-in-out 0.35s infinite alternate; }
 
 /* Safe padding for modern devices */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 16px);
 }
