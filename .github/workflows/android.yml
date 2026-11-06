@@ -8,7 +8,7 @@ on:
       - appjet
     paths:
       - 'android/**'
-        - 'src/**'
+      - 'src/**'
       - 'public/**'
       - 'index.html'
       - 'package.json'
