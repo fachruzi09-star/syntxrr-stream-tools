@@ -8,8 +8,9 @@ on:
       - appjet
     paths:
       - 'android/**'
-      - 'src/**'
+        - 'src/**'
       - 'public/**'
+      - 'index.html'
       - 'package.json'
       - 'bun.lock'
       - 'capacitor.config.ts'
