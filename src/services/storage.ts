@@ -519,7 +519,12 @@ async function idbGet<T>(key: string): Promise<T | null> {
   }
 }
 
+function isBlobValue(value: unknown): value is Blob {
+  return typeof Blob !== 'undefined' && value instanceof Blob;
+}
+
 async function idbSet<T>(key: string, value: T): Promise<void> {
+  const isBlob = isBlobValue(value);
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -527,17 +532,21 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
       const store = tx.objectStore('store');
       const request = store.put(value, key);
       request.onsuccess = () => {
-        try {
-          localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
-        } catch {}
+        if (!isBlob) {
+          try {
+            localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
+          } catch {}
+        }
         resolve();
       };
       request.onerror = () => reject(request.error);
     });
   } catch {
-    try {
-      localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
-    } catch {}
+    if (!isBlob) {
+      try {
+        localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
+      } catch {}
+    }
   }
 }
 
@@ -609,6 +618,60 @@ export const StorageService = {
 
   async saveSoundboard(items: SoundboardItem[]): Promise<void> {
     await idbSet('soundboard_items', items);
+  },
+
+  async getSoundboardAudio(id: string): Promise<Blob | null> {
+    return idbGet<Blob>(`soundboard_audio_${id}`);
+  },
+
+  async saveSoundboardAudio(id: string, file: Blob): Promise<void> {
+    await idbSet(`soundboard_audio_${id}`, file);
+  },
+
+  async deleteSoundboardAudio(id: string): Promise<void> {
+    try {
+      const db = await openDB();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('store', 'readwrite');
+        const request = tx.objectStore('store').delete(`soundboard_audio_${id}`);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    } catch {}
+
+    try {
+      localStorage.removeItem(`syntxrr_soundboard_audio_${id}`);
+    } catch {}
+  },
+
+  async deleteAllSoundboardAudio(): Promise<void> {
+    try {
+      const db = await openDB();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('store', 'readwrite');
+        const store = tx.objectStore('store');
+        const request = store.openCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) {
+            resolve();
+            return;
+          }
+          if (typeof cursor.key === 'string' && cursor.key.startsWith('soundboard_audio_')) {
+            cursor.delete();
+          }
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch {
+      try {
+        for (let index = 0; index < localStorage.length; index += 1) {
+          const key = localStorage.key(index);
+          if (key?.startsWith('syntxrr_soundboard_audio_')) localStorage.removeItem(key);
+        }
+      } catch {}
+    }
   },
 
   // MARKETPLACE
@@ -772,6 +835,7 @@ export const StorageService = {
   },
 
   async resetToDefaults(): Promise<void> {
+    await this.deleteAllSoundboardAudio();
     await this.saveSettings(DEFAULT_SETTINGS);
     await this.savePresets(DEFAULT_PRESETS);
     await this.saveActivePresetId(DEFAULT_PRESETS[0].id);

@@ -1,7 +1,18 @@
 // Layanan Text-to-Speech (TTS) — SYNTXRR STREAM
-// Web Speech API with Android WebView gesture-unlock, queue management, and resume logic.
+// Native Android engine (NativeAudioPlugin / NativeTtsManager) as the primary
+// path, with the Web Speech API kept as the fallback for non-Android runtimes.
+// The service never reports 'ready' unless the engine state is confirmed.
 
 import { TTSConfig } from '../types';
+import {
+  isNativeAndroid,
+  speak as nativeSpeak,
+  stopSpeaking as nativeStopSpeaking,
+  getAudioStatus,
+  onTtsStart,
+  onTtsDone,
+  onTtsError,
+} from './nativeAudioBridge';
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   enabled: true,
@@ -19,6 +30,10 @@ type TTSStatus = 'unavailable' | 'not_primed' | 'ready' | 'error';
 
 class TTSService {
   private config: TTSConfig = { ...DEFAULT_TTS_CONFIG };
+  // Native Android is the primary path; Web Speech is the fallback.
+  private readonly native = isNativeAndroid();
+  private nativeReady = false;
+  private nativeListenersAttached = false;
   private synth: SpeechSynthesis | null = null;
   private voices: SpeechSynthesisVoice[] = [];
   private primed = false;
@@ -29,6 +44,15 @@ class TTSService {
   private resumeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
+    if (this.native) {
+      // The native engine lives in NativeTtsManager; it is never 'ready'
+      // until getAudioStatus() confirms it. Start as 'not_primed'.
+      this.status = 'not_primed';
+      this.attachNativeListeners();
+      void this.refreshStatus();
+      return;
+    }
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       this.synth = window.speechSynthesis;
       this.status = 'not_primed';
@@ -39,6 +63,78 @@ class TTSService {
           this.voiceLoadRetries = 0;
         };
       }
+    }
+  }
+
+  /** Subscribe to native utterance lifecycle events once. */
+  private attachNativeListeners() {
+    if (this.nativeListenersAttached || !this.native) return;
+    this.nativeListenersAttached = true;
+
+    void onTtsStart(() => {
+      this.nativeReady = true;
+      this.status = 'ready';
+    });
+    void onTtsDone(() => {
+      // Completion does not clear readiness, but it must not invent it either.
+      if (this.nativeReady) this.status = 'ready';
+    });
+    void onTtsError((data) => {
+      this.nativeReady = false;
+      this.status = 'error';
+      console.warn('TTS native error:', data?.error || 'tidak diketahui');
+    });
+  }
+
+  /**
+   * Ask the native plugin for the real engine state and mirror it into
+   * this.status. Never upgrades to 'ready' without confirmation.
+   */
+  async refreshStatus(): Promise<TTSStatus> {
+    if (!this.native) return this.status;
+    try {
+      const nativeStatus = await getAudioStatus();
+      if (!nativeStatus.isNative) {
+        this.nativeReady = false;
+        this.status = 'unavailable';
+      } else if (nativeStatus.ttsReady) {
+        this.nativeReady = true;
+        this.status = 'ready';
+      } else if (nativeStatus.ttsInitializing) {
+        this.nativeReady = false;
+        this.status = 'not_primed';
+      } else {
+        this.nativeReady = false;
+        this.status = 'error';
+      }
+    } catch {
+      this.nativeReady = false;
+      this.status = 'error';
+    }
+    return this.status;
+  }
+
+  private async speakNative(text: string): Promise<void> {
+    try {
+      const result = await nativeSpeak(text, {
+        rate: this.config.rate,
+        pitch: this.config.pitch,
+        language: this.config.language || 'id-ID',
+        queue: true,
+      });
+      if (!result.isNative || !result.success) {
+        this.nativeReady = false;
+        this.status = 'error';
+        console.warn('TTS native gagal:', result.message || 'tidak diketahui');
+        return;
+      }
+      // A successful call only means the request was accepted (possibly
+      // queued); confirm the engine state before claiming readiness.
+      await this.refreshStatus();
+    } catch (err) {
+      this.nativeReady = false;
+      this.status = 'error';
+      console.warn('TTS native tidak dapat dijalankan:', err);
     }
   }
 
@@ -64,16 +160,28 @@ class TTSService {
   }
 
   isAvailable(): boolean {
-    return this.synth !== null;
+    return this.native || this.synth !== null;
   }
 
   /**
-   * Unlocks the speech synthesis engine via a user gesture.
-   * On Android WebView, speechSynthesis is blocked until the first
-   * user interaction triggers a speak() call. This sends a silent
-   * utterance to prime the engine.
+   * Primes the engine.
+   * - Native Android: initializes NativeTtsManager and reads back the real
+   *   engine state. Never returns true unless the engine confirms readiness.
+   * - Web: unlocks the speech synthesis engine via a user gesture. On Android
+   *   WebView, speechSynthesis is blocked until the first user interaction
+   *   triggers a speak() call. This sends a silent utterance to prime it.
    */
   prime(): boolean {
+    if (this.native) {
+      // The native engine initializes lazily inside the plugin; an async
+      // refresh is the only truthful source of readiness.
+      this.attachNativeListeners();
+      void this.refreshStatus();
+      // Readiness is confirmed later via events/refreshStatus, so do not
+      // claim success at this point unless it was already verified.
+      return this.nativeReady;
+    }
+
     if (!this.synth) {
       this.status = 'unavailable';
       return false;
@@ -89,10 +197,13 @@ class TTSService {
         this.status = 'ready';
         this.startResumeTimer();
       };
-      primer.onerror = () => {
-        this.primed = true;
-        this.status = 'ready';
-        this.startResumeTimer();
+      primer.onerror = (e) => {
+        // A failed primer means the engine produced no audio: report it
+        // honestly instead of pretending the engine is ready.
+        this.primed = false;
+        this.status = 'error';
+        this.stopResumeTimer();
+        console.warn('TTS primer gagal:', e.error);
       };
       this.synth.speak(primer);
       return true;
@@ -136,7 +247,18 @@ class TTSService {
   }
 
   speak(text: string, force = false): boolean {
-    if (!this.synth || (!this.config.enabled && !force)) {
+    if (!this.config.enabled && !force) {
+      return false;
+    }
+
+    if (this.native) {
+      // Fire-and-forget so the public synchronous API is preserved; the
+      // promise updates this.status truthfully once resolved.
+      void this.speakNative(text);
+      return true;
+    }
+
+    if (!this.synth) {
       return false;
     }
 
@@ -213,6 +335,13 @@ class TTSService {
   }
 
   stop() {
+    if (this.native) {
+      void nativeStopSpeaking().catch((err) => {
+        console.warn('TTS native tidak dapat dihentikan:', err);
+      });
+      return;
+    }
+
     if (this.synth) {
       this.synth.cancel();
       this.stopResumeTimer();

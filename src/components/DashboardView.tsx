@@ -281,11 +281,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#080c16] border border-slate-800 p-1" role="tablist" aria-label="Pilih mode operasi">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isModeA}
+            aria-controls="mode-a-details"
+            aria-pressed={isModeA}
+            onClick={() => onSelectMode('MODE_A_TIKTOK_COMPANION')}
+            className={`min-h-[42px] rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+              isModeA ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            Mode A
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!isModeA}
+            aria-controls="mode-b-details"
+            aria-pressed={!isModeA}
+            onClick={() => onSelectMode('MODE_B_STREAMING_ENCODER')}
+            className={`min-h-[42px] rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+              !isModeA ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            Mode B
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4">
           {/* Mode A Card */}
           <div
+            id="mode-a-details"
+            role="tabpanel"
+            aria-hidden={!isModeA}
             onClick={() => onSelectMode('MODE_A_TIKTOK_COMPANION')}
-            className={`relative p-5 rounded-2xl border transition-all cursor-pointer ${
+            className={`${isModeA ? '' : 'hidden'} relative p-5 rounded-2xl border transition-all cursor-pointer ${
               isModeA
                 ? 'bg-[#101b33] border-blue-500/80 shadow-lg shadow-blue-950/40 ring-1 ring-blue-500'
                 : 'bg-[#0e1626] border-slate-800 hover:border-slate-700'
@@ -354,8 +386,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Mode B Card */}
           <div
+            id="mode-b-details"
+            role="tabpanel"
+            aria-hidden={isModeA}
             onClick={() => onSelectMode('MODE_B_STREAMING_ENCODER')}
-            className={`relative p-5 rounded-2xl border transition-all cursor-pointer ${
+            className={`${isModeA ? 'hidden' : ''} relative p-5 rounded-2xl border transition-all cursor-pointer ${
               !isModeA
                 ? 'bg-[#101b33] border-blue-500/80 shadow-lg shadow-blue-950/40 ring-1 ring-blue-500'
                 : 'bg-[#0e1626] border-slate-800 hover:border-slate-700'

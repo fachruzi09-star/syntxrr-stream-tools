@@ -185,6 +185,7 @@ export interface SoundboardItem {
   audioUrl?: string; // local object URL or synthesized
   isQuickSlot: boolean;
   quickSlotKey?: number;
+  isFavorite?: boolean;
   synthType?: 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell';
 }
 
