@@ -12,6 +12,11 @@ export type PerformanceProfile = 'battery_saver' | 'balanced' | 'performance';
 
 export type AppTheme = 'navy_dark' | 'obsidian_dark' | 'cyber_slate';
 
+// SETTINGS FOUNDATION
+export type AppLanguage = 'id-ID' | 'en-US';
+
+export type HudPosition = 'left' | 'right';
+
 export type NavigationTab =
   | 'dashboard'
   | 'studio'
@@ -53,6 +58,31 @@ export interface AppSettings {
   tiktokConnected?: boolean;
   // Soundboard & Audio routing
   soundboardVolume?: number;
+
+  // === SETTINGS FOUNDATION (Bagian A–F) ===
+  // A. General
+  language?: AppLanguage;
+  hapticFeedback?: boolean;
+  confirmBeforeEndLive?: boolean;
+  // B. Audio & Microphone
+  microphoneDeviceId?: string;
+  micGain?: number; // 0–200 (%)
+  noiseSuppression?: boolean;
+  micEchoCancellation?: boolean;
+  micAutoGainControl?: boolean;
+  // C. Floating HUD
+  hudEnabled?: boolean;
+  hudButtonSize?: number; // 40–64 (dp)
+  hudOpacity?: number; // 30–100 (%)
+  hudPosition?: HudPosition;
+  hudPanelChat?: boolean;
+  hudPanelSoundboard?: boolean;
+  hudPanelMusic?: boolean;
+  hudPanelMixer?: boolean;
+  hudPanelLiveControl?: boolean;
+  hudPanelSettings?: boolean;
+  // D. Graphics & Device Performance
+  autoApplyRecommendations?: boolean;
 }
 
 // STUDIO & SOURCES DEFINITIONS
