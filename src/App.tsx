@@ -779,6 +779,8 @@ export default function App() {
   };
 
   const handleImportData = async (json: string): Promise<boolean> => {
+    // Selesaikan tulisan settings yang tertunda agar tidak menimpa hasil pemulihan.
+    await flushPendingSettings();
     const success = await StorageService.importData(json);
     if (success) {
       const [reloadedSettings, reloadedPresets, reloadedElements, reloadedIntegrations] = await Promise.all([
