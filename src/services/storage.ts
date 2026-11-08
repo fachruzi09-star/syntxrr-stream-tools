@@ -43,6 +43,30 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tiktokUsername: '',
   tiktokConnected: false,
   soundboardVolume: 0.85,
+  // === SETTINGS FOUNDATION DEFAULTS ===
+  // A. General
+  language: 'id-ID',
+  hapticFeedback: true,
+  confirmBeforeEndLive: true,
+  // B. Audio & Microphone
+  microphoneDeviceId: '',
+  micGain: 100,
+  noiseSuppression: true,
+  micEchoCancellation: true,
+  micAutoGainControl: false,
+  // C. Floating HUD
+  hudEnabled: true,
+  hudButtonSize: 48,
+  hudOpacity: 92,
+  hudPosition: 'right',
+  hudPanelChat: true,
+  hudPanelSoundboard: true,
+  hudPanelMusic: true,
+  hudPanelMixer: true,
+  hudPanelLiveControl: true,
+  hudPanelSettings: true,
+  // D. Graphics & Device Performance
+  autoApplyRecommendations: false,
 };
 
 // INITIAL STUDIO ELEMENTS (Default Layout)
