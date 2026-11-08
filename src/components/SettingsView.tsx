@@ -522,6 +522,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <span>Atur Ulang Pengaturan</span>
           </button>
         </div>
+
+        <p className="text-[11px] text-slate-500 leading-relaxed flex items-start gap-1.5">
+          <ShieldAlert className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+          <span>
+            File cadangan tidak memuat Stream Key, YouTube API key, maupun token Spotify. Kredensial
+            hanya tersimpan di perangkat ini dan tidak pernah ditimpa oleh file cadangan pengguna lain.
+          </span>
+        </p>
       </div>
 
       {/* Informasi Versi & Arsitektur */}
