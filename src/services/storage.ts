@@ -835,7 +835,7 @@ export const StorageService = {
         appName: 'SYNTXRR STREAM',
         version: '3.0.0',
         exportedAt: new Date().toISOString(),
-        settings,
+        settings: omitCredentials(settings),
         presets,
         activePresetId,
         studioElements,
