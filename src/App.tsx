@@ -682,6 +682,7 @@ export default function App() {
 
   // Settings Handlers & Backup Export/Import
   // Phase 2: persistensi settings yang andal (debounce, flush, status nyata)
+  const SETTINGS_SAVE_DEBOUNCE_MS = 400;
   const settingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSettingsRef = useRef<AppSettings | null>(null);
   const pendingSaveResolversRef = useRef<Array<(success: boolean) => void>>([]);

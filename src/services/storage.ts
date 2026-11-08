@@ -855,7 +855,12 @@ export const StorageService = {
   async importData(jsonString: string): Promise<boolean> {
     try {
       const data = JSON.parse(jsonString);
-      if (data.settings) await this.saveSettings(data.settings);
+      if (!data || typeof data !== 'object') return false;
+      if (data.settings && typeof data.settings === 'object') {
+        // Kredensial lokal selalu dipertahankan; hanya field non-sensitif yang dipulihkan.
+        const currentSettings = await this.getSettings();
+        await this.saveSettings(mergeBackupSettings(data.settings, currentSettings));
+      }
       if (Array.isArray(data.presets)) await this.savePresets(data.presets);
       if (data.activePresetId) await this.saveActivePresetId(data.activePresetId);
       if (Array.isArray(data.studioElements)) await this.saveStudioElements(data.studioElements);
