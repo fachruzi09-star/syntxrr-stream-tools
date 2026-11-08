@@ -144,8 +144,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         {saveStatus && (
-          <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-3 py-1.5 rounded-xl flex items-center gap-1.5 self-start sm:self-auto">
-            <Check className="w-4 h-4" /> {saveStatus}
+          <span
+            role="status"
+            aria-live="polite"
+            className={`text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 self-start sm:self-auto border ${
+              saveStatus.kind === 'success'
+                ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800'
+                : saveStatus.kind === 'error'
+                  ? 'text-red-300 bg-red-950/80 border-red-800'
+                  : 'text-slate-300 bg-slate-900/80 border-slate-700'
+            }`}
+          >
+            {saveStatus.kind === 'success' ? (
+              <Check className="w-4 h-4" />
+            ) : saveStatus.kind === 'error' ? (
+              <ShieldAlert className="w-4 h-4" />
+            ) : (
+              <Database className="w-4 h-4" />
+            )}
+            {saveStatus.message}
           </span>
         )}
       </div>

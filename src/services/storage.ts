@@ -576,7 +576,7 @@ export function omitCredentials(settings: AppSettings): Record<string, unknown> 
  * - Field kredensial yang hilang, redacted, null, atau kosong tidak menghapus nilai lokal.
  * - Field non-sensitif yang dikenal tetap dipulihkan (kompatibilitas cadangan lama).
  */
-function mergeBackupSettings(imported: unknown, current: AppSettings): AppSettings {
+export function mergeBackupSettings(imported: unknown, current: AppSettings): AppSettings {
   if (!imported || typeof imported !== 'object' || Array.isArray(imported)) return current;
 
   const merged: Record<string, unknown> = { ...current };
