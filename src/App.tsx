@@ -799,6 +799,8 @@ export default function App() {
 
   const handleResetDefaults = async () => {
     if (window.confirm('Apakah Anda yakin ingin mengembalikan seluruh pengaturan ke default?')) {
+      // Selesaikan tulisan tertunda agar settings lama tidak dibangkitkan setelah reset.
+      await flushPendingSettings();
       soundboardItems.forEach((item) => {
         soundboardEngine.removeCustomFile(item.id);
         if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);

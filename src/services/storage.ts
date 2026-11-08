@@ -873,7 +873,7 @@ export const StorageService = {
       if (Array.isArray(data.scenes)) await this.saveScenes(data.scenes);
       return true;
     } catch (e) {
-      console.error('Gagal memulihkan backup data:', e);
+      console.error('Gagal memulihkan backup data:', e instanceof Error ? e.message : 'unknown error');
       return false;
     }
   },
