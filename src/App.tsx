@@ -681,10 +681,88 @@ export default function App() {
   };
 
   // Settings Handlers & Backup Export/Import
-  const handleUpdateSettings = async (newSettings: AppSettings) => {
-    setSettings(newSettings);
-    await StorageService.saveSettings(newSettings);
+  // Phase 2: persistensi settings yang andal (debounce, flush, status nyata)
+  const settingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSettingsRef = useRef<AppSettings | null>(null);
+  const pendingSaveResolversRef = useRef<Array<(success: boolean) => void>>([]);
+  const settingsSaveChainRef = useRef<Promise<boolean>>(Promise.resolve(true));
+
+  const writeSettingsToStorage = (next: AppSettings): Promise<boolean> => {
+    const write = settingsSaveChainRef.current.then(async () => {
+      try {
+        await StorageService.saveSettings(next);
+        return true;
+      } catch (error) {
+        console.error('Gagal menyimpan pengaturan:', error instanceof Error ? error.message : 'unknown error');
+        return false;
+      }
+    });
+    settingsSaveChainRef.current = write.catch(() => false);
+    return write;
   };
+
+  /** Tulis segera semua perubahan settings yang masih tertunda. */
+  const flushPendingSettings = (): Promise<boolean> => {
+    if (settingsSaveTimerRef.current !== null) {
+      clearTimeout(settingsSaveTimerRef.current);
+      settingsSaveTimerRef.current = null;
+    }
+    const resolvers = pendingSaveResolversRef.current;
+    pendingSaveResolversRef.current = [];
+    const pending = pendingSettingsRef.current;
+    pendingSettingsRef.current = null;
+
+    if (!pending) {
+      const inFlight = settingsSaveChainRef.current;
+      resolvers.forEach((resolve) => {
+        void inFlight.then(resolve);
+      });
+      return inFlight;
+    }
+
+    const write = writeSettingsToStorage(pending);
+    resolvers.forEach((resolve) => {
+      void write.then(resolve);
+    });
+    return write;
+  };
+
+  const handleUpdateSettings = (newSettings: AppSettings): Promise<boolean> => {
+    setSettings(newSettings); // UI tetap responsif saat mengetik
+    pendingSettingsRef.current = newSettings; // tulisan terakhir yang menang
+    if (settingsSaveTimerRef.current !== null) clearTimeout(settingsSaveTimerRef.current);
+    return new Promise<boolean>((resolve) => {
+      pendingSaveResolversRef.current.push(resolve);
+      settingsSaveTimerRef.current = setTimeout(() => {
+        settingsSaveTimerRef.current = null;
+        void flushPendingSettings();
+      }, SETTINGS_SAVE_DEBOUNCE_MS);
+    });
+  };
+
+  // Pastikan tulisan tertunda tidak hilang saat app di-background atau ditutup.
+  useEffect(() => {
+    const flushPending = () => {
+      if (settingsSaveTimerRef.current !== null) {
+        clearTimeout(settingsSaveTimerRef.current);
+        settingsSaveTimerRef.current = null;
+      }
+      const pending = pendingSettingsRef.current;
+      pendingSettingsRef.current = null;
+      if (pending) void writeSettingsToStorage(pending);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPending();
+    };
+    window.addEventListener('beforeunload', flushPending);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', flushPending);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushPending();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExportData = async () => {
     const jsonString = await StorageService.exportAllData();

@@ -550,6 +550,45 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
   }
 }
 
+// ============================================================
+// PERLINDUNGAN KREDENSIAL PADA CADANGAN (Phase 1)
+// Kredensial sensitif tidak pernah ditulis ke file cadangan dan tidak
+// pernah dipulihkan dari file cadangan (milik pengguna/perangkat lain).
+// ============================================================
+export const CREDENTIAL_SETTING_KEYS = ['streamKey', 'youtubeApiKey', 'spotifyAccessToken'] as const;
+export type CredentialSettingKey = (typeof CREDENTIAL_SETTING_KEYS)[number];
+
+const isCredentialSettingKey = (key: string): key is CredentialSettingKey =>
+  (CREDENTIAL_SETTING_KEYS as readonly string[]).includes(key);
+
+/** Salinan settings tanpa field kredensial, untuk ditulis ke file cadangan. */
+function omitCredentials(settings: AppSettings): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = { ...settings };
+  for (const key of CREDENTIAL_SETTING_KEYS) {
+    delete sanitized[key];
+  }
+  return sanitized;
+}
+
+/**
+ * Gabungkan settings dari file cadangan dengan settings lokal perangkat ini.
+ * - Kredensial lokal selalu dipertahankan dan tidak pernah ditimpa file cadangan.
+ * - Field kredensial yang hilang, redacted, null, atau kosong tidak menghapus nilai lokal.
+ * - Field non-sensitif yang dikenal tetap dipulihkan (kompatibilitas cadangan lama).
+ */
+function mergeBackupSettings(imported: unknown, current: AppSettings): AppSettings {
+  if (!imported || typeof imported !== 'object' || Array.isArray(imported)) return current;
+
+  const merged: Record<string, unknown> = { ...current };
+  for (const [key, value] of Object.entries(imported as Record<string, unknown>)) {
+    if (isCredentialSettingKey(key)) continue; // kredensial lokal selalu menang
+    if (!(key in DEFAULT_SETTINGS)) continue; // abaikan key yang tidak dikenal
+    if (value === undefined || value === null) continue; // jangan menghapus nilai lokal
+    merged[key] = value;
+  }
+  return merged as AppSettings;
+}
+
 export const StorageService = {
   // SETTINGS
   async getSettings(): Promise<AppSettings> {
