@@ -562,7 +562,7 @@ const isCredentialSettingKey = (key: string): key is CredentialSettingKey =>
   (CREDENTIAL_SETTING_KEYS as readonly string[]).includes(key);
 
 /** Salinan settings tanpa field kredensial, untuk ditulis ke file cadangan. */
-function omitCredentials(settings: AppSettings): Record<string, unknown> {
+export function omitCredentials(settings: AppSettings): Record<string, unknown> {
   const sanitized: Record<string, unknown> = { ...settings };
   for (const key of CREDENTIAL_SETTING_KEYS) {
     delete sanitized[key];

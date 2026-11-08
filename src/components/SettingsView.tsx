@@ -23,9 +23,16 @@ import {
   Volume2,
 } from 'lucide-react';
 
+type SaveStatusKind = 'pending' | 'success' | 'error';
+
+interface SaveStatus {
+  message: string;
+  kind: SaveStatusKind;
+}
+
 interface SettingsViewProps {
   settings: AppSettings;
-  onUpdateSettings: (newSettings: AppSettings) => void;
+  onUpdateSettings: (newSettings: AppSettings) => Promise<boolean>;
   onExportData: () => Promise<void>;
   onImportData: (json: string) => Promise<boolean>;
   onResetDefaults: () => Promise<void>;
@@ -40,31 +47,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const [showStreamKey, setShowStreamKey] = useState(false);
   const [showYouTubeKey, setShowYouTubeKey] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Phase 2: status hanya ditampilkan setelah persistensi benar-benar selesai.
+  const latestSettingsRef = useRef(settings);
+  const statusTimerRef = useRef<number | null>(null);
+  const saveRequestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    latestSettingsRef.current = settings;
+  }, [settings]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (statusTimerRef.current !== null) window.clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = null;
+    };
+  }, []);
+
+  const showSaveStatus = (message: string, kind: SaveStatusKind) => {
+    if (!isMountedRef.current) return;
+    if (statusTimerRef.current !== null) window.clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = null;
+    setSaveStatus({ message, kind });
+    if (kind === 'pending') return;
+    statusTimerRef.current = window.setTimeout(
+      () => {
+        statusTimerRef.current = null;
+        if (isMountedRef.current) setSaveStatus(null);
+      },
+      kind === 'error' ? 6000 : 2000
+    );
+  };
+
+  const persistSettings = async (next: AppSettings) => {
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
+    showSaveStatus('Menyimpan…', 'pending');
+    const success = await onUpdateSettings(next);
+    // Hasil dari permintaan yang sudah usang tidak boleh menimpa status terbaru.
+    if (!isMountedRef.current || requestId !== saveRequestIdRef.current) return;
+    if (success) {
+      showSaveStatus('Tersimpan', 'success');
+    } else {
+      showSaveStatus('Gagal menyimpan — perubahan belum tersimpan di perangkat', 'error');
+    }
+  };
+
   const handleUpdate = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    const updated = { ...settings, [key]: value };
-    onUpdateSettings(updated);
-    setSaveStatus('Tersimpan di IndexedDB');
-    setTimeout(() => setSaveStatus(null), 2000);
+    const updated = { ...latestSettingsRef.current, [key]: value };
+    latestSettingsRef.current = updated;
+    void persistSettings(updated);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target?.result as string;
-      if (content) {
-        const success = await onImportData(content);
-        if (success) {
-          setSaveStatus('Cadangan berhasil dipulihkan!');
-          setTimeout(() => setSaveStatus(null), 2500);
-        } else {
-          alert('Gagal membaca file JSON cadangan.');
-        }
+      if (!content) {
+        showSaveStatus('File cadangan kosong atau tidak dapat dibaca', 'error');
+        return;
       }
+      const success = await onImportData(content);
+      if (!isMountedRef.current) return;
+      if (success) {
+        showSaveStatus('Cadangan dipulihkan — kredensial perangkat ini dipertahankan', 'success');
+      } else {
+        showSaveStatus('Gagal memulihkan cadangan: format JSON tidak valid', 'error');
+      }
+    };
+    reader.onerror = () => {
+      showSaveStatus('Gagal membaca file cadangan', 'error');
     };
     reader.readAsText(file);
   };
