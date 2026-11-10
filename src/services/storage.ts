@@ -43,6 +43,30 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tiktokUsername: '',
   tiktokConnected: false,
   soundboardVolume: 0.85,
+  // === SETTINGS FOUNDATION DEFAULTS ===
+  // A. General
+  language: 'id-ID',
+  hapticFeedback: true,
+  confirmBeforeEndLive: true,
+  // B. Audio & Microphone
+  microphoneDeviceId: '',
+  micGain: 100,
+  noiseSuppression: true,
+  micEchoCancellation: true,
+  micAutoGainControl: false,
+  // C. Floating HUD
+  hudEnabled: true,
+  hudButtonSize: 48,
+  hudOpacity: 92,
+  hudPosition: 'right',
+  hudPanelChat: true,
+  hudPanelSoundboard: true,
+  hudPanelMusic: true,
+  hudPanelMixer: true,
+  hudPanelLiveControl: true,
+  hudPanelSettings: true,
+  // D. Graphics & Device Performance
+  autoApplyRecommendations: false,
 };
 
 // INITIAL STUDIO ELEMENTS (Default Layout)
@@ -550,6 +574,45 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
   }
 }
 
+// ============================================================
+// PERLINDUNGAN KREDENSIAL PADA CADANGAN (Phase 1)
+// Kredensial sensitif tidak pernah ditulis ke file cadangan dan tidak
+// pernah dipulihkan dari file cadangan (milik pengguna/perangkat lain).
+// ============================================================
+export const CREDENTIAL_SETTING_KEYS = ['streamKey', 'youtubeApiKey', 'spotifyAccessToken'] as const;
+export type CredentialSettingKey = (typeof CREDENTIAL_SETTING_KEYS)[number];
+
+const isCredentialSettingKey = (key: string): key is CredentialSettingKey =>
+  (CREDENTIAL_SETTING_KEYS as readonly string[]).includes(key);
+
+/** Salinan settings tanpa field kredensial, untuk ditulis ke file cadangan. */
+export function omitCredentials(settings: AppSettings): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = { ...settings };
+  for (const key of CREDENTIAL_SETTING_KEYS) {
+    delete sanitized[key];
+  }
+  return sanitized;
+}
+
+/**
+ * Gabungkan settings dari file cadangan dengan settings lokal perangkat ini.
+ * - Kredensial lokal selalu dipertahankan dan tidak pernah ditimpa file cadangan.
+ * - Field kredensial yang hilang, redacted, null, atau kosong tidak menghapus nilai lokal.
+ * - Field non-sensitif yang dikenal tetap dipulihkan (kompatibilitas cadangan lama).
+ */
+export function mergeBackupSettings(imported: unknown, current: AppSettings): AppSettings {
+  if (!imported || typeof imported !== 'object' || Array.isArray(imported)) return current;
+
+  const merged: Record<string, unknown> = { ...current };
+  for (const [key, value] of Object.entries(imported as Record<string, unknown>)) {
+    if (isCredentialSettingKey(key)) continue; // kredensial lokal selalu menang
+    if (!(key in DEFAULT_SETTINGS)) continue; // abaikan key yang tidak dikenal
+    if (value === undefined || value === null) continue; // jangan menghapus nilai lokal
+    merged[key] = value;
+  }
+  return merged as AppSettings;
+}
+
 export const StorageService = {
   // SETTINGS
   async getSettings(): Promise<AppSettings> {
@@ -796,7 +859,7 @@ export const StorageService = {
         appName: 'SYNTXRR STREAM',
         version: '3.0.0',
         exportedAt: new Date().toISOString(),
-        settings,
+        settings: omitCredentials(settings),
         presets,
         activePresetId,
         studioElements,
@@ -816,7 +879,12 @@ export const StorageService = {
   async importData(jsonString: string): Promise<boolean> {
     try {
       const data = JSON.parse(jsonString);
-      if (data.settings) await this.saveSettings(data.settings);
+      if (!data || typeof data !== 'object') return false;
+      if (data.settings && typeof data.settings === 'object') {
+        // Kredensial lokal selalu dipertahankan; hanya field non-sensitif yang dipulihkan.
+        const currentSettings = await this.getSettings();
+        await this.saveSettings(mergeBackupSettings(data.settings, currentSettings));
+      }
       if (Array.isArray(data.presets)) await this.savePresets(data.presets);
       if (data.activePresetId) await this.saveActivePresetId(data.activePresetId);
       if (Array.isArray(data.studioElements)) await this.saveStudioElements(data.studioElements);
@@ -829,7 +897,7 @@ export const StorageService = {
       if (Array.isArray(data.scenes)) await this.saveScenes(data.scenes);
       return true;
     } catch (e) {
-      console.error('Gagal memulihkan backup data:', e);
+      console.error('Gagal memulihkan backup data:', e instanceof Error ? e.message : 'unknown error');
       return false;
     }
   },
