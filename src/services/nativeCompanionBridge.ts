@@ -58,6 +58,7 @@ export interface FloatingCompanionPluginInterface {
   isCompanionRunning(): Promise<{ isRunning: boolean }>;
   // Phase 4.3B: Native Floating HUD Methods
   showFloatingHud(options?: FloatingHudOptions): Promise<FloatingHudStatusResult>;
+  updateFloatingHud(options?: FloatingHudOptions): Promise<FloatingHudStatusResult>;
   hideFloatingHud(): Promise<FloatingHudStatusResult>;
   isFloatingHudVisible(): Promise<{ isVisible: boolean }>;
   addListener(
@@ -312,6 +313,39 @@ export async function showFloatingHud(
 }
 
 /**
+ * Terapkan ukuran/opacity/sisi pada bubble yang SEDANG tampil, tanpa hide/show.
+ * Native memakai updateViewLayout pada view yang sama, jadi tidak ada overlay ganda.
+ * Di luar Android (atau saat bubble belum tampil) panggilan ini aman dan tidak
+ * mengubah apa pun.
+ */
+export async function updateFloatingHud(
+  options?: FloatingHudOptions
+): Promise<FloatingHudStatusResult> {
+  if (!isNativeAndroid()) {
+    return {
+      success: false,
+      isVisible: false,
+      message: 'Floating HUD native hanya didukung saat dijalankan di aplikasi Android (APK).',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.updateFloatingHud(options ?? {});
+    return {
+      success: !!res?.success,
+      isVisible: !!res?.isVisible,
+      message: res?.message || 'Tampilan Floating HUD diperbarui.',
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      isVisible: false,
+      message: error?.message || 'Gagal memperbarui Floating HUD.',
+    };
+  }
+}
+
+/**
  * Hide and remove the native Android Floating HUD bubble overlay from screen.
  */
 export async function hideFloatingHud(): Promise<FloatingHudStatusResult> {
@@ -396,6 +430,7 @@ export const nativeCompanionBridge = {
   isCompanionRunning,
   // Phase 4.3B HUD Methods
   showFloatingHud,
+  updateFloatingHud,
   hideFloatingHud,
   isFloatingHudVisible,
   onFloatingHudClick,

@@ -56,6 +56,7 @@ import {
   checkOverlayPermission,
   requestOverlayPermission,
   showFloatingHud,
+  updateFloatingHud,
   hideFloatingHud,
 } from '../services/nativeCompanionBridge';
 import { applyTheme } from '../theme/themeEngine';
@@ -99,19 +100,14 @@ const StatusBadge: React.FC<{ status: UiStatus }> = ({ status }) => {
  * ========================================================================== */
 
 const Section: React.FC<{
-  index: string;
   icon: React.ElementType;
   title: string;
   subtitle: string;
   children: React.ReactNode;
-}> = ({ index, icon: Icon, title, subtitle, children }) => {
-  const { isEnglish } = useTranslation();
+}> = ({ icon: Icon, title, subtitle, children }) => {
   return (
     <section className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
       <div>
-        <div className="text-[10px] font-semibold tracking-wider text-blue-400 uppercase">
-          {isEnglish ? `Section ${index}` : `Bagian ${index}`}
-        </div>
         <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 mt-0.5">
           <Icon className="w-4 h-4 text-blue-400" />
           {title}
@@ -382,6 +378,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Floating HUD
   const [hudMessage, setHudMessage] = useState<string | null>(null);
+
+  /**
+   * Terapkan perubahan ukuran/opacity/sisi ke bubble native yang SEDANG tampil.
+   * Tidak ada hide/show: native memakai updateViewLayout pada view yang sama, jadi
+   * posisi geser pengguna dan status tampil tetap terjaga.
+   */
+  const hudAppearanceSignatureRef = useRef<string>('');
+  useEffect(() => {
+    const sizeDp = settings.hudButtonSize ?? 48;
+    const opacity = settings.hudOpacity ?? 92;
+    const position = (settings.hudPosition ?? 'right') as 'left' | 'right';
+    const signature = `${sizeDp}|${opacity}|${position}`;
+    if (hudAppearanceSignatureRef.current === signature) return;
+    const isBaseline = hudAppearanceSignatureRef.current === '';
+    hudAppearanceSignatureRef.current = signature;
+    if (isBaseline) return; // nilai awal hanya dijadikan baseline, tidak dikirim
+    void updateFloatingHud({ sizeDp, opacity, position }).catch(() => {});
+  }, [settings.hudButtonSize, settings.hudOpacity, settings.hudPosition]);
 
   const nativeAndroid = useMemo(() => isNativeAndroid(), []);
 
@@ -838,30 +852,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       )}
 
       {activeCategory === null && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Dua kolom selalu aktif, termasuk di layar HP sempit (tanpa prefiks sm:) */}
+        <div className="grid grid-cols-2 gap-2.5 w-full">
           {([
-            { id: 'general' as const, index: 'A', title: t('settings.secA.title', 'Umum (General)'), detail: isEnglish ? 'Language, theme, haptics, and end-LIVE confirmation.' : 'Bahasa, tema, getar, dan konfirmasi akhiri siaran.' },
-            { id: 'audio' as const, index: 'B', title: t('settings.secB.title', 'Audio & Mikrofon'), detail: isEnglish ? 'Microphone, test meter, gain, and processing.' : 'Mikrofon, meter tes, gain, dan pemrosesan.' },
-            { id: 'hud' as const, index: 'C', title: t('settings.secC.title', 'Floating HUD'), detail: isEnglish ? 'Bubble size, opacity, side, and six panel menus.' : 'Ukuran bubble, opacity, sisi, dan enam menu panel.' },
-            { id: 'performance' as const, index: 'D', title: t('settings.secD.title', 'Grafis & Performa Perangkat'), detail: isEnglish ? 'Device test, recommendations, manual resolution/FPS/bitrate.' : 'Uji perangkat, rekomendasi, resolusi/FPS/bitrate manual.' },
-            { id: 'system' as const, index: 'E', title: t('settings.secE.title', 'Sistem'), detail: isEnglish ? 'Permissions, storage & cache, diagnostics.' : 'Izin, penyimpanan & cache, diagnostik.' },
+            { id: 'general' as const, title: t('settings.secA.title', 'Umum (General)'), detail: isEnglish ? 'Language, theme, haptics, and end-LIVE confirmation.' : 'Bahasa, tema, getar, dan konfirmasi akhiri siaran.' },
+            { id: 'audio' as const, title: t('settings.secB.title', 'Audio & Mikrofon'), detail: isEnglish ? 'Microphone, test meter, gain, and processing.' : 'Mikrofon, meter tes, gain, dan pemrosesan.' },
+            { id: 'hud' as const, title: t('settings.secC.title', 'Floating HUD'), detail: isEnglish ? 'Bubble size, opacity, side, and six panel menus.' : 'Ukuran bubble, opacity, sisi, dan enam menu panel.' },
+            { id: 'performance' as const, title: t('settings.secD.title', 'Grafis & Performa Perangkat'), detail: isEnglish ? 'Device test, recommendations, manual resolution/FPS/bitrate.' : 'Uji perangkat, rekomendasi, resolusi/FPS/bitrate manual.' },
+            { id: 'system' as const, title: t('settings.secE.title', 'Sistem'), detail: isEnglish ? 'Permissions, storage & cache, diagnostics.' : 'Izin, penyimpanan & cache, diagnostik.' },
           ]).map((category) => (
             <button
               key={category.id}
               type="button"
               onClick={() => setActiveCategory(category.id)}
-              className="text-left p-4 rounded-2xl bg-[#080c16] border border-slate-800 hover:border-blue-500 transition-colors"
+              className="text-left p-3 rounded-2xl bg-[#080c16] border border-slate-800 hover:border-blue-500 transition-colors min-w-0"
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-mono font-semibold text-blue-400">{category.index}</span>
+              <div className="flex items-center justify-end gap-2">
                 <span className="text-[10px] text-slate-500">{isEnglish ? 'Open' : 'Buka'} →</span>
               </div>
-              <div className="mt-1.5 text-sm font-semibold text-white">{category.title}</div>
-              <p className="mt-0.5 text-[11px] text-slate-400 leading-snug">{category.detail}</p>
+              <div className="mt-1 text-[13px] font-semibold text-white leading-snug break-words">{category.title}</div>
+              <p className="mt-0.5 text-[10px] text-slate-400 leading-snug">{category.detail}</p>
             </button>
           ))}
-          {/* Slot kosong sesuai layout yang disetujui */}
-          <div className="hidden sm:block rounded-2xl border border-dashed border-slate-800" aria-hidden="true" />
+          {/* Slot kosong sesuai layout yang disetujui; selalu tampil agar grid tetap 2 kolom */}
+          <div className="rounded-2xl border border-dashed border-slate-800 min-h-[76px]" aria-hidden="true" />
         </div>
       )}
 
@@ -904,7 +918,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ================================ A. GENERAL ================================ */}
       {activeCategory === 'general' && (
       <Section
-        index="A"
+        index=""
         icon={SlidersHorizontal}
         title={t('settings.secA.title', 'Umum (General)')}
         subtitle={t('settings.secA.subtitle', 'Bahasa, tema tampilan, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran')}
@@ -1002,7 +1016,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ========================= B. AUDIO & MICROPHONE ========================= */}
       {activeCategory === 'audio' && (
       <Section
-        index="B"
+        index=""
         icon={Mic}
         title={t('settings.secB.title', 'Audio & Mikrofon')}
         subtitle={t('settings.secB.subtitle', 'Pemilihan perangkat input, tes level mikrofon, sensitivitas, dan pemrosesan suara')}
@@ -1162,7 +1176,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ============================ C. FLOATING HUD ============================ */}
       {activeCategory === 'hud' && (
       <Section
-        index="C"
+        index=""
         icon={PanelRight}
         title={t('settings.secC.title', 'Floating HUD')}
         subtitle={t('settings.secC.subtitle', 'Tombol mengambang kecil dan panel satu tangan yang dipakai bersama Mode A dan Mode B')}
@@ -1255,16 +1269,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <p className="text-[10px] text-slate-500 leading-relaxed">
-          Ukuran, transparansi, dan sisi layar dikirim ke bubble native saat Anda menekan
-          "Tampilkan HUD Native". Posisi akhir tetap bisa digeser langsung oleh pengguna, dan
-          setelah itu posisi diingat oleh WindowManager Android.
+          Ukuran, transparansi, dan sisi layar langsung diterapkan ke bubble native yang sedang
+          tampil — tanpa perlu menyembunyikan HUD lalu menampilkannya lagi. Posisi geser pengguna
+          tetap dipertahankan, dan nilai tersimpan dipakai lagi setelah aplikasi dibuka ulang.
         </p>
 
         <FieldRow
           title={t('settings.hudPosition.title', 'Posisi Tombol')}
           description={t(
             'settings.hudPosition.desc',
-            'Sisi layar tempat tombol mengambang berlabuh saat pertama kali ditampilkan. Setelah itu pengguna bebas menggesernya.'
+            'Sisi layar tempat tombol mengambang berlabuh. Mengubahnya langsung memindahkan bubble yang sedang tampil, dan pengguna tetap bebas menggesernya.'
           )}
           status={nativeAndroid ? 'functional' : 'not_supported'}
         >
@@ -1370,7 +1384,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ================= D. GRAPHICS & DEVICE PERFORMANCE ================= */}
       {activeCategory === 'performance' && (
       <Section
-        index="D"
+        index=""
         icon={Monitor}
         title={t('settings.secD.title', 'Grafis & Performa Perangkat')}
         subtitle={t('settings.secD.subtitle', 'Uji perangkat, rekomendasi, kontrol manual resolusi/FPS/bitrate, dan peringatan risiko')}
@@ -1679,7 +1693,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* =============================== E. SYSTEM =============================== */}
       {activeCategory === 'system' && (
       <Section
-        index="E"
+        index=""
         icon={Lock}
         title={t('settings.secE.title', 'Sistem (System)')}
         subtitle={t('settings.secE.subtitle', 'Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data')}
@@ -1966,7 +1980,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* About tampil langsung di halaman grid, tidak butuh halaman sendiri. */}
       {activeCategory === null && (
       <Section
-        index="F"
+        index=""
         icon={Info}
         title={t('settings.secF.title', 'Tentang SYNTXRR')}
         subtitle={t('settings.secF.subtitle', 'Versi aplikasi, informasi pembaruan, dan lisensi komponen')}
