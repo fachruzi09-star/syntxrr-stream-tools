@@ -774,6 +774,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   /* --------------------------------------------------------------- RENDER */
 
   const warnings = computeWarnings(settings, isEnglish);
+
+  // Phase 5: navigasi kategori (grid dua kolom). null = halaman grid.
+  const [activeCategory, setActiveCategory] = useState<
+    'general' | 'audio' | 'hud' | 'performance' | 'system' | null
+  >(null);
   const hudPanelMenus: Array<{ id: string; name: string; detail: string; status: UiStatus }> = [
     { id: 'chat', name: '1. Chat', detail: isEnglish ? 'Chat, gifts, viewers, and LIVE activity.' : 'Chat, gift, penonton, dan aktivitas LIVE.', status: 'not_connected' },
     { id: 'soundboard', name: '2. Soundboard', detail: isEnglish ? '4–6 favorite sounds sourced from Studio.' : '4–6 suara favorit yang bersumber dari Studio.', status: 'pending' },
@@ -793,7 +798,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {t('settings.title', 'Pengaturan Studio (Settings)')}
           </h1>
           <p className="text-xs text-slate-400">
-            {t('settings.subtitle', 'Satu halaman pengaturan — Umum, Audio, Floating HUD, Grafis, Sistem, dan Tentang')}
+            {t('settings.subtitle', 'Pilih kategori pengaturan. Support dan Tentang tersedia langsung di halaman ini.')}
           </p>
         </div>
 
@@ -821,7 +826,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
+      {/* ================= KATEGORI GRID (2 kolom) ================= */}
+      {activeCategory !== null && (
+        <button
+          type="button"
+          onClick={() => setActiveCategory(null)}
+          className="self-start px-3 py-1.5 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
+        >
+          ← {isEnglish ? 'Back to categories' : 'Kembali ke kategori'}
+        </button>
+      )}
+
+      {activeCategory === null && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {([
+            { id: 'general' as const, index: 'A', title: t('settings.secA.title', 'Umum (General)'), detail: isEnglish ? 'Language, theme, haptics, and end-LIVE confirmation.' : 'Bahasa, tema, getar, dan konfirmasi akhiri siaran.' },
+            { id: 'audio' as const, index: 'B', title: t('settings.secB.title', 'Audio & Mikrofon'), detail: isEnglish ? 'Microphone, test meter, gain, and processing.' : 'Mikrofon, meter tes, gain, dan pemrosesan.' },
+            { id: 'hud' as const, index: 'C', title: t('settings.secC.title', 'Floating HUD'), detail: isEnglish ? 'Bubble size, opacity, side, and six panel menus.' : 'Ukuran bubble, opacity, sisi, dan enam menu panel.' },
+            { id: 'performance' as const, index: 'D', title: t('settings.secD.title', 'Grafis & Performa Perangkat'), detail: isEnglish ? 'Device test, recommendations, manual resolution/FPS/bitrate.' : 'Uji perangkat, rekomendasi, resolusi/FPS/bitrate manual.' },
+            { id: 'system' as const, index: 'E', title: t('settings.secE.title', 'Sistem'), detail: isEnglish ? 'Permissions, storage & cache, diagnostics.' : 'Izin, penyimpanan & cache, diagnostik.' },
+          ]).map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              onClick={() => setActiveCategory(category.id)}
+              className="text-left p-4 rounded-2xl bg-[#080c16] border border-slate-800 hover:border-blue-500 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-mono font-semibold text-blue-400">{category.index}</span>
+                <span className="text-[10px] text-slate-500">{isEnglish ? 'Open' : 'Buka'} →</span>
+              </div>
+              <div className="mt-1.5 text-sm font-semibold text-white">{category.title}</div>
+              <p className="mt-0.5 text-[11px] text-slate-400 leading-snug">{category.detail}</p>
+            </button>
+          ))}
+          {/* Slot kosong sesuai layout yang disetujui */}
+          <div className="hidden sm:block rounded-2xl border border-dashed border-slate-800" aria-hidden="true" />
+        </div>
+      )}
+
+      {/* ================= SUPPORT SYNTXRR (langsung di halaman grid) ================= */}
+      {activeCategory === null && (
+        <div className="p-4 rounded-2xl bg-[#080c16] border border-slate-800 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-white">{isEnglish ? 'Support SYNTXRR' : 'Dukung SYNTXRR'}</span>
+            <StatusBadge status="not_connected" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {([
+              {
+                label: 'Donasi',
+                detail: isEnglish
+                  ? 'Official donation link has not been supplied yet, so this action is intentionally not wired.'
+                  : 'Tautan donasi resmi belum tersedia, jadi tombol ini sengaja belum dihubungkan.',
+              },
+              {
+                label: 'Discord Server',
+                detail: isEnglish
+                  ? 'Official Discord invite has not been supplied yet, so this action is intentionally not wired.'
+                  : 'Undangan Discord resmi belum tersedia, jadi tombol ini sengaja belum dihubungkan.',
+              },
+            ]).map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                disabled
+                className="text-left p-3 rounded-xl bg-[#0e1626] border border-slate-800 disabled:opacity-70"
+              >
+                <div className="text-[11px] font-semibold text-white">{item.label}</div>
+                <p className="mt-0.5 text-[10px] text-slate-500 leading-snug">{item.detail}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ================================ A. GENERAL ================================ */}
+      {activeCategory === 'general' && (
       <Section
         index="A"
         icon={SlidersHorizontal}
@@ -916,8 +997,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </FieldRow>
       </Section>
+      )}
 
       {/* ========================= B. AUDIO & MICROPHONE ========================= */}
+      {activeCategory === 'audio' && (
       <Section
         index="B"
         icon={Mic}
@@ -1074,8 +1157,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
       </Section>
+      )}
 
       {/* ============================ C. FLOATING HUD ============================ */}
+      {activeCategory === 'hud' && (
       <Section
         index="C"
         icon={PanelRight}
@@ -1280,8 +1365,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
       </Section>
+      )}
 
       {/* ================= D. GRAPHICS & DEVICE PERFORMANCE ================= */}
+      {activeCategory === 'performance' && (
       <Section
         index="D"
         icon={Monitor}
@@ -1587,8 +1674,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
       </Section>
+      )}
 
       {/* =============================== E. SYSTEM =============================== */}
+      {activeCategory === 'system' && (
       <Section
         index="E"
         icon={Lock}
@@ -1871,8 +1960,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </Section>
+      )}
 
       {/* ================================ F. ABOUT ================================ */}
+      {/* About tampil langsung di halaman grid, tidak butuh halaman sendiri. */}
+      {activeCategory === null && (
       <Section
         index="F"
         icon={Info}
@@ -1969,6 +2061,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="text-slate-500">{t('settings.about.footer', 'Mobile Streaming Studio & TikTok LIVE Companion')}</div>
         </div>
       </Section>
+      )}
     </div>
   );
 };
