@@ -260,7 +260,7 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
       case 'live':
         return (
           <div className="space-y-3">
-            {operatingMode === 'mode_a' ? (
+            {(operatingMode === 'MODE_A_TIKTOK_COMPANION' || operatingMode === 'MODE_A_OVERLAY') ? (
               <>
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Mode A adalah pendamping TikTok LIVE. Siaran tetap dijalankan dan dikendalikan oleh

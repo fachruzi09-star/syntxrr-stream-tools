@@ -57,7 +57,7 @@ export interface FloatingCompanionPluginInterface {
   }>;
   isCompanionRunning(): Promise<{ isRunning: boolean }>;
   // Phase 4.3B: Native Floating HUD Methods
-  showFloatingHud(): Promise<FloatingHudStatusResult>;
+  showFloatingHud(options?: FloatingHudOptions): Promise<FloatingHudStatusResult>;
   hideFloatingHud(): Promise<FloatingHudStatusResult>;
   isFloatingHudVisible(): Promise<{ isVisible: boolean }>;
   addListener(
