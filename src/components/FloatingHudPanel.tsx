@@ -1,9 +1,19 @@
 /**
  * FloatingHudPanel.tsx
  *
- * Panel yang terbuka saat bubble Floating HUD native ditekan.
+ * Launcher + panel untuk bubble Floating HUD native.
  *
- * Prinsip desain:
+ * Perilaku (revisi akhir):
+ * - Bubble adalah master toggle. Saat bubble ditekan, komponen ini muncul sebagai
+ *   launcher enam ikon kecil (Chat, Soundboard, Music, Audio Mixer, Live Control,
+ *   Settings) di sisi layar yang sama dengan bubble.
+ * - Menekan salah satu ikon membuka HANYA panel fitur itu, berukuran kompak,
+ *   dengan scroll internal bila isinya panjang.
+ * - Tidak ada backdrop penuh layar, tidak ada dimming, tidak ada modal takeover,
+ *   sehingga area menonton TikTok LIVE tetap terpakai.
+ * - Panel tidak pernah bertumpuk: memilih ikon lain menggantikan panel sebelumnya.
+ *
+ * Prinsip lain:
  * - Hanya membungkus state/handler yang SUDAH ada di App.tsx. Tidak ada logika
  *   soundboard, musik, atau mixer yang diduplikasi di sini.
  * - Tidak mengarang kemampuan native. Mode A tidak pernah menampilkan kontrol
@@ -39,6 +49,8 @@ export type HudMixerKey = 'audioVolume' | 'soundboardVolume' | 'micGain';
 export interface FloatingHudPanelProps {
   open: boolean;
   onClose: () => void;
+  /** Sisi layar tempat bubble native berlabuh; launcher mengikuti sisi ini. */
+  bubbleSide?: 'left' | 'right';
   /** Panel yang diizinkan oleh pengaturan (hudPanelChat, hudPanelSoundboard, ...). */
   enabledPanels: HudPanelId[];
   alerts: AlertEvent[];
@@ -83,6 +95,7 @@ function clampPercent(value: number, min = 0, max = 100) {
 export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
   open,
   onClose,
+  bubbleSide = 'right',
   enabledPanels,
   alerts,
   sounds,
@@ -105,13 +118,19 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
     () => (enabledPanels.length > 0 ? enabledPanels : (['chat'] as HudPanelId[])),
     [enabledPanels]
   );
-  const [activePanel, setActivePanel] = useState<HudPanelId>(availablePanels[0]);
+  // null = launcher saja (belum ada panel fitur yang dipilih).
+  const [activePanel, setActivePanel] = useState<HudPanelId | null>(null);
   const [mutedVolume, setMutedVolume] = useState<number | null>(null);
 
-  // Jika pengguna mematikan panel yang sedang aktif, pindah ke panel pertama yang masih ada.
+  // Master toggle dari bubble: setiap kali HUD ditutup, kembali ke kondisi launcher.
   useEffect(() => {
-    if (!availablePanels.includes(activePanel)) {
-      setActivePanel(availablePanels[0]);
+    if (!open) setActivePanel(null);
+  }, [open]);
+
+  // Jika pengguna mematikan panel yang sedang terbuka di Settings, tutup panel itu.
+  useEffect(() => {
+    if (activePanel !== null && !availablePanels.includes(activePanel)) {
+      setActivePanel(null);
     }
   }, [availablePanels, activePanel]);
 
@@ -311,58 +330,77 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
     }
   };
 
+  const anchorClass = bubbleSide === 'left' ? 'left-3' : 'right-3';
+
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 backdrop-blur-[2px]"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Panel Floating HUD"
-      onClick={onClose}
+      className={`fixed bottom-24 z-[60] ${anchorClass} max-w-[calc(100vw-1.5rem)] pointer-events-none`}
+      role="group"
+      aria-label="Floating HUD"
     >
-      <div
-        className="w-full max-w-md mb-0 sm:mb-6 rounded-t-3xl sm:rounded-2xl bg-[#0e1626] border border-slate-800 shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 pt-3 pb-2">
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">Floating HUD</span>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
-            aria-label="Tutup panel"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex gap-1 px-3 pb-2 overflow-x-auto no-scrollbar">
+      {activePanel === null ? (
+        /* ===== Launcher: enam ikon kecil, bukan enam panel besar ===== */
+        <div className="pointer-events-auto grid grid-cols-3 gap-1 p-1.5 rounded-2xl bg-[#0e1626]/95 border border-slate-700 shadow-xl">
           {availablePanels.map((panel) => {
             const meta = PANEL_META[panel];
             const Icon = meta.icon;
-            const isActive = panel === activePanel;
             return (
               <button
                 key={panel}
                 type="button"
                 onClick={() => setActivePanel(panel)}
-                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors ${
-                  isActive
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
-                }`}
+                aria-label={meta.label}
+                className="w-12 h-11 flex flex-col items-center justify-center gap-0.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 active:bg-slate-700 transition-colors"
               >
-                <Icon className="w-3.5 h-3.5" />
-                {meta.label}
+                <Icon className="w-4 h-4" />
+                <span className="text-[8px] leading-none">{meta.label}</span>
               </button>
             );
           })}
         </div>
+      ) : (
+        /* ===== Satu panel fitur aktif, kompak, scroll internal ===== */
+        <div className="pointer-events-auto w-[17rem] max-w-[calc(100vw-1.5rem)] rounded-2xl bg-[#0e1626]/95 border border-slate-700 shadow-xl overflow-hidden">
+          <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-1">
+            <span className="text-[10px] uppercase tracking-wide text-slate-500">Floating HUD</span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+              aria-label="Tutup panel"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
-        <div className="px-4 pb-5 pt-1 min-h-[132px]">{renderPanel()}</div>
-      </div>
+          {/* Strip launcher tetap ringkas dan bisa dipakai berpindah panel */}
+          <div className="flex items-center gap-1 px-2 pb-1.5 overflow-x-auto no-scrollbar">
+            {availablePanels.map((panel) => {
+              const meta = PANEL_META[panel];
+              const Icon = meta.icon;
+              const isActive = panel === activePanel;
+              return (
+                <button
+                  key={panel}
+                  type="button"
+                  onClick={() => setActivePanel(panel)}
+                  aria-label={meta.label}
+                  aria-pressed={isActive}
+                  className={`shrink-0 w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                    isActive
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-slate-800/70 text-slate-400 hover:text-slate-100'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="px-3 pb-3 pt-1 max-h-[42vh] overflow-y-auto">{renderPanel()}</div>
+        </div>
+      )}
     </div>
   );
 };

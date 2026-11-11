@@ -43,7 +43,12 @@ public class FloatingHudManager {
 
     private boolean mIsAttached = false;
 
+    // Geometri aktif bubble (dipakai untuk clamp saat drag dan update in-place)
+    private int mSizePx = 0;
+    private boolean mAlignLeft = false;
+
     // Drag tracking variables
+    private boolean mHasDragged = false;
     private int mInitialX;
     private int mInitialY;
     private float mInitialTouchX;
@@ -148,6 +153,8 @@ public class FloatingHudManager {
             int marginPx = (int) (16 * metrics.density);
             mParams.x = alignLeft ? marginPx : Math.max(0, metrics.widthPixels - viewSizePx - marginPx);
             mParams.y = (int) (120 * metrics.density);
+            mSizePx = viewSizePx;
+            mAlignLeft = alignLeft;
 
             // Terapkan ukuran bubble dan opacity dari pengaturan (sebelumnya selalu 56dp / 100%)
             if (bubbleContainer != null) {
@@ -164,7 +171,7 @@ public class FloatingHudManager {
             }
 
             // 6. Setup touch and drag handling
-            setupTouchListener(mFloatingView, mParams, viewSizePx);
+            setupTouchListener(mFloatingView, mParams);
 
             // 7. Attach to WindowManager
             mWindowManager.addView(mFloatingView, mParams);
@@ -181,6 +188,63 @@ public class FloatingHudManager {
             Log.e(TAG, "Unexpected error adding Floating HUD view: " + e.getMessage(), e);
             mFloatingView = null;
             mIsAttached = false;
+            return false;
+        }
+    }
+
+    /**
+     * Terapkan ukuran, opacity, dan sisi layar pada bubble yang SUDAH tampil.
+     *
+     * Tidak menghapus lalu menambah ulang view, sehingga tidak ada overlay ganda,
+     * tidak ada layar berkedip, dan service tetap satu. Posisi hasil geser pengguna
+     * (sumbu Y) dipertahankan; sumbu X hanya dipindah bila sisi benar-benar berubah.
+     *
+     * @return true bila bubble sedang tampil dan berhasil diperbarui.
+     */
+    public synchronized boolean updateHudAppearance(int sizeDp, int opacityPercent, boolean alignLeft) {
+        if (!mIsAttached || mFloatingView == null || mParams == null || mWindowManager == null) {
+            return false;
+        }
+
+        DisplayMetrics metrics = mContext.getResources().getDisplayMetrics();
+        int clampedSizeDp = Math.min(64, Math.max(40, sizeDp));
+        int viewSizePx = (int) (clampedSizeDp * metrics.density);
+
+        View bubbleContainer = mFloatingView.findViewById(R.id.floating_hud_bubble);
+        if (bubbleContainer != null) {
+            android.view.ViewGroup.LayoutParams bubbleParams = bubbleContainer.getLayoutParams();
+            if (bubbleParams != null) {
+                bubbleParams.width = viewSizePx;
+                bubbleParams.height = viewSizePx;
+                bubbleContainer.setLayoutParams(bubbleParams);
+            }
+        }
+
+        int clampedOpacity = Math.min(100, Math.max(30, opacityPercent));
+        mFloatingView.setAlpha(clampedOpacity / 100f);
+
+        int marginPx = (int) (16 * metrics.density);
+        int maxX = Math.max(0, metrics.widthPixels - viewSizePx);
+        int maxY = Math.max(0, metrics.heightPixels - viewSizePx);
+
+        if (alignLeft != mAlignLeft) {
+            mParams.x = alignLeft ? marginPx : Math.max(0, metrics.widthPixels - viewSizePx - marginPx);
+        } else {
+            // Pertahankan posisi drag, hanya jaga agar tetap di dalam layar.
+            mParams.x = Math.min(Math.max(0, mParams.x), maxX);
+        }
+        mParams.y = Math.min(Math.max(0, mParams.y), maxY);
+
+        mSizePx = viewSizePx;
+        mAlignLeft = alignLeft;
+
+        try {
+            mWindowManager.updateViewLayout(mFloatingView, mParams);
+            Log.d(TAG, "Floating HUD appearance updated in place (size=" + clampedSizeDp
+                    + "dp, opacity=" + clampedOpacity + "%, alignLeft=" + alignLeft + ").");
+            return true;
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "Unable to update Floating HUD layout: " + e.getMessage());
             return false;
         }
     }
@@ -224,7 +288,7 @@ public class FloatingHudManager {
     /**
      * Configure touch listener for drag-and-drop movement and click detection.
      */
-    private void setupTouchListener(@NonNull View view, @NonNull WindowManager.LayoutParams params, int viewSizePx) {
+    private void setupTouchListener(@NonNull View view, @NonNull WindowManager.LayoutParams params) {
         view.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
@@ -238,6 +302,7 @@ public class FloatingHudManager {
                         mInitialY = params.y;
                         mInitialTouchX = event.getRawX();
                         mInitialTouchY = event.getRawY();
+                        mHasDragged = false;
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
@@ -247,10 +312,15 @@ public class FloatingHudManager {
                         int newX = mInitialX + deltaX;
                         int newY = mInitialY + deltaY;
 
+                        // Gerakan melewati ambang berarti drag, bukan tap.
+                        if (Math.abs(deltaX) > CLICK_THRESHOLD_PX || Math.abs(deltaY) > CLICK_THRESHOLD_PX) {
+                            mHasDragged = true;
+                        }
+
                         // Clamp coordinates to safe visible screen bounds
                         DisplayMetrics metrics = mContext.getResources().getDisplayMetrics();
-                        int maxX = Math.max(0, metrics.widthPixels - viewSizePx);
-                        int maxY = Math.max(0, metrics.heightPixels - viewSizePx);
+                        int maxX = Math.max(0, metrics.widthPixels - mSizePx);
+                        int maxY = Math.max(0, metrics.heightPixels - mSizePx);
 
                         params.x = Math.max(0, Math.min(newX, maxX));
                         params.y = Math.max(0, Math.min(newY, maxY));
@@ -266,8 +336,8 @@ public class FloatingHudManager {
                         float totalDeltaX = Math.abs(event.getRawX() - mInitialTouchX);
                         float totalDeltaY = Math.abs(event.getRawY() - mInitialTouchY);
 
-                        // If touch moved less than threshold, treat as click
-                        if (totalDeltaX < CLICK_THRESHOLD_PX && totalDeltaY < CLICK_THRESHOLD_PX) {
+                        // Hanya gerakan di bawah ambang yang dianggap tap.
+                        if (!mHasDragged && totalDeltaX < CLICK_THRESHOLD_PX && totalDeltaY < CLICK_THRESHOLD_PX) {
                             v.performClick();
                             if (mClickListener != null) {
                                 mClickListener.onHudClick();

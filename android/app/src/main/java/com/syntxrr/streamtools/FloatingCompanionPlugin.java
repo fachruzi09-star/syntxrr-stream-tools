@@ -261,6 +261,66 @@ public class FloatingCompanionPlugin extends Plugin {
         }
     }
 
+    /**
+     * Terapkan ukuran/opacity/sisi pada bubble yang sedang tampil, tanpa hide/show.
+     * Dipanggil dari Settings setiap kali slider atau pilihan sisi berubah.
+     */
+    @PluginMethod
+    public void updateFloatingHud(PluginCall call) {
+        Integer sizeDpOpt = call.getInt("sizeDp", 56);
+        Integer opacityOpt = call.getInt("opacity", 100);
+        String positionOpt = call.getString("position", "right");
+        final int sizeDp = sizeDpOpt != null ? sizeDpOpt : 56;
+        final int opacity = opacityOpt != null ? opacityOpt : 100;
+        final boolean alignLeft = "left".equalsIgnoreCase(positionOpt);
+
+        // Belum tampil: tidak perlu membuat overlay baru, nilai akan dipakai saat showHud.
+        if (mHudManager == null || !mHudManager.isHudVisible()) {
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("isVisible", false);
+            ret.put("updated", false);
+            ret.put("message", "Floating HUD belum tampil; nilai akan dipakai saat ditampilkan.");
+            call.resolve(ret);
+            return;
+        }
+
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        boolean updated = getHudManager().updateHudAppearance(sizeDp, opacity, alignLeft);
+                        JSObject ret = new JSObject();
+                        ret.put("success", true);
+                        ret.put("isVisible", true);
+                        ret.put("updated", updated);
+                        ret.put("message", updated
+                            ? "Tampilan Floating HUD diperbarui."
+                            : "Gagal memperbarui tampilan Floating HUD.");
+                        call.resolve(ret);
+                    } catch (Exception e) {
+                        call.reject("Gagal memperbarui Floating HUD: " + e.getMessage());
+                    }
+                }
+            });
+        } else {
+            try {
+                boolean updated = mHudManager.updateHudAppearance(sizeDp, opacity, alignLeft);
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("isVisible", true);
+                ret.put("updated", updated);
+                ret.put("message", updated
+                    ? "Tampilan Floating HUD diperbarui."
+                    : "Gagal memperbarui tampilan Floating HUD.");
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("Gagal memperbarui Floating HUD: " + e.getMessage());
+            }
+        }
+    }
+
     @PluginMethod
     public void hideFloatingHud(PluginCall call) {
         if (getActivity() != null) {

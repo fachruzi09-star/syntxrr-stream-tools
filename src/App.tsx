@@ -785,8 +785,9 @@ export default function App() {
     let disposed = false;
     let handle: Awaited<ReturnType<typeof onFloatingHudClick>> = null;
 
+    // Bubble adalah master toggle: buka launcher/panel, tekan lagi untuk menutup semuanya.
     onFloatingHudClick(() => {
-      if (!disposed) setIsHudPanelOpen(true);
+      if (!disposed) setIsHudPanelOpen((prev) => !prev);
     })
       .then((registered) => {
         if (disposed) {
@@ -1167,6 +1168,7 @@ export default function App() {
       <FloatingHudPanel
         open={isHudPanelOpen}
         onClose={() => setIsHudPanelOpen(false)}
+        bubbleSide={(settings.hudPosition ?? 'right') as 'left' | 'right'}
         enabledPanels={hudPanels}
         alerts={alertHistory}
         sounds={soundboardItems}
