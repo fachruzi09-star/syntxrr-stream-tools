@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ActiveNav,
   NavigationTab,
@@ -32,6 +32,7 @@ import {
   DEFAULT_MARKETPLACE_ITEMS,
   DEFAULT_INTEGRATIONS,
 } from './services/storage';
+import { triggerHaptic } from './services/haptics';
 import { audioEngine } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
 import { dispatchSoundboard } from './services/soundboardDispatcher';
@@ -68,6 +69,18 @@ export default function App() {
 
   // App Settings
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+
+  /**
+   * Navigation wrapper: gives the haptic feedback toggle a real effect by applying it to
+   * primary navigation. Nothing vibrates while the setting is off or the device cannot vibrate.
+   */
+  const handleNavigate = useCallback(
+    (nav: NavigationTab) => {
+      triggerHaptic(settings, 'light');
+      setActiveNav(nav);
+    },
+    [settings]
+  );
 
   // Studio & Presets State
   const [presets, setPresets] = useState<StudioPreset[]>(DEFAULT_PRESETS);
@@ -894,7 +907,7 @@ export default function App() {
         activeNav={activeNav}
         operatingMode={settings.operatingMode}
         activePreset={activePreset}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         onOpenModeModal={() => setIsModeModalOpen(true)}
         onOpenDrawer={() => setIsDrawerOpen(true)}
       />
@@ -919,7 +932,7 @@ export default function App() {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         activeNav={activeNav}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         pendingMusicCount={pendingRequestsCount}
       />
 
@@ -931,7 +944,7 @@ export default function App() {
             activePreset={activePreset}
             integrations={integrations}
             onSelectMode={handleSelectMode}
-            onNavigate={setActiveNav}
+            onNavigate={handleNavigate}
             onOpenModeModal={() => setIsModeModalOpen(true)}
           />
         )}
@@ -1059,7 +1072,7 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar */}
       <BottomNav
         activeNav={activeNav}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         onOpenDrawer={() => setIsDrawerOpen(true)}
         pendingRequestsCount={pendingRequestsCount}
       />
