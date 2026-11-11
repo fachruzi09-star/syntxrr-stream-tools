@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavigationTab } from '../types';
+import { useTranslation } from '../i18n/I18nContext';
 import {
   X,
   LayoutDashboard,
@@ -28,6 +29,7 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   onNavigate,
   pendingMusicCount = 0,
 }) => {
+  const { t } = useTranslation();
   if (!isOpen) return null;
 
   const modules: {
@@ -39,50 +41,50 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   }[] = [
     {
       id: 'dashboard',
-      label: '1. Dashboard',
-      sublabel: 'Pusat kendali, status hardware, dan telemetri streaming',
+      label: t('drawer.dashboard.title', '1. Dashboard'),
+      sublabel: t('drawer.dashboard.sub', 'Pusat kendali, status hardware, dan telemetri streaming'),
       icon: LayoutDashboard,
     },
     {
       id: 'studio',
-      label: '2. Studio Editor & Presets',
-      sublabel: 'Pusat pemilihan preset, editor canvas 9:16 & 16:9, dan layer compositor',
+      label: t('drawer.studio.title', '2. Studio Editor & Presets'),
+      sublabel: t('drawer.studio.sub', 'Pusat pemilihan preset, editor canvas 9:16 & 16:9, dan layer compositor'),
       icon: Tv,
     },
     {
       id: 'sources',
-      label: '3. Sources & Audio Library',
-      sublabel: 'Pustaka elemen overlay, audio manual, dan widget interaktif',
+      label: t('drawer.sources.title', '3. Sources & Audio Library'),
+      sublabel: t('drawer.sources.sub', 'Pustaka elemen overlay, audio manual, dan widget interaktif'),
       icon: Box,
     },
     {
       id: 'live_center',
-      label: '4. Live Center & Event',
-      sublabel: 'Simulator chat, gift, follow, donasi, dan Text-to-Speech (TTS)',
+      label: t('drawer.live.title', '4. Live Center & Event'),
+      sublabel: t('drawer.live.sub', 'Simulator chat, gift, follow, donasi, dan Text-to-Speech (TTS)'),
       icon: Radio,
     },
     {
       id: 'remote_deck',
-      label: '5. Remote Stream Deck',
-      sublabel: 'Kontroler nirkabel P2P LAN dari HP kedua dengan tombol fisik virtual',
+      label: t('drawer.deck.title', '5. Remote Stream Deck'),
+      sublabel: t('drawer.deck.sub', 'Kontroler nirkabel P2P LAN dari HP kedua dengan tombol fisik virtual'),
       icon: Smartphone,
     },
     {
       id: 'integrations',
-      label: '6. Integrations',
-      sublabel: 'TikTok LIVE, YouTube, Twitch, Saweria, Sociabuzz, Trakteer, BagiBagi',
+      label: t('drawer.integrations.title', '6. Integrations'),
+      sublabel: t('drawer.integrations.sub', 'TikTok LIVE, YouTube, Twitch, Saweria, Sociabuzz, Trakteer, BagiBagi'),
       icon: Share2,
     },
     {
       id: 'marketplace',
-      label: '7. Marketplace',
-      sublabel: 'Koleksi scene, widget donasi, alert pack, dan overlay interaktif',
+      label: t('drawer.marketplace.title', '7. Marketplace'),
+      sublabel: t('drawer.marketplace.sub', 'Koleksi scene, widget donasi, alert pack, dan overlay interaktif'),
       icon: ShoppingBag,
     },
     {
       id: 'settings',
-      label: '8. Settings (Pengaturan)',
-      sublabel: 'Mode streaming, encoder, profil performa, izin Android, dan backup JSON',
+      label: t('drawer.settings.title', '8. Settings (Pengaturan)'),
+      sublabel: t('drawer.settings.sub', 'Mode streaming, encoder, profil performa, izin Android, dan backup JSON'),
       icon: Settings,
     },
   ];
@@ -102,10 +104,10 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-slate-800">
           <div>
             <h2 id="nav-drawer-title" className="text-base font-bold text-white flex items-center gap-2">
-              Menu Modul Studio
+              {t('drawer.title', 'Pusat Navigasi & Fitur')}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Pilih modul produksi SYNTXRR STREAM yang ingin dibuka
+              {t('drawer.subtitle', 'Pilih modul studio siaran yang ingin dikelola')}
             </p>
           </div>
           <button

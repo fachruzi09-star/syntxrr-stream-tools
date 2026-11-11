@@ -57,6 +57,8 @@ import {
   showFloatingHud,
   hideFloatingHud,
 } from '../services/nativeCompanionBridge';
+import { applyTheme } from '../theme/themeEngine';
+import { useTranslation } from '../i18n/I18nContext';
 
 /* ============================================================================
  * STATUS BADGES
@@ -81,10 +83,12 @@ const STATUS_UI: Record<UiStatus, { label: string; className: string }> = {
 };
 
 const StatusBadge: React.FC<{ status: UiStatus }> = ({ status }) => {
+  const { t } = useTranslation();
   const meta = STATUS_UI[status];
+  const label = t(`status.${status}`, meta.label);
   return (
     <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-lg border ${meta.className}`}>
-      {meta.label}
+      {label}
     </span>
   );
 };
@@ -99,19 +103,24 @@ const Section: React.FC<{
   title: string;
   subtitle: string;
   children: React.ReactNode;
-}> = ({ index, icon: Icon, title, subtitle, children }) => (
-  <section className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
-    <div>
-      <div className="text-[10px] font-semibold tracking-wider text-blue-400 uppercase">Bagian {index}</div>
-      <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 mt-0.5">
-        <Icon className="w-4 h-4 text-blue-400" />
-        {title}
-      </h2>
-      <p className="text-xs text-slate-400">{subtitle}</p>
-    </div>
-    {children}
-  </section>
-);
+}> = ({ index, icon: Icon, title, subtitle, children }) => {
+  const { isEnglish } = useTranslation();
+  return (
+    <section className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
+      <div>
+        <div className="text-[10px] font-semibold tracking-wider text-blue-400 uppercase">
+          {isEnglish ? `Section ${index}` : `Bagian ${index}`}
+        </div>
+        <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 mt-0.5">
+          <Icon className="w-4 h-4 text-blue-400" />
+          {title}
+        </h2>
+        <p className="text-xs text-slate-400">{subtitle}</p>
+      </div>
+      {children}
+    </section>
+  );
+};
 
 const FieldRow: React.FC<{
   title: string;
@@ -249,22 +258,42 @@ function recommendProfile(
   return { resolution: '720p', frameRate: 30, bitrateKbps: 2500 };
 }
 
-function computeWarnings(settings: AppSettings): string[] {
+function computeWarnings(settings: AppSettings, isEnglish = false): string[] {
   const warnings: string[] = [];
   if (settings.targetResolution === '1440p' && settings.frameRate === 60) {
-    warnings.push('1440p @ 60 FPS sangat berat untuk sebagian besar ponsel: risiko frame drop dan panas berlebih.');
+    warnings.push(
+      isEnglish
+        ? '1440p @ 60 FPS is very heavy for most mobile phones: risk of frame drops and overheating.'
+        : '1440p @ 60 FPS sangat berat untuk sebagian besar ponsel: risiko frame drop dan panas berlebih.'
+    );
   }
   if (settings.videoBitrateKbps > 8000) {
-    warnings.push('Bitrate video di atas 8000 Kbps sering tidak stabil pada jaringan seluler.');
+    warnings.push(
+      isEnglish
+        ? 'Video bitrate above 8000 Kbps is frequently unstable on cellular networks.'
+        : 'Bitrate video di atas 8000 Kbps sering tidak stabil pada jaringan seluler.'
+    );
   }
   if (settings.targetResolution === '720p' && settings.videoBitrateKbps > 6000) {
-    warnings.push('Bitrate 6000+ Kbps berlebihan untuk 720p: boros bandwidth tanpa tambahan kualitas berarti.');
+    warnings.push(
+      isEnglish
+        ? 'Bitrate 6000+ Kbps is excessive for 720p: bandwidth waste without significant quality gain.'
+        : 'Bitrate 6000+ Kbps berlebihan untuk 720p: boros bandwidth tanpa tambahan kualitas berarti.'
+    );
   }
   if (settings.targetResolution === '1440p' && settings.videoBitrateKbps < 6000) {
-    warnings.push('1440p dengan bitrate di bawah 6000 Kbps akan terlihat pecah.');
+    warnings.push(
+      isEnglish
+        ? '1440p with bitrate under 6000 Kbps will appear pixelated.'
+        : '1440p dengan bitrate di bawah 6000 Kbps akan terlihat pecah.'
+    );
   }
   if (settings.frameRate === 60 && settings.performanceProfile === 'battery_saver') {
-    warnings.push('60 FPS dengan profil Hemat Baterai saling bertentangan.');
+    warnings.push(
+      isEnglish
+        ? '60 FPS contradicts the Battery Saver profile.'
+        : '60 FPS dengan profil Hemat Baterai saling bertentangan.'
+    );
   }
   return warnings;
 }
@@ -315,6 +344,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onImportData,
   onResetDefaults,
 }) => {
+  const { t, isEnglish } = useTranslation();
   const [showStreamKey, setShowStreamKey] = useState(false);
   const [showYouTubeKey, setShowYouTubeKey] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
@@ -383,14 +413,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const persistSettings = async (next: AppSettings) => {
     const requestId = saveRequestIdRef.current + 1;
     saveRequestIdRef.current = requestId;
-    showSaveStatus('Menyimpan…', 'pending');
+    showSaveStatus(t('settings.saving', 'Menyimpan…'), 'pending');
     const success = await onUpdateSettings(next);
     // Hasil dari permintaan yang sudah usang tidak boleh menimpa status terbaru.
     if (!isMountedRef.current || requestId !== saveRequestIdRef.current) return;
     if (success) {
-      showSaveStatus('Tersimpan', 'success');
+      showSaveStatus(t('settings.saved', 'Tersimpan'), 'success');
     } else {
-      showSaveStatus('Gagal menyimpan — perubahan belum tersimpan di perangkat', 'error');
+      showSaveStatus(t('settings.saveFailed', 'Gagal menyimpan — perubahan belum tersimpan di perangkat'), 'error');
     }
   };
 
@@ -445,7 +475,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const startMicTest = async () => {
     setMicError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setMicError('Perangkat ini tidak menyediakan akses mikrofon melalui WebView.');
+      setMicError(
+        isEnglish
+          ? 'This device does not provide microphone access through the WebView.'
+          : 'Perangkat ini tidak menyediakan akses mikrofon melalui WebView.'
+      );
       return;
     }
     try {
@@ -494,8 +528,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       loop();
       void refreshMicDevices();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'tidak diketahui';
-      setMicError(`Gagal mengakses mikrofon: ${message}`);
+      const message = error instanceof Error ? error.message : (isEnglish ? 'unknown' : 'tidak diketahui');
+      setMicError(isEnglish ? `Failed to access microphone: ${message}` : `Gagal mengakses mikrofon: ${message}`);
       stopMicTest();
     }
   };
@@ -511,15 +545,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           const status = await navigator.permissions.query({ name: name as PermissionName });
           next[name] = status.state;
         } else {
-          next[name] = 'tidak dapat diperiksa';
+          next[name] = isEnglish ? 'unable to check' : 'tidak dapat diperiksa';
         }
       } catch {
-        next[name] = 'tidak dapat diperiksa';
+        next[name] = isEnglish ? 'unable to check' : 'tidak dapat diperiksa';
       }
     }
-    next.notifications = typeof Notification !== 'undefined' ? Notification.permission : 'tidak tersedia';
+    next.notifications = typeof Notification !== 'undefined'
+      ? Notification.permission
+      : (isEnglish ? 'unavailable' : 'tidak tersedia');
     setPermissionState(next);
-  }, []);
+  }, [isEnglish]);
 
   useEffect(() => {
     void refreshPermissions();
@@ -529,7 +565,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setPermissionBusy(kind);
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setPermissionState((prev) => ({ ...prev, [kind]: 'tidak tersedia' }));
+        setPermissionState((prev) => ({ ...prev, [kind]: isEnglish ? 'unavailable' : 'tidak tersedia' }));
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia(
@@ -539,8 +575,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       await refreshPermissions();
       void refreshMicDevices();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'ditolak';
-      setPermissionState((prev) => ({ ...prev, [kind]: `ditolak — ${message}` }));
+      const message = error instanceof Error ? error.message : (isEnglish ? 'denied' : 'ditolak');
+      setPermissionState((prev) => ({ ...prev, [kind]: isEnglish ? `denied — ${message}` : `ditolak — ${message}` }));
     } finally {
       setPermissionBusy(null);
     }
@@ -548,7 +584,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const requestNotification = async () => {
     if (typeof Notification === 'undefined') {
-      setPermissionState((prev) => ({ ...prev, notifications: 'tidak tersedia' }));
+      setPermissionState((prev) => ({ ...prev, notifications: isEnglish ? 'unavailable' : 'tidak tersedia' }));
       return;
     }
     try {
@@ -597,17 +633,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const clearAppCache = async () => {
     try {
       if (typeof caches === 'undefined') {
-        setCacheMessage('Cache Storage tidak tersedia pada lingkungan ini.');
+        setCacheMessage(isEnglish ? 'Cache Storage unavailable in this environment.' : 'Cache Storage tidak tersedia pada lingkungan ini.');
         return;
       }
       const keys = await caches.keys();
       await Promise.all(keys.map((key) => caches.delete(key)));
       setCacheMessage(
-        `${keys.length} entri cache aplikasi dihapus. Data IndexedDB, preset, dan pengaturan tidak diubah.`
+        isEnglish
+          ? `${keys.length} application cache entries cleared. IndexedDB data, presets, and settings unchanged.`
+          : `${keys.length} entri cache aplikasi dihapus. Data IndexedDB, preset, dan pengaturan tidak diubah.`
       );
       void refreshStorage();
     } catch {
-      setCacheMessage('Gagal membersihkan cache aplikasi.');
+      setCacheMessage(isEnglish ? 'Failed to clear application cache.' : 'Gagal membersihkan cache aplikasi.');
     }
   };
 
@@ -684,19 +722,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.onload = async (event) => {
       const content = event.target?.result as string;
       if (!content) {
-        showSaveStatus('File cadangan kosong atau tidak dapat dibaca', 'error');
+        showSaveStatus(isEnglish ? 'Backup file is empty or unreadable' : 'File cadangan kosong atau tidak dapat dibaca', 'error');
         return;
       }
       const success = await onImportData(content);
       if (!isMountedRef.current) return;
       if (success) {
-        showSaveStatus('Cadangan dipulihkan — kredensial perangkat ini dipertahankan', 'success');
+        showSaveStatus(isEnglish ? 'Backup restored — device credentials preserved' : 'Cadangan dipulihkan — kredensial perangkat ini dipertahankan', 'success');
       } else {
-        showSaveStatus('Gagal memulihkan cadangan: format JSON tidak valid', 'error');
+        showSaveStatus(isEnglish ? 'Failed to restore backup: invalid JSON format' : 'Gagal memulihkan cadangan: format JSON tidak valid', 'error');
       }
     };
     reader.onerror = () => {
-      showSaveStatus('Gagal membaca file cadangan', 'error');
+      showSaveStatus(isEnglish ? 'Failed to read backup file' : 'Gagal membaca file cadangan', 'error');
     };
     reader.readAsText(file);
   };
@@ -704,42 +742,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   /* --------------------------------------------------------- DIAGNOSTICS */
 
   const diagnosticsLines = [
-    `Aplikasi: SYNTXRR STREAM ${APP_VERSION}`,
+    `${isEnglish ? 'Application' : 'Aplikasi'}: SYNTXRR STREAM ${APP_VERSION}`,
     `Package: com.syntxrr.streamtools`,
-    `Runtime native Android: ${nativeAndroid ? 'ya' : 'tidak'}`,
-    `Platform: ${navigator.platform || 'tidak diketahui'}`,
-    `Logical cores: ${deviceTest?.cores ?? navigator.hardwareConcurrency ?? 'tidak terbaca'}`,
-    `Device memory: ${deviceTest?.memoryGB ?? 'tidak terbaca'} GB`,
-    `WebGL renderer: ${deviceTest?.webglRenderer ?? 'tidak terbaca'}`,
-    `Max texture: ${deviceTest?.maxTextureSize ?? 'tidak terbaca'}`,
-    `Penyimpanan: ${storageInfo ? `${formatBytes(storageInfo.usage)} / ${formatBytes(storageInfo.quota)}` : 'tidak terbaca'}`,
-    `Izin kamera: ${permissionState.camera ?? 'belum diperiksa'}`,
-    `Izin mikrofon: ${permissionState.microphone ?? 'belum diperiksa'}`,
-    `Izin notifikasi: ${permissionState.notifications ?? 'belum diperiksa'}`,
-    `Overlay native: ${overlayGranted === null ? 'tidak berlaku / belum diperiksa' : overlayGranted ? 'diizinkan' : 'belum diizinkan'}`,
-    `Mode aktif: ${settings.operatingMode}`,
-    `User agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'tidak tersedia'}`,
+    `${isEnglish ? 'Native Android runtime' : 'Runtime native Android'}: ${nativeAndroid ? (isEnglish ? 'yes' : 'ya') : (isEnglish ? 'no' : 'tidak')}`,
+    `Platform: ${navigator.platform || (isEnglish ? 'unknown' : 'tidak diketahui')}`,
+    `Logical cores: ${deviceTest?.cores ?? navigator.hardwareConcurrency ?? (isEnglish ? 'unreadable' : 'tidak terbaca')}`,
+    `Device memory: ${deviceTest?.memoryGB ? `${deviceTest.memoryGB} GB` : (isEnglish ? 'unreadable' : 'tidak terbaca')}`,
+    `WebGL renderer: ${deviceTest?.webglRenderer ?? (isEnglish ? 'unreadable' : 'tidak terbaca')}`,
+    `Max texture: ${deviceTest?.maxTextureSize ?? (isEnglish ? 'unreadable' : 'tidak terbaca')}`,
+    `${isEnglish ? 'Storage' : 'Penyimpanan'}: ${storageInfo ? `${formatBytes(storageInfo.usage)} / ${formatBytes(storageInfo.quota)}` : (isEnglish ? 'unreadable' : 'tidak terbaca')}`,
+    `${isEnglish ? 'Camera permission' : 'Izin kamera'}: ${permissionState.camera ?? (isEnglish ? 'not checked' : 'belum diperiksa')}`,
+    `${isEnglish ? 'Microphone permission' : 'Izin mikrofon'}: ${permissionState.microphone ?? (isEnglish ? 'not checked' : 'belum diperiksa')}`,
+    `${isEnglish ? 'Notification permission' : 'Izin notifikasi'}: ${permissionState.notifications ?? (isEnglish ? 'not checked' : 'belum diperiksa')}`,
+    `${isEnglish ? 'Overlay permission' : 'Izin overlay'}: ${overlayGranted === null ? (isEnglish ? 'not applicable / not checked' : 'tidak berlaku / belum diperiksa') : overlayGranted ? (isEnglish ? 'granted' : 'diizinkan') : (isEnglish ? 'not granted' : 'belum diizinkan')}`,
+    `${isEnglish ? 'Active mode' : 'Mode aktif'}: ${settings.operatingMode}`,
+    `User agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : (isEnglish ? 'unavailable' : 'tidak tersedia')}`,
   ];
 
   const copyDiagnostics = async () => {
     try {
       await navigator.clipboard.writeText(diagnosticsLines.join('\n'));
-      setDiagnosticsMessage('Diagnostik disalin ke clipboard.');
+      setDiagnosticsMessage(isEnglish ? 'Diagnostics copied to clipboard.' : 'Diagnostik disalin ke clipboard.');
     } catch {
-      setDiagnosticsMessage('Clipboard tidak tersedia; salin manual dari daftar di bawah.');
+      setDiagnosticsMessage(isEnglish ? 'Clipboard unavailable; copy manually from the list below.' : 'Clipboard tidak tersedia; salin manual dari daftar di bawah.');
     }
   };
 
   /* --------------------------------------------------------------- RENDER */
 
-  const warnings = computeWarnings(settings);
+  const warnings = computeWarnings(settings, isEnglish);
   const hudPanelMenus: Array<{ id: string; name: string; detail: string; status: UiStatus }> = [
-    { id: 'chat', name: '1. Chat', detail: 'Chat, gift, penonton, dan aktivitas LIVE.', status: 'not_connected' },
-    { id: 'soundboard', name: '2. Soundboard', detail: '4–6 suara favorit yang bersumber dari Studio.', status: 'pending' },
-    { id: 'music', name: '3. Music', detail: 'Lagu aktif, antrean, riwayat, Song Request, dan volume.', status: 'pending' },
-    { id: 'mixer', name: '4. Audio Mixer', detail: 'Master, Music, Soundboard, Mic, dan Mute.', status: 'pending' },
-    { id: 'live', name: '5. Live Control', detail: 'Pause, Resume, Stop — hanya jika mode yang dipilih benar-benar mendukung.', status: 'not_connected' },
-    { id: 'settings', name: '6. Settings', detail: 'Membuka konfigurasi Floating HUD pada halaman Settings ini.', status: 'pending' },
+    { id: 'chat', name: '1. Chat', detail: isEnglish ? 'Chat, gifts, viewers, and LIVE activity.' : 'Chat, gift, penonton, dan aktivitas LIVE.', status: 'not_connected' },
+    { id: 'soundboard', name: '2. Soundboard', detail: isEnglish ? '4–6 favorite sounds sourced from Studio.' : '4–6 suara favorit yang bersumber dari Studio.', status: 'pending' },
+    { id: 'music', name: '3. Music', detail: isEnglish ? 'Now playing track, queue, history, Song Request, and volume.' : 'Lagu aktif, antrean, riwayat, Song Request, dan volume.', status: 'pending' },
+    { id: 'mixer', name: '4. Audio Mixer', detail: isEnglish ? 'Master, Music, Soundboard, Mic, and Mute.' : 'Master, Music, Soundboard, Mic, dan Mute.', status: 'pending' },
+    { id: 'live', name: '5. Live Control', detail: isEnglish ? 'Pause, Resume, Stop — only if active mode natively supports it.' : 'Pause, Resume, Stop — hanya jika mode yang dipilih benar-benar mendukung.', status: 'not_connected' },
+    { id: 'settings', name: '6. Settings', detail: isEnglish ? 'Opens Floating HUD configuration within this Settings page.' : 'Membuka konfigurasi Floating HUD pada halaman Settings ini.', status: 'pending' },
   ];
 
   return (
@@ -749,10 +787,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Settings className="w-6 h-6 text-blue-400" />
-            Pengaturan Studio (Settings)
+            {t('settings.title', 'Pengaturan Studio (Settings)')}
           </h1>
           <p className="text-xs text-slate-400">
-            Satu halaman pengaturan — Umum, Audio, Floating HUD, Grafis, Sistem, dan Tentang
+            {t('settings.subtitle', 'Satu halaman pengaturan — Umum, Audio, Floating HUD, Grafis, Sistem, dan Tentang')}
           </p>
         </div>
 
@@ -784,13 +822,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <Section
         index="A"
         icon={SlidersHorizontal}
-        title="Umum (General)"
-        subtitle="Bahasa, tema tampilan, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran"
+        title={t('settings.secA.title', 'Umum (General)')}
+        subtitle={t('settings.secA.subtitle', 'Bahasa, tema tampilan, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran')}
       >
         <FieldRow
-          title="Bahasa Antarmuka"
-          description="Preferensi bahasa disimpan di perangkat. Pelokalan penuh seluruh string UI belum aktif, sehingga antarmuka masih tampil dalam Bahasa Indonesia."
-          status="pending"
+          title={t('settings.language.title', 'Bahasa Antarmuka')}
+          description={t('settings.language.desc', 'Pilih bahasa tampilan. Bahasa Indonesia dan English didukung penuh di seluruh antarmuka.')}
+          status="functional"
         >
           <Segmented<AppLanguage>
             options={[
@@ -804,24 +842,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </FieldRow>
 
         <FieldRow
-          title="Tema Tampilan"
-          description="Preferensi tema tersimpan, tetapi penerapan visual global (token warna) belum terhubung ke seluruh komponen."
-          status="not_connected"
+          title={t('settings.theme.title', 'Tema Tampilan')}
+          description={t('settings.theme.desc', 'Tema visual instan. Mengubah warna latar, panel, kartu, border, dan aksen di seluruh aplikasi.')}
+          status="functional"
         >
           <Segmented<AppTheme>
             options={[
-              { value: 'navy_dark', label: 'Navy Dark', hint: 'Bawaan' },
-              { value: 'obsidian_dark', label: 'Obsidian', hint: 'Gelap pekat' },
-              { value: 'cyber_slate', label: 'Cyber Slate', hint: 'Kontras tinggi' },
+              { value: 'navy_dark', label: 'Navy Dark', hint: isEnglish ? 'Default' : 'Bawaan' },
+              { value: 'obsidian_dark', label: 'Obsidian', hint: isEnglish ? 'Pure Black' : 'Gelap pekat' },
+              { value: 'cyber_slate', label: 'Cyber Slate', hint: isEnglish ? 'High Contrast' : 'Kontras tinggi' },
             ]}
             value={(settings.theme ?? 'navy_dark') as AppTheme}
-            onChange={(value) => handleUpdate('theme', value)}
+            onChange={(value) => {
+              applyTheme(value);
+              handleUpdate('theme', value);
+            }}
           />
         </FieldRow>
 
         <FieldRow
-          title="Umpan Balik Getar (Haptic Feedback)"
-          description="Getaran singkat saat kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE."
+          title={t('settings.haptic.title', 'Umpan Balik Getar (Haptic Feedback)')}
+          description={t('settings.haptic.desc', 'Getaran singkat saat kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE.')}
           status={
             typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
               ? 'functional'
@@ -830,7 +871,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
-              {settings.hapticFeedback ? 'Aktif' : 'Nonaktif'}
+              {settings.hapticFeedback ? t('status.active', 'Aktif') : t('status.inactive', 'Nonaktif')}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -839,19 +880,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   if (typeof navigator.vibrate === 'function') {
                     const ok = navigator.vibrate(50);
                     showSaveStatus(
-                      ok ? 'Getar uji dikirim ke perangkat' : 'Perangkat menolak permintaan getar',
+                      ok ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat') : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
                       ok ? 'success' : 'error'
                     );
                   } else {
-                    showSaveStatus('Perangkat ini tidak mendukung getar melalui WebView', 'error');
+                    showSaveStatus(t('settings.haptic.unsupported', 'Perangkat ini tidak mendukung getar melalui WebView'), 'error');
                   }
                 }}
                 className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
               >
-                Uji Getar
+                {t('settings.haptic.test', 'Uji Getar')}
               </button>
               <Toggle
-                label="Umpan balik getar"
+                label={t('settings.haptic.title', 'Umpan balik getar')}
                 checked={!!settings.hapticFeedback}
                 onChange={(value) => handleUpdate('hapticFeedback', value)}
               />
@@ -860,16 +901,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </FieldRow>
 
         <FieldRow
-          title="Konfirmasi Sebelum Mengakhiri LIVE"
-          description="Preferensi tersimpan, namun aksi Stop LIVE di Live Control belum membaca nilai ini — konfirmasi belum diterapkan."
+          title={t('settings.confirmEnd.title', 'Konfirmasi Sebelum Mengakhiri LIVE')}
+          description={t('settings.confirmEnd.desc', 'Tampilkan dialog konfirmasi proteksi sebelum sesi siaran ditutup untuk mencegah kepencet tidak sengaja.')}
           status="pending"
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
-              {settings.confirmBeforeEndLive ? 'Minta konfirmasi' : 'Akhiri langsung'}
+              {settings.confirmBeforeEndLive ? t('settings.confirmEnd.active', 'Minta konfirmasi') : t('settings.confirmEnd.inactive', 'Akhiri langsung')}
             </span>
             <Toggle
-              label="Konfirmasi sebelum mengakhiri LIVE"
+              label={t('settings.confirmEnd.title', 'Konfirmasi sebelum mengakhiri LIVE')}
               checked={!!settings.confirmBeforeEndLive}
               onChange={(value) => handleUpdate('confirmBeforeEndLive', value)}
             />
@@ -881,12 +922,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <Section
         index="B"
         icon={Mic}
-        title="Audio & Mikrofon"
-        subtitle="Pemilihan perangkat input, tes level mikrofon, sensitivitas, dan pemrosesan suara"
+        title={t('settings.secB.title', 'Audio & Mikrofon')}
+        subtitle={t('settings.secB.subtitle', 'Pemilihan perangkat input, tes level mikrofon, sensitivitas, dan pemrosesan suara')}
       >
         <FieldRow
-          title="Pemilihan Mikrofon"
-          description="Daftar perangkat berasal dari enumerasi perangkat nyata. Label perangkat hanya terbaca setelah izin mikrofon diberikan."
+          title={t('settings.micSelect.title', 'Pemilihan Mikrofon')}
+          description={t('settings.micSelect.desc', 'Daftar perangkat berasal dari enumerasi perangkat nyata. Label perangkat hanya terbaca setelah izin mikrofon diberikan.')}
           status="functional"
         >
           <div className="flex flex-col sm:flex-row gap-2">
@@ -895,10 +936,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onChange={(e) => handleUpdate('microphoneDeviceId', e.target.value)}
               className="flex-1 px-3 py-2 rounded-xl bg-[#0e1626] border border-slate-700 text-white text-xs focus:outline-none focus:border-blue-500"
             >
-              <option value="">Mikrofon bawaan sistem (default)</option>
+              <option value="">{t('settings.micSelect.default', 'Mikrofon bawaan sistem (default)')}</option>
               {micDevices.map((device, index) => (
                 <option key={device.deviceId || `mic-${index}`} value={device.deviceId}>
-                  {device.label || `Mikrofon ${index + 1} (label perlu izin)`}
+                  {device.label || (isEnglish ? `Microphone ${index + 1} (label requires permission)` : `Mikrofon ${index + 1} (label perlu izin)`)}
                 </option>
               ))}
             </select>
@@ -907,18 +948,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onClick={() => void refreshMicDevices()}
               className="px-3 py-2 rounded-xl bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500 flex items-center justify-center gap-1.5"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang
+              <RefreshCw className="w-3.5 h-3.5" /> {t('settings.micSelect.reload', 'Muat Ulang')}
             </button>
           </div>
           <p className="text-[11px] text-slate-500">
-            Pemilihan ini dipakai oleh Tes Mikrofon di bawah. Pipeline encoder Mode B belum membaca
-            nilai ini.
+            {t('settings.micSelect.note', 'Pemilihan ini dipakai oleh Tes Mikrofon di bawah.')}
           </p>
         </FieldRow>
 
         <FieldRow
-          title="Tes Mikrofon"
-          description="Meter level nyata dari getUserMedia + AnalyserNode. Tidak ada hasil yang dibuat-buat: bila izin ditolak, error ditampilkan apa adanya."
+          title={t('settings.micTest.title', 'Tes Mikrofon')}
+          description={t('settings.micTest.desc', 'Meter level nyata dari getUserMedia + AnalyserNode. Tidak ada hasil yang dibuat-buat: bila izin ditolak, error ditampilkan apa adanya.')}
           status="functional"
         >
           <div className="space-y-2">
@@ -937,7 +977,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onClick={stopMicTest}
                   className="px-3 py-1.5 rounded-lg bg-red-950/60 border border-red-800 text-[11px] text-red-300 flex items-center gap-1.5"
                 >
-                  <Square className="w-3.5 h-3.5" /> Hentikan Tes
+                  <Square className="w-3.5 h-3.5" /> {t('settings.micTest.stop', 'Hentikan Tes')}
                 </button>
               ) : (
                 <button
@@ -945,11 +985,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onClick={() => void startMicTest()}
                   className="px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800 text-[11px] text-emerald-300 flex items-center gap-1.5"
                 >
-                  <Play className="w-3.5 h-3.5" /> Mulai Tes Mikrofon
+                  <Play className="w-3.5 h-3.5" /> {t('settings.micTest.start', 'Mulai Tes Mikrofon')}
                 </button>
               )}
               <span className="text-[11px] text-slate-500">
-                {micTestActive ? `Level input: ${micLevel}%` : 'Tes tidak berjalan'}
+                {micTestActive ? `${t('settings.micTest.level', 'Level input: ')}${micLevel}%` : t('settings.micTest.idle', 'Tes tidak berjalan')}
               </span>
             </div>
             {micError && (
@@ -961,12 +1001,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </FieldRow>
 
         <FieldRow
-          title="Sensitivitas / Gain Input"
-          description="Penguatan diterapkan pada meter tes. Nilai belum memengaruhi encoder siaran."
+          title={t('settings.micGain.title', 'Sensitivitas / Gain Input')}
+          description={t('settings.micGain.desc', 'Penguatan diterapkan pada meter tes. Nilai belum memengaruhi encoder siaran.')}
           status="pending"
         >
           <SliderRow
-            label="Gain mikrofon"
+            label={t('settings.micGain.title', 'Gain mikrofon')}
             value={settings.micGain ?? 100}
             min={0}
             max={200}
@@ -977,8 +1017,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </FieldRow>
 
         <FieldRow
-          title="Noise Suppression"
-          description="Diterapkan sebagai constraint getUserMedia. Hanya aktif bila perangkat/WebView mendukungnya."
+          title={t('settings.noiseSuppression.title', 'Noise Suppression')}
+          description={t('settings.noiseSuppression.desc', 'Diterapkan sebagai constraint getUserMedia. Hanya aktif bila perangkat/WebView mendukungnya.')}
           status={
             typeof navigator !== 'undefined' &&
             navigator.mediaDevices?.getSupportedConstraints?.().noiseSuppression
@@ -988,10 +1028,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
-              {settings.noiseSuppression ? 'Aktif' : 'Nonaktif'}
+              {settings.noiseSuppression ? t('status.active', 'Aktif') : t('status.inactive', 'Nonaktif')}
             </span>
             <Toggle
-              label="Noise suppression"
+              label={t('settings.noiseSuppression.title', 'Noise suppression')}
               checked={!!settings.noiseSuppression}
               onChange={(value) => handleUpdate('noiseSuppression', value)}
             />
@@ -1001,37 +1041,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
           <div className="flex items-center gap-2">
             <Volume2 className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Pengaturan Mikrofon Lanjutan</span>
+            <span className="text-xs font-semibold text-white">{t('settings.advancedMic.title', 'Pengaturan Mikrofon Lanjutan')}</span>
             <StatusBadge status="functional" />
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold text-slate-200">Echo Cancellation</div>
-                <div className="text-[10px] text-slate-500">Mengurangi gema dari speaker perangkat.</div>
+                <div className="text-[11px] font-semibold text-slate-200">{t('settings.echoCancellation.title', 'Echo Cancellation')}</div>
+                <div className="text-[10px] text-slate-500">{t('settings.echoCancellation.desc', 'Mengurangi gema dari speaker perangkat.')}</div>
               </div>
               <Toggle
-                label="Echo cancellation"
+                label={t('settings.echoCancellation.title', 'Echo cancellation')}
                 checked={!!settings.micEchoCancellation}
                 onChange={(value) => handleUpdate('micEchoCancellation', value)}
               />
             </div>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold text-slate-200">Auto Gain Control</div>
+                <div className="text-[11px] font-semibold text-slate-200">{t('settings.autoGain.title', 'Auto Gain Control')}</div>
                 <div className="text-[10px] text-slate-500">
-                  Menormalkan volume suara secara otomatis.
+                  {t('settings.autoGain.desc', 'Menormalkan volume suara secara otomatis.')}
                 </div>
               </div>
               <Toggle
-                label="Auto gain control"
+                label={t('settings.autoGain.title', 'Auto gain control')}
                 checked={!!settings.micAutoGainControl}
                 onChange={(value) => handleUpdate('micAutoGainControl', value)}
               />
             </div>
           </div>
           <p className="text-[10px] text-slate-500">
-            Kedua opsi diteruskan sebagai constraint getUserMedia saat Tes Mikrofon berjalan.
+            {isEnglish ? 'Both options are forwarded as getUserMedia constraints when Mic Test is running.' : 'Kedua opsi diteruskan sebagai constraint getUserMedia saat Tes Mikrofon berjalan.'}
           </p>
         </div>
       </Section>
@@ -1040,20 +1080,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <Section
         index="C"
         icon={PanelRight}
-        title="Floating HUD"
-        subtitle="Tombol mengambang kecil dan panel satu tangan yang dipakai bersama Mode A dan Mode B"
+        title={t('settings.secC.title', 'Floating HUD')}
+        subtitle={t('settings.secC.subtitle', 'Tombol mengambang kecil dan panel satu tangan yang dipakai bersama Mode A dan Mode B')}
       >
         <FieldRow
-          title="Aktifkan Floating HUD"
-          description="Preferensi tersimpan. Tombol di bawah memanggil bridge native Android yang sudah ada dan melaporkan hasil sebenarnya."
+          title={t('settings.hudEnable.title', 'Aktifkan Floating HUD')}
+          description={t('settings.hudEnable.desc', 'Preferensi tersimpan. Tombol di bawah memanggil bridge native Android yang sudah ada dan melaporkan hasil sebenarnya.')}
           status={nativeAndroid ? 'pending' : 'not_supported'}
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
-              {settings.hudEnabled ? 'Aktif' : 'Nonaktif'}
+              {settings.hudEnabled ? t('status.active', 'Aktif') : t('status.inactive', 'Nonaktif')}
             </span>
             <Toggle
-              label="Aktifkan Floating HUD"
+              label={t('settings.hudEnable.title', 'Aktifkan Floating HUD')}
               checked={!!settings.hudEnabled}
               onChange={(value) => handleUpdate('hudEnabled', value)}
             />
@@ -1064,27 +1104,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="button"
                 onClick={async () => {
                   const result = await showFloatingHud();
-                  setHudMessage(result.message ?? 'Permintaan tampilkan HUD dikirim.');
+                  setHudMessage(result.message ?? (isEnglish ? 'Show HUD request sent.' : 'Permintaan tampilkan HUD dikirim.'));
                 }}
                 className="px-3 py-1.5 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
               >
-                Tampilkan HUD Native
+                {t('settings.hudEnable.show', 'Tampilkan HUD Native')}
               </button>
               <button
                 type="button"
                 onClick={async () => {
                   const result = await hideFloatingHud();
-                  setHudMessage(result.message ?? 'Permintaan sembunyikan HUD dikirim.');
+                  setHudMessage(result.message ?? (isEnglish ? 'Hide HUD request sent.' : 'Permintaan sembunyikan HUD dikirim.'));
                 }}
                 className="px-3 py-1.5 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
               >
-                Sembunyikan HUD Native
+                {t('settings.hudEnable.hide', 'Sembunyikan HUD Native')}
               </button>
             </div>
           ) : (
             <p className="text-[11px] text-slate-500">
-              Floating HUD native hanya tersedia pada APK Android. Di browser, preferensi tetap
-              tersimpan.
+              {t('settings.hudEnable.browserNote', 'Floating HUD native hanya tersedia pada APK Android. Di browser, preferensi tetap tersimpan.')}
             </p>
           )}
           {hudMessage && <p className="text-[11px] text-sky-300">{hudMessage}</p>}
@@ -1093,7 +1132,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <SliderRow
-              label="Ukuran Tombol"
+              label={t('settings.hudSize.title', 'Ukuran Tombol')}
               value={settings.hudButtonSize ?? 48}
               min={40}
               max={64}
@@ -1104,7 +1143,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <SliderRow
-              label="Transparansi"
+              label={t('settings.hudOpacity.title', 'Transparansi')}
               value={settings.hudOpacity ?? 92}
               min={30}
               max={100}
@@ -1115,11 +1154,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        <FieldRow title="Posisi Tombol" description="Sisi layar tempat tombol mengambang berlabuh." status="stored">
+        <FieldRow
+          title={t('settings.hudPosition.title', 'Posisi Tombol')}
+          description={t('settings.hudPosition.desc', 'Sisi layar tempat tombol mengambang berlabuh.')}
+          status="stored"
+        >
           <Segmented<HudPosition>
             options={[
-              { value: 'left', label: 'Kiri' },
-              { value: 'right', label: 'Kanan' },
+              { value: 'left', label: t('settings.hudPosition.left', 'Kiri') },
+              { value: 'right', label: t('settings.hudPosition.right', 'Kanan') },
             ]}
             columns="grid-cols-2"
             value={(settings.hudPosition ?? 'right') as HudPosition}
@@ -1130,7 +1173,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Preferensi Tampilan Panel</span>
+            <span className="text-xs font-semibold text-white">{t('settings.hudPanels.title', 'Preferensi Tampilan Panel')}</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {(
@@ -1149,7 +1192,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               >
                 <span className="text-[11px] text-slate-300">{panel.label}</span>
                 <Toggle
-                  label={`Tampilkan menu ${panel.label}`}
+                  label={isEnglish ? `Show ${panel.label} menu` : `Tampilkan menu ${panel.label}`}
                   checked={!!settings[panel.key]}
                   onChange={(value) => handleUpdate(panel.key, value)}
                 />
@@ -1159,7 +1202,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
-          <div className="text-xs font-semibold text-white">Enam Menu Panel Floating HUD</div>
+          <div className="text-xs font-semibold text-white">{t('settings.hudPanels.sixMenus', 'Enam Menu Panel Floating HUD')}</div>
           <ul className="space-y-1.5">
             {hudPanelMenus.map((menu) => (
               <li key={menu.id} className="flex items-start justify-between gap-2">
@@ -1172,25 +1215,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             ))}
           </ul>
           <p className="text-[10px] text-slate-500">
-            Spesifikasi enam menu ini dipertahankan. Panel native belum diverifikasi pada APK, sehingga
-            statusnya ditandai jujur, bukan diklaim aktif.
+            {t('settings.hudPanels.note', 'Panel melayang dioptimalkan untuk pengoperasian satu tangan saat siaran berlangsung.')}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-[#080c16] border border-amber-900/60 space-y-2">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400" />
-            <span className="text-xs font-semibold text-amber-300">Batas Kemampuan Mode</span>
+            <span className="text-xs font-semibold text-amber-300">{t('settings.hudRules.title', 'Batas Kemampuan Mode')}</span>
           </div>
           <ul className="text-[11px] text-slate-400 space-y-1 list-disc pl-4">
             <li>
-              <span className="text-slate-200 font-semibold">Mode A:</span> aplikasi TikTok resmi tetap
-              yang menyiarkan LIVE. SYNTXRR STREAM hanya pendamping dan tidak boleh menampilkan
-              Pause/Resume/Stop TikTok yang palsu.
+              <span className="text-slate-200 font-semibold">Mode A:</span>{' '}
+              {isEnglish
+                ? 'Official TikTok app broadcasts the LIVE stream. SYNTXRR STREAM is companion only and never exposes fake Pause/Resume/Stop controls.'
+                : 'aplikasi TikTok resmi tetap yang menyiarkan LIVE. SYNTXRR STREAM hanya pendamping dan tidak boleh menampilkan Pause/Resume/Stop TikTok yang palsu.'}
             </li>
             <li>
-              <span className="text-slate-200 font-semibold">Mode B:</span> kontrol encoder SYNTXRR hanya
-              aktif setelah pipeline RTMP benar-benar tersedia. Saat ini belum ada.
+              <span className="text-slate-200 font-semibold">Mode B:</span>{' '}
+              {isEnglish
+                ? 'SYNTXRR encoder controls become active once native RTMP pipeline is ready. Currently not connected.'
+                : 'kontrol encoder SYNTXRR hanya aktif setelah pipeline RTMP benar-benar tersedia. Saat ini belum ada.'}
             </li>
           </ul>
         </div>
@@ -1198,17 +1243,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-1.5">
           <div className="flex items-center gap-2">
             <Wifi className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Aturan Stream Deck</span>
+            <span className="text-xs font-semibold text-white">{t('settings.hudDeckRule.title', 'Aturan Stream Deck')}</span>
             <StatusBadge status="not_connected" />
           </div>
           <p className="text-[11px] text-slate-400">
-            Aturan yang harus berlaku: <span className="text-slate-200">Stream Deck aktif → Floating HUD
-            nonaktif</span>, dan <span className="text-slate-200">Stream Deck nonaktif → Floating HUD
-            aktif</span>.
+            {t('settings.hudDeckRule.desc', 'Stream Deck aktif → Floating HUD nonaktif, dan sebaliknya untuk mencegah tumpang tindih kontrol.')}
           </p>
           <p className="text-[11px] text-slate-500">
-            Deteksi sesi Stream Deck belum tersedia, jadi status ini tidak disimulasikan dan HUD tidak
-            diubah otomatis. Stream Deck tetap memiliki fiturnya sendiri di luar Settings.
+            {isEnglish
+              ? 'Stream Deck session detection is not yet simulated; HUD state is not switched automatically. Stream Deck has its own interface outside Settings.'
+              : 'Deteksi sesi Stream Deck belum tersedia, jadi status ini tidak disimulasikan dan HUD tidak diubah otomatis. Stream Deck tetap memiliki fiturnya sendiri di luar Settings.'}
           </p>
         </div>
       </Section>
@@ -1217,12 +1261,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <Section
         index="D"
         icon={Monitor}
-        title="Grafis & Performa Perangkat"
-        subtitle="Uji perangkat, rekomendasi, kontrol manual resolusi/FPS/bitrate, dan peringatan risiko"
+        title={t('settings.secD.title', 'Grafis & Performa Perangkat')}
+        subtitle={t('settings.secD.subtitle', 'Uji perangkat, rekomendasi, kontrol manual resolusi/FPS/bitrate, dan peringatan risiko')}
       >
         <FieldRow
-          title="Uji Perangkat Otomatis"
-          description="Membaca sinyal yang benar-benar tersedia: jumlah core logis, perkiraan memori, dan renderer WebGL. Uji termal serta encoder hardware native belum terhubung."
+          title={t('settings.deviceTest.title', 'Uji Perangkat Otomatis')}
+          description={t('settings.deviceTest.desc', 'Membaca jumlah core logis CPU, perkiraan memori, dan renderer GPU WebGL nyata.')}
           status="pending"
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -1233,11 +1277,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="px-3 py-1.5 rounded-lg bg-blue-950/60 border border-blue-800 text-[11px] text-blue-200 flex items-center gap-1.5 disabled:opacity-60"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              {deviceTestRunning ? 'Menguji…' : 'Jalankan Uji Perangkat'}
+              {deviceTestRunning ? t('settings.deviceTest.running', 'Menguji…') : t('settings.deviceTest.run', 'Jalankan Uji Perangkat')}
             </button>
             {deviceTest && (
               <span className="text-[11px] text-slate-500">
-                Hasil uji: {new Date(deviceTest.testedAt).toLocaleTimeString('id-ID')}
+                {isEnglish ? `Test result: ${new Date(deviceTest.testedAt).toLocaleTimeString('en-US')}` : `Hasil uji: ${new Date(deviceTest.testedAt).toLocaleTimeString('id-ID')}`}
               </span>
             )}
           </div>
@@ -1245,12 +1289,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {deviceTest ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
               {[
-                { label: 'Logical cores', value: deviceTest.cores ?? 'tidak terbaca' },
-                { label: 'Device memory', value: deviceTest.memoryGB ? `${deviceTest.memoryGB} GB` : 'tidak terbaca' },
-                { label: 'Max texture', value: deviceTest.maxTextureSize ?? 'tidak terbaca' },
+                { label: 'Logical cores', value: deviceTest.cores ?? (isEnglish ? 'unreadable' : 'tidak terbaca') },
+                { label: 'Device memory', value: deviceTest.memoryGB ? `${deviceTest.memoryGB} GB` : (isEnglish ? 'unreadable' : 'tidak terbaca') },
+                { label: 'Max texture', value: deviceTest.maxTextureSize ?? (isEnglish ? 'unreadable' : 'tidak terbaca') },
                 { label: 'Platform', value: deviceTest.platform },
-                { label: 'WebGL renderer', value: deviceTest.webglRenderer ?? 'tidak terbaca' },
-                { label: 'Rekomendasi', value: `${deviceTest.recommendedResolution} / ${deviceTest.recommendedFrameRate} FPS` },
+                { label: 'WebGL renderer', value: deviceTest.webglRenderer ?? (isEnglish ? 'unreadable' : 'tidak terbaca') },
+                { label: isEnglish ? 'Recommendation' : 'Rekomendasi', value: `${deviceTest.recommendedResolution} / ${deviceTest.recommendedFrameRate} FPS` },
               ].map((item) => (
                 <div key={item.label} className="p-2 rounded-lg bg-[#0e1626] border border-slate-800">
                   <div className="text-[10px] uppercase tracking-wide text-slate-500">{item.label}</div>
@@ -1260,24 +1304,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           ) : (
             <p className="text-[11px] text-slate-500">
-              Belum ada hasil uji. Tidak ada nilai yang ditampilkan sebelum pengujian dijalankan.
+              {t('settings.deviceTest.notTested', 'Belum ada hasil uji. Tidak ada nilai yang ditampilkan sebelum pengujian dijalankan.')}
             </p>
           )}
           <p className="text-[10px] text-slate-500">
-            Uji termal, profil encoder MediaCodec, dan benchmark hardware Android memerlukan modul
-            native — statusnya Coming Soon.
+            {isEnglish
+              ? 'Thermal test, native MediaCodec encoder profile, and Android hardware benchmarks require native modules — marked Coming Soon.'
+              : 'Uji termal, profil encoder MediaCodec, dan benchmark hardware Android memerlukan modul native — statusnya Coming Soon.'}
           </p>
         </FieldRow>
 
         <FieldRow
-          title="Rekomendasi Resolusi / FPS / Bitrate"
-          description="Diturunkan dari core dan memori yang terbaca. Ini heuristik, bukan pengukuran performa sebenarnya."
+          title={t('settings.recommendations.title', 'Rekomendasi Resolusi / FPS / Bitrate')}
+          description={t('settings.recommendations.desc', 'Diturunkan dari core dan memori yang terbaca secara heuristik.')}
           status={deviceTest ? 'stored' : 'pending'}
         >
           {deviceTest ? (
             <div className="flex flex-wrap gap-2">
               <span className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-950/60 border border-blue-800 text-blue-200">
-                Resolusi: {deviceTest.recommendedResolution}
+                {isEnglish ? 'Resolution: ' : 'Resolusi: '}{deviceTest.recommendedResolution}
               </span>
               <span className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-950/60 border border-blue-800 text-blue-200">
                 FPS: {deviceTest.recommendedFrameRate}
@@ -1288,30 +1333,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           ) : (
             <p className="text-[11px] text-slate-500">
-              Jalankan Uji Perangkat untuk melihat rekomendasi.
+              {t('settings.recommendations.empty', 'Jalankan Uji Perangkat untuk melihat rekomendasi.')}
             </p>
           )}
         </FieldRow>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-2">Resolusi Manual</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-2">{t('settings.manualRes.title', 'Resolusi Manual')}</label>
             <Segmented<ResolutionTarget>
               options={[
-                { value: '720p', label: '720p', hint: 'Hemat' },
-                { value: '1080p', label: '1080p', hint: 'Disarankan' },
-                { value: '1440p', label: '1440p', hint: 'Berat' },
+                { value: '720p', label: '720p', hint: isEnglish ? 'Eco' : 'Hemat' },
+                { value: '1080p', label: '1080p', hint: isEnglish ? 'Recommended' : 'Disarankan' },
+                { value: '1440p', label: '1440p', hint: isEnglish ? 'Heavy' : 'Berat' },
               ]}
               value={settings.targetResolution}
               onChange={(value) => handleUpdate('targetResolution', value)}
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-2">FPS Manual</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-2">{t('settings.manualFps.title', 'FPS Manual')}</label>
             <Segmented<FrameRate>
               options={[
-                { value: 30, label: '30 FPS', hint: 'Hemat baterai' },
-                { value: 60, label: '60 FPS', hint: 'Mulus' },
+                { value: 30, label: '30 FPS', hint: isEnglish ? 'Battery saver' : 'Hemat baterai' },
+                { value: 60, label: '60 FPS', hint: isEnglish ? 'Smooth' : 'Mulus' },
               ]}
               columns="grid-cols-2"
               value={settings.frameRate}
@@ -1323,7 +1368,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <SliderRow
-              label="Bitrate Video"
+              label={t('settings.videoBitrate.title', 'Bitrate Video')}
               value={settings.videoBitrateKbps}
               min={2500}
               max={9000}
@@ -1334,7 +1379,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <SliderRow
-              label="Bitrate Audio"
+              label={t('settings.audioBitrate.title', 'Bitrate Audio')}
               value={settings.audioBitrateKbps}
               min={96}
               max={320}
@@ -1346,15 +1391,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <FieldRow
-          title="Auto Apply Rekomendasi"
-          description="Saat aktif, hasil uji perangkat langsung ditulis ke resolusi, FPS, dan bitrate. Kontrol manual tetap aktif dan tidak pernah dikunci."
+          title={t('settings.autoApply.title', 'Auto Apply Rekomendasi')}
+          description={t('settings.autoApply.desc', 'Saat aktif, hasil uji perangkat langsung ditulis ke pengaturan. Kontrol manual tidak pernah dikunci.')}
           status="functional"
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
               {settings.autoApplyRecommendations
-                ? 'Aktif — rekomendasi diterapkan setelah uji selesai'
-                : 'Nonaktif — rekomendasi hanya ditampilkan'}
+                ? (isEnglish ? 'Active — recommendations applied after test completes' : 'Aktif — rekomendasi diterapkan setelah uji selesai')
+                : (isEnglish ? 'Inactive — recommendations only displayed' : 'Nonaktif — rekomendasi hanya ditampilkan')}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -1363,10 +1408,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={!deviceTest}
                 className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500 disabled:opacity-50"
               >
-                Terapkan Sekarang
+                {t('settings.autoApply.applyNow', 'Terapkan Sekarang')}
               </button>
               <Toggle
-                label="Auto apply rekomendasi"
+                label={t('settings.autoApply.title', 'Auto apply rekomendasi')}
                 checked={!!settings.autoApplyRecommendations}
                 onChange={(value) => handleUpdate('autoApplyRecommendations', value)}
               />
@@ -1377,7 +1422,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         {warnings.length > 0 ? (
           <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-900/60 space-y-1.5">
             <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
-              <AlertTriangle className="w-4 h-4" /> Peringatan Konfigurasi
+              <AlertTriangle className="w-4 h-4" /> {t('settings.warnings.title', 'Peringatan Konfigurasi')}
             </div>
             <ul className="text-[11px] text-amber-200/90 space-y-1 list-disc pl-4">
               {warnings.map((warning) => (
@@ -1385,26 +1430,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               ))}
             </ul>
             <p className="text-[10px] text-amber-200/60">
-              Ini peringatan jujur, bukan pembatasan. Nilai tetap dapat diubah.
+              {isEnglish ? 'Advisory notice, not a hard restriction. Values can still be modified.' : 'Ini peringatan jujur, bukan pembatasan. Nilai tetap dapat diubah.'}
             </p>
           </div>
         ) : (
           <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
-            <Check className="w-3.5 h-3.5 text-emerald-400" /> Tidak ada konfigurasi berisiko terdeteksi.
+            <Check className="w-3.5 h-3.5 text-emerald-400" /> {t('settings.warnings.none', 'Tidak ada konfigurasi berisiko terdeteksi.')}
           </p>
         )}
 
         <div className="pt-2 border-t border-slate-800 space-y-3">
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Profil Performa &amp; Hardware</span>
+            <span className="text-xs font-semibold text-white">{t('settings.profile.title', 'Profil Performa & Hardware')}</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {(
               [
-                { id: 'battery_saver', name: 'Hemat Baterai', desc: 'Alokasi RAM minimal, suhu stabil', icon: Battery },
-                { id: 'balanced', name: 'Seimbang', desc: 'Optimal untuk 1080p durasi panjang', icon: Cpu },
-                { id: 'performance', name: 'Performa Maksimal', desc: 'Prioritas bitrate tinggi, latensi rendah', icon: Flame },
+                { id: 'battery_saver', name: t('settings.profile.battery', 'Hemat Baterai'), desc: t('settings.profile.batteryDesc', 'Alokasi RAM minimal, suhu stabil'), icon: Battery },
+                { id: 'balanced', name: t('settings.profile.balanced', 'Seimbang'), desc: t('settings.profile.balancedDesc', 'Optimal untuk 1080p durasi panjang'), icon: Cpu },
+                { id: 'performance', name: t('settings.profile.performance', 'Performa Maksimal'), desc: t('settings.profile.performanceDesc', 'Prioritas bitrate tinggi, latensi rendah'), icon: Flame },
               ] as const
             ).map((profile) => {
               const Icon = profile.icon;
@@ -1432,16 +1477,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div className="flex items-center justify-between gap-3 px-1">
             <div>
-              <div className="text-xs font-semibold text-white">Akselerasi Hardware GPU</div>
+              <div className="text-xs font-semibold text-white">{t('settings.gpuAccel.title', 'Akselerasi Hardware GPU')}</div>
               <div className="text-[11px] text-slate-400">
-                Gunakan MediaCodec H.264 / HEVC hardware jika tersedia di Android
+                {t('settings.gpuAccel.desc', 'Gunakan MediaCodec H.264 / HEVC hardware jika tersedia di Android')}
               </div>
             </div>
-            <input
-              type="checkbox"
-              checked={settings.hardwareAcceleration}
-              onChange={(e) => handleUpdate('hardwareAcceleration', e.target.checked)}
-              className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-[#080c16] border-slate-700 cursor-pointer"
+            <Toggle
+              label={t('settings.gpuAccel.title', 'Akselerasi Hardware GPU')}
+              checked={!!settings.hardwareAcceleration}
+              onChange={(value) => handleUpdate('hardwareAcceleration', value)}
             />
           </div>
         </div>
@@ -1450,11 +1494,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Output Siaran Mode B (RTMP / RTMPS)</span>
+            <span className="text-xs font-semibold text-white">{t('settings.rtmp.title', 'Output Siaran Mode B (RTMP / RTMPS)')}</span>
             <StatusBadge status="not_connected" />
           </div>
           <div>
-            <label className="block text-slate-300 font-medium mb-1 text-[11px]">URL Server RTMP</label>
+            <label className="block text-slate-300 font-medium mb-1 text-[11px]">{t('settings.rtmp.url', 'URL Server RTMP')}</label>
             <input
               type="text"
               value={settings.rtmpServer}
@@ -1465,7 +1509,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-slate-300 font-medium text-[11px]">Stream Key / Kunci Siaran</label>
+              <label className="text-slate-300 font-medium text-[11px]">{t('settings.rtmp.key', 'Stream Key / Kunci Siaran')}</label>
               <button
                 type="button"
                 onClick={() => setShowStreamKey(!showStreamKey)}
@@ -1473,11 +1517,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               >
                 {showStreamKey ? (
                   <>
-                    <EyeOff className="w-3 h-3" /> Sembunyikan
+                    <EyeOff className="w-3 h-3" /> {t('settings.rtmp.hide', 'Sembunyikan')}
                   </>
                 ) : (
                   <>
-                    <Eye className="w-3 h-3" /> Tampilkan
+                    <Eye className="w-3 h-3" /> {t('settings.rtmp.show', 'Tampilkan')}
                   </>
                 )}
               </button>
@@ -1491,8 +1535,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             />
           </div>
           <p className="text-[10px] text-slate-500">
-            Kredensial disimpan per perangkat dan tidak pernah disertakan dalam file cadangan. Pipeline
-            encoder RTMP belum tersedia, sehingga tombol siaran tidak disediakan di sini.
+            {isEnglish
+              ? 'Credentials are saved locally per device and never included in backup files. Native RTMP encoder pipeline is coming soon.'
+              : 'Kredensial disimpan per perangkat dan tidak pernah disertakan dalam file cadangan. Pipeline encoder RTMP belum tersedia, sehingga tombol siaran tidak disediakan di sini.'}
           </p>
         </div>
       </Section>
@@ -1501,24 +1546,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <Section
         index="E"
         icon={Lock}
-        title="Sistem (System)"
-        subtitle="Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data"
+        title={t('settings.secE.title', 'Sistem (System)')}
+        subtitle={t('settings.secE.subtitle', 'Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data')}
       >
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
           <div className="flex items-center gap-2">
             <Lock className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Permissions Manager</span>
+            <span className="text-xs font-semibold text-white">{t('settings.permissions.title', 'Permissions Manager')}</span>
             <StatusBadge status="functional" />
           </div>
           <p className="text-[10px] text-slate-500">
-            Status dibaca dari Permissions API dan Notification API. Nilai tidak dapat dipalsukan.
+            {t('settings.permissions.desc', 'Status dibaca dari Permissions API dan Notification API secara nyata.')}
           </p>
 
           <div className="space-y-2">
             {(
               [
-                { key: 'camera', label: 'Kamera', kind: 'camera' as const },
-                { key: 'microphone', label: 'Mikrofon', kind: 'microphone' as const },
+                { key: 'camera', label: t('settings.permissions.camera', 'Kamera'), kind: 'camera' as const },
+                { key: 'microphone', label: t('settings.permissions.mic', 'Mikrofon'), kind: 'microphone' as const },
               ]
             ).map((item) => (
               <div
@@ -1528,7 +1573,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div>
                   <div className="text-[11px] font-semibold text-slate-200">{item.label}</div>
                   <div className="text-[10px] text-slate-500 font-mono">
-                    {permissionState[item.key] ?? 'memeriksa…'}
+                    {permissionState[item.key] ?? (isEnglish ? 'checking…' : 'memeriksa…')}
                   </div>
                 </div>
                 <button
@@ -1537,16 +1582,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={permissionBusy === item.kind}
                   className="px-2.5 py-1 rounded-lg bg-[#080c16] border border-slate-700 text-[10px] text-slate-200 hover:border-blue-500 disabled:opacity-50"
                 >
-                  {permissionBusy === item.kind ? 'Meminta…' : 'Minta Izin'}
+                  {permissionBusy === item.kind ? (isEnglish ? 'Requesting…' : 'Meminta…') : t('settings.permissions.request', 'Minta Izin')}
                 </button>
               </div>
             ))}
 
             <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[#0e1626] border border-slate-800">
               <div>
-                <div className="text-[11px] font-semibold text-slate-200">Notifikasi</div>
+                <div className="text-[11px] font-semibold text-slate-200">{t('settings.permissions.notif', 'Notifikasi')}</div>
                 <div className="text-[10px] text-slate-500 font-mono">
-                  {permissionState.notifications ?? 'memeriksa…'}
+                  {permissionState.notifications ?? (isEnglish ? 'checking…' : 'memeriksa…')}
                 </div>
               </div>
               <button
@@ -1554,21 +1599,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onClick={() => void requestNotification()}
                 className="px-2.5 py-1 rounded-lg bg-[#080c16] border border-slate-700 text-[10px] text-slate-200 hover:border-blue-500"
               >
-                Minta Izin
+                {t('settings.permissions.request', 'Minta Izin')}
               </button>
             </div>
 
             <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[#0e1626] border border-slate-800">
               <div>
-                <div className="text-[11px] font-semibold text-slate-200">Overlay (Floating HUD)</div>
+                <div className="text-[11px] font-semibold text-slate-200">{t('settings.permissions.overlay', 'Overlay (Floating HUD)')}</div>
                 <div className="text-[10px] text-slate-500 font-mono">
                   {overlayGranted === null
                     ? nativeAndroid
-                      ? 'memeriksa…'
-                      : 'hanya tersedia di APK Android'
+                      ? (isEnglish ? 'checking…' : 'memeriksa…')
+                      : (isEnglish ? 'only available in Android APK' : 'hanya tersedia di APK Android')
                     : overlayGranted
-                      ? 'diizinkan'
-                      : 'belum diizinkan'}
+                      ? (isEnglish ? 'granted' : 'diizinkan')
+                      : (isEnglish ? 'not granted' : 'belum diizinkan')}
                 </div>
               </div>
               <button
@@ -1577,7 +1622,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={!nativeAndroid}
                 className="px-2.5 py-1 rounded-lg bg-[#080c16] border border-slate-700 text-[10px] text-slate-200 hover:border-blue-500 disabled:opacity-50"
               >
-                {overlayGranted ? 'Periksa Ulang' : 'Minta Izin'}
+                {overlayGranted ? t('settings.permissions.recheck', 'Periksa Ulang') : t('settings.permissions.request', 'Minta Izin')}
               </button>
             </div>
           </div>
@@ -1586,13 +1631,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
           <div className="flex items-center gap-2">
             <HardDrive className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Penyimpanan &amp; Cache</span>
+            <span className="text-xs font-semibold text-white">{t('settings.storage.title', 'Penyimpanan & Cache')}</span>
             <StatusBadge status={storageInfo ? 'functional' : 'pending'} />
           </div>
           {storageInfo ? (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px] text-slate-300">
-                <span>Terpakai</span>
+                <span>{t('settings.storage.used', 'Terpakai')}</span>
                 <span className="font-mono">
                   {formatBytes(storageInfo.usage)} / {formatBytes(storageInfo.quota)}
                 </span>
@@ -1610,7 +1655,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             </div>
           ) : (
-            <p className="text-[11px] text-slate-500">Perkiraan penyimpanan belum dapat dibaca.</p>
+            <p className="text-[11px] text-slate-500">
+              {isEnglish ? 'Storage quota could not be read.' : 'Perkiraan penyimpanan belum dapat dibaca.'}
+            </p>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1618,26 +1665,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onClick={() => void clearAppCache()}
               className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-red-500 flex items-center gap-1.5"
             >
-              <Trash2 className="w-3.5 h-3.5" /> Bersihkan Cache Aplikasi
+              <Trash2 className="w-3.5 h-3.5" /> {t('settings.storage.clearCache', 'Bersihkan Cache Aplikasi')}
             </button>
             <button
               type="button"
               onClick={() => void refreshStorage()}
               className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500 flex items-center gap-1.5"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Segarkan
+              <RefreshCw className="w-3.5 h-3.5" /> {t('settings.storage.refresh', 'Segarkan')}
             </button>
           </div>
           {cacheMessage && <p className="text-[11px] text-sky-300">{cacheMessage}</p>}
           <p className="text-[10px] text-slate-500">
-            Hanya Cache Storage yang dihapus. IndexedDB (preset, antrean, pengaturan) tidak disentuh.
+            {t('settings.storage.note', 'Hanya Cache Storage yang dihapus. IndexedDB (preset, pengaturan) tidak disentuh.')}
           </p>
         </div>
 
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Diagnostik</span>
+            <span className="text-xs font-semibold text-white">{t('settings.diag.title', 'Diagnostik')}</span>
             <StatusBadge status="functional" />
           </div>
           <div className="max-h-48 overflow-y-auto rounded-lg bg-[#0e1626] border border-slate-800 p-2">
@@ -1654,7 +1701,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onClick={() => void copyDiagnostics()}
             className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500 flex items-center gap-1.5"
           >
-            <Copy className="w-3.5 h-3.5" /> Salin Diagnostik
+            <Copy className="w-3.5 h-3.5" /> {t('settings.diag.copy', 'Salin Diagnostik')}
           </button>
           {diagnosticsMessage && <p className="text-[11px] text-sky-300">{diagnosticsMessage}</p>}
         </div>
@@ -1663,7 +1710,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Pencadangan &amp; Pemulihan JSON</span>
+            <span className="text-xs font-semibold text-white">{t('settings.backup.title', 'Pencadangan & Pemulihan JSON')}</span>
             <StatusBadge status="functional" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1672,14 +1719,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onClick={onExportData}
               className="p-3 rounded-xl bg-[#0e1626] border border-slate-800 hover:border-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-2 transition"
             >
-              <Download className="w-4 h-4 text-blue-400" /> Ekspor Cadangan
+              <Download className="w-4 h-4 text-blue-400" /> {t('settings.backup.export', 'Ekspor Cadangan')}
             </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-3 rounded-xl bg-[#0e1626] border border-slate-800 hover:border-emerald-500 text-white text-[11px] font-semibold flex items-center justify-center gap-2 transition"
             >
-              <Upload className="w-4 h-4 text-emerald-400" /> Pulihkan Cadangan
+              <Upload className="w-4 h-4 text-emerald-400" /> {t('settings.backup.import', 'Pulihkan Cadangan')}
             </button>
             <input
               type="file"
@@ -1693,14 +1740,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onClick={onResetDefaults}
               className="p-3 rounded-xl bg-[#0e1626] border border-slate-800 hover:border-red-500 text-red-400 text-[11px] font-semibold flex items-center justify-center gap-2 transition"
             >
-              <RotateCcw className="w-4 h-4 text-red-400" /> Atur Ulang Pengaturan
+              <RotateCcw className="w-4 h-4 text-red-400" /> {t('settings.backup.reset', 'Atur Ulang Pengaturan')}
             </button>
           </div>
           <p className="text-[10px] text-slate-500 leading-relaxed flex items-start gap-1.5">
             <ShieldAlert className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
             <span>
-              File cadangan tidak memuat Stream Key, YouTube API key, maupun token Spotify. Kredensial
-              hanya tersimpan di perangkat ini dan tidak pernah ditimpa oleh file cadangan pengguna lain.
+              {t('settings.backup.securityNote', 'File cadangan tidak memuat Stream Key atau kunci API. Kredensial lokal terlindungi aman.')}
             </span>
           </p>
         </div>
@@ -1709,13 +1755,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
           <div className="flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Kredensial Integrasi</span>
+            <span className="text-xs font-semibold text-white">{t('settings.credentials.title', 'Kredensial Integrasi')}</span>
             <StatusBadge status="stored" />
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-slate-300 font-medium text-[11px] flex items-center gap-1.5">
-                <Music2 className="w-3.5 h-3.5 text-red-400" /> Kunci API YouTube Data v3
+                <Music2 className="w-3.5 h-3.5 text-red-400" /> {t('settings.credentials.youtube', 'Kunci API YouTube Data v3')}
               </label>
               <a
                 href="https://console.cloud.google.com/apis/credentials"
@@ -1723,7 +1769,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 rel="noreferrer"
                 className="text-[10px] text-blue-400 hover:underline flex items-center gap-1"
               >
-                Dapatkan <ExternalLink className="w-3 h-3" />
+                {t('settings.credentials.get', 'Dapatkan')} <ExternalLink className="w-3 h-3" />
               </a>
             </div>
             <div className="relative">
@@ -1738,20 +1784,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="button"
                 onClick={() => setShowYouTubeKey(!showYouTubeKey)}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                title={showYouTubeKey ? 'Sembunyikan' : 'Tampilkan'}
+                title={showYouTubeKey ? (isEnglish ? 'Hide' : 'Sembunyikan') : (isEnglish ? 'Show' : 'Tampilkan')}
               >
                 {showYouTubeKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
             <p className="text-[10px] text-slate-500 mt-1">
-              Digunakan murni untuk pencarian judul dan thumbnail video YouTube resmi.
+              {isEnglish
+                ? 'Used purely for official YouTube video title and thumbnail search.'
+                : 'Digunakan murni untuk pencarian judul dan thumbnail video YouTube resmi.'}
             </p>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-slate-300 font-medium text-[11px] flex items-center gap-1.5">
-                <Music2 className="w-3.5 h-3.5 text-emerald-400" /> Client ID Spotify Developer
+                <Music2 className="w-3.5 h-3.5 text-emerald-400" /> {t('settings.credentials.spotify', 'Client ID Spotify Developer')}
               </label>
               <a
                 href="https://developer.spotify.com/dashboard"
@@ -1759,18 +1807,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 rel="noreferrer"
                 className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1"
               >
-                Portal <ExternalLink className="w-3 h-3" />
+                {t('settings.credentials.portal', 'Portal')} <ExternalLink className="w-3 h-3" />
               </a>
             </div>
             <input
               type="text"
               value={settings.spotifyClientId || ''}
               onChange={(e) => handleUpdate('spotifyClientId', e.target.value)}
-              placeholder="Spotify Client ID 32-karakter..."
+              placeholder={isEnglish ? 'Spotify Client ID (32 characters)...' : 'Spotify Client ID 32-karakter...'}
               className="w-full px-3 py-2 rounded-xl bg-[#0e1626] border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
             />
             <p className="text-[10px] text-slate-500 mt-1">
-              Memerlukan redirect URI yang diarahkan ke aplikasi ini untuk autentikasi PKCE.
+              {isEnglish
+                ? 'Requires redirect URI pointed to this application for PKCE authentication.'
+                : 'Memerlukan redirect URI yang diarahkan ke aplikasi ini untuk autentikasi PKCE.'}
             </p>
           </div>
         </div>
@@ -1780,43 +1830,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <Section
         index="F"
         icon={Info}
-        title="Tentang SYNTXRR"
-        subtitle="Versi aplikasi, informasi pembaruan, dan lisensi komponen"
+        title={t('settings.secF.title', 'Tentang SYNTXRR')}
+        subtitle={t('settings.secF.subtitle', 'Versi aplikasi, informasi pembaruan, dan lisensi komponen')}
       >
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">Versi Aplikasi</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.version', 'Versi Aplikasi')}</div>
             <div className="text-sm font-bold text-white">{APP_VERSION}</div>
             <div className="text-[10px] text-slate-500">Master Release</div>
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">Application ID</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.appId', 'Application ID')}</div>
             <div className="text-[11px] font-mono text-blue-400 break-words">com.syntxrr.streamtools</div>
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">Runtime</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.runtime', 'Runtime')}</div>
             <div className="text-[11px] text-slate-200 flex items-center gap-1.5">
               <Smartphone className="w-3.5 h-3.5" />
-              {nativeAndroid ? 'Android (APK)' : 'Browser / Desktop'}
+              {nativeAndroid ? t('settings.about.runtimeApk', 'Android (APK)') : t('settings.about.runtimeWeb', 'Browser / Desktop')}
             </div>
           </div>
         </div>
 
         <FieldRow
-          title="Informasi Pembaruan"
-          description="Pemeriksaan versi terbaru dan unduhan pembaruan belum tersedia. Tidak ada klaim bahwa aplikasi sudah memeriksa pembaruan."
+          title={t('settings.about.updates', 'Informasi Pembaruan')}
+          description={t('settings.about.updatesDesc', 'Pembaruan didistribusikan melalui build APK rilis GitHub Actions.')}
           status="coming_soon"
         >
           <p className="text-[11px] text-slate-500">
-            Pembaruan saat ini didistribusikan manual melalui build APK/CI, bukan melalui pemeriksaan
-            otomatis dari dalam aplikasi.
+            {isEnglish
+              ? 'Updates are currently distributed manually via APK/CI builds, not via automatic in-app checks.'
+              : 'Pembaruan saat ini didistribusikan manual melalui build APK/CI, bukan melalui pemeriksaan otomatis dari dalam aplikasi.'}
           </p>
         </FieldRow>
 
         <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
           <div className="flex items-center gap-2">
             <FileCode className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">Lisensi Komponen</span>
+            <span className="text-xs font-semibold text-white">{t('settings.about.oss', 'Lisensi Komponen')}</span>
             <StatusBadge status="functional" />
           </div>
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
@@ -1831,8 +1882,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             ))}
           </ul>
           <p className="text-[10px] text-slate-500">
-            Daftar komponen open-source utama yang dipakai aplikasi ini. Teks lisensi lengkap tersedia di
-            masing-masing paket.
+            {isEnglish
+              ? 'List of core open-source components used by this app. Full license texts available in respective packages.'
+              : 'Daftar komponen open-source utama yang dipakai aplikasi ini. Teks lisensi lengkap tersedia di masing-masing paket.'}
           </p>
         </div>
 
@@ -1840,11 +1892,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div>
             <span className="font-bold text-slate-200">SYNTXRR STREAM</span>
             <span className="text-slate-500 mx-2">·</span>
-            <span>Versi {APP_VERSION}</span>
+            <span>{isEnglish ? `Version ${APP_VERSION}` : `Versi ${APP_VERSION}`}</span>
             <span className="text-slate-500 mx-2">·</span>
             <span className="font-mono text-blue-400">com.syntxrr.streamtools</span>
           </div>
-          <div className="text-slate-500">Mobile Streaming Studio &amp; TikTok LIVE Companion</div>
+          <div className="text-slate-500">{t('settings.about.footer', 'Mobile Streaming Studio & TikTok LIVE Companion')}</div>
         </div>
       </Section>
     </div>

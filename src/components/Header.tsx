@@ -1,5 +1,5 @@
-import React from 'react';
 import { NavigationTab, OperatingMode, StudioPreset } from '../types';
+import { useTranslation } from '../i18n/I18nContext';
 import {
   Radio,
   Monitor,
@@ -25,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   onOpenModeModal,
 }) => {
+  const { t } = useTranslation();
   const isModeA = operatingMode === 'MODE_A_TIKTOK_COMPANION' || operatingMode === 'MODE_A_OVERLAY';
 
   return (
@@ -34,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={() => onNavigate('dashboard')}
           className="flex items-center gap-2 text-left group"
-          title="Ke Dashboard"
+          title={t('header.toDashboard', 'Ke Dashboard')}
         >
           <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 group-hover:bg-blue-600/30 transition-colors">
             <Radio className="w-4 h-4 text-blue-400" />
@@ -43,11 +44,11 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="text-sm font-extrabold tracking-wider text-white flex items-center gap-1.5 leading-none">
               SYNTXRR STREAM
               <span className="text-[9px] text-blue-400 font-bold tracking-normal px-1 py-0.5 rounded bg-blue-950/80 border border-blue-800/60 uppercase">
-                STUDIO
+                {t('app.badge', 'STUDIO')}
               </span>
             </div>
             <div className="text-[10px] text-slate-400 font-medium tracking-tight mt-0.5">
-              Mobile Streaming Studio
+              {t('app.subtitle', 'Mobile Streaming Studio')}
             </div>
           </div>
         </button>
@@ -56,12 +57,12 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Zone 2: Desktop / Tablet navigation links */}
       <div className="hidden xl:flex items-center gap-4 text-xs font-semibold text-slate-300">
         {[
-          { id: 'dashboard' as NavigationTab, label: 'Dashboard' },
-          { id: 'studio' as NavigationTab, label: 'Studio' },
-          { id: 'live_center' as NavigationTab, label: 'Live' },
-          { id: 'remote_deck' as NavigationTab, label: 'Remote Deck' },
-          { id: 'integrations' as NavigationTab, label: 'Integrasi' },
-          { id: 'settings' as NavigationTab, label: 'Pengaturan' },
+          { id: 'dashboard' as NavigationTab, label: t('nav.dashboard', 'Dashboard') },
+          { id: 'studio' as NavigationTab, label: t('nav.studio', 'Studio') },
+          { id: 'live_center' as NavigationTab, label: t('nav.live_center', 'Live') },
+          { id: 'remote_deck' as NavigationTab, label: t('nav.remote_deck', 'Remote Deck') },
+          { id: 'integrations' as NavigationTab, label: t('nav.integrations', 'Integrasi') },
+          { id: 'settings' as NavigationTab, label: t('nav.settings', 'Pengaturan') },
         ].map((item) => (
           <button
             key={item.id}
@@ -81,14 +82,14 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-2 shrink-0">
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border border-amber-900/60 text-[11px]">
           <div className="w-2 h-2 rounded-full bg-amber-400" />
-          <span className="font-semibold text-amber-300">Belum Siaran</span>
+          <span className="font-semibold text-amber-300">{t('header.idle', 'Belum Siaran')}</span>
         </div>
 
         {activePreset && (
           <button
             onClick={() => onNavigate('studio')}
             className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border border-blue-900/40 text-[11px] text-blue-300 hover:border-blue-700/60 transition-colors"
-            title="Kelola Preset di Studio"
+            title={t('header.activePreset', 'Kelola Preset di Studio')}
           >
             <Layers className="w-3.5 h-3.5 text-blue-400" />
             <span className="truncate max-w-[100px]">{activePreset.name}</span>
@@ -98,11 +99,11 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onOpenModeModal}
           className="min-h-[38px] px-2.5 sm:px-3 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/50 text-blue-300 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
-          title="Ubah Mode Operasi Studio"
+          title={t('header.changeMode', 'Ubah Mode Operasi Studio')}
         >
           <Monitor className="w-3.5 h-3.5 text-blue-400" />
           <span className="whitespace-nowrap">
-            {isModeA ? 'Mode A: TikTok' : 'Mode B: Encoder'}
+            {isModeA ? t('header.modeA', 'Mode A: TikTok') : t('header.modeB', 'Mode B: Encoder')}
           </span>
         </button>
       </div>

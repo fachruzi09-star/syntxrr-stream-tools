@@ -1,37 +1,194 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ==========================================================================
+   CENTRALIZED THEME DESIGN TOKENS — SYNTXRR STREAM
+   Supported Themes: navy_dark (default), obsidian_dark, cyber_slate
+   ========================================================================== */
 :root {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color-scheme: dark;
+
+  /* Default: Navy Dark */
+  --app-bg: #080c16;
+  --app-surface: #0e1626;
+  --app-surface-hover: #131f36;
+  --app-card: #131f36;
+  --app-border: #1e293b;
+  --app-border-light: #334155;
+  --app-text: #f8fafc;
+  --app-text-muted: #94a3b8;
+  --app-accent: #2563eb;
+  --app-accent-hover: #1d4ed8;
+  --app-accent-text: #60a5fa;
+  --app-accent-subtle: rgba(37, 99, 235, 0.15);
+  --app-accent-border: rgba(59, 130, 246, 0.4);
 }
 
+[data-theme="navy_dark"] {
+  --app-bg: #080c16;
+  --app-surface: #0e1626;
+  --app-surface-hover: #131f36;
+  --app-card: #131f36;
+  --app-border: #1e293b;
+  --app-border-light: #334155;
+  --app-text: #f8fafc;
+  --app-text-muted: #94a3b8;
+  --app-accent: #2563eb;
+  --app-accent-hover: #1d4ed8;
+  --app-accent-text: #60a5fa;
+  --app-accent-subtle: rgba(37, 99, 235, 0.15);
+  --app-accent-border: rgba(59, 130, 246, 0.4);
+}
+
+[data-theme="obsidian_dark"] {
+  --app-bg: #030305;
+  --app-surface: #0d0d12;
+  --app-surface-hover: #171720;
+  --app-card: #14141c;
+  --app-border: #22222d;
+  --app-border-light: #323242;
+  --app-text: #ffffff;
+  --app-text-muted: #9ca3af;
+  --app-accent: #6366f1;
+  --app-accent-hover: #4f46e5;
+  --app-accent-text: #818cf8;
+  --app-accent-subtle: rgba(99, 102, 241, 0.15);
+  --app-accent-border: rgba(129, 140, 248, 0.4);
+}
+
+[data-theme="cyber_slate"] {
+  --app-bg: #0a0f18;
+  --app-surface: #131b28;
+  --app-surface-hover: #1c283c;
+  --app-card: #182233;
+  --app-border: #2a3a52;
+  --app-border-light: #3c5274;
+  --app-text: #f0fdf4;
+  --app-text-muted: #94a3b8;
+  --app-accent: #06b6d4;
+  --app-accent-hover: #0891b2;
+  --app-accent-text: #38bdf8;
+  --app-accent-subtle: rgba(6, 182, 212, 0.15);
+  --app-accent-border: rgba(56, 189, 248, 0.4);
+}
+
+/* Global Dynamic Theme Binding */
 body {
-  background-color: #080c16;
-  color: #f1f5f9;
+  background-color: var(--app-bg) !important;
+  color: var(--app-text) !important;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior-y: none;
   touch-action: manipulation;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Custom scrollbars for clean studio aesthetic */
+[data-theme] .bg-\[\#080c16\] {
+  background-color: var(--app-bg) !important;
+}
+
+[data-theme] .bg-\[\#080c16\]\/50 {
+  background-color: color-mix(in srgb, var(--app-bg) 50%, transparent) !important;
+}
+
+[data-theme] .bg-\[\#080c16\]\/90 {
+  background-color: color-mix(in srgb, var(--app-bg) 90%, transparent) !important;
+}
+
+[data-theme] .bg-\[\#080c16\]\/95 {
+  background-color: color-mix(in srgb, var(--app-bg) 95%, transparent) !important;
+}
+
+[data-theme] .bg-\[\#0e1626\],
+[data-theme] .bg-\[\#0e172a\],
+[data-theme] .bg-\[\#0a0f1d\] {
+  background-color: var(--app-surface) !important;
+}
+
+[data-theme] .bg-slate-900 {
+  background-color: var(--app-surface) !important;
+}
+
+[data-theme] .bg-slate-900\/60,
+[data-theme] .bg-slate-900\/80,
+[data-theme] .bg-slate-900\/90 {
+  background-color: color-mix(in srgb, var(--app-surface) 80%, transparent) !important;
+}
+
+/* Card, Sub-Panel & Pill Backgrounds */
+[data-theme] .bg-\[\#131f36\],
+[data-theme] .bg-\[\#131f38\],
+[data-theme] .bg-\[\#101b33\],
+[data-theme] .bg-\[\#111b2e\],
+[data-theme] .bg-\[\#0a1120\],
+[data-theme] .bg-\[\#1e293b\] {
+  background-color: var(--app-card) !important;
+}
+
+[data-theme] .bg-slate-800 {
+  background-color: var(--app-card) !important;
+}
+
+[data-theme] .bg-\[\#334155\] {
+  background-color: var(--app-surface-hover) !important;
+}
+
+/* Interactive Hover States */
+[data-theme] .hover\:bg-\[\#131f38\]:hover,
+[data-theme] .hover\:bg-\[\#1e293b\]:hover,
+[data-theme] .hover\:bg-\[\#334155\]:hover,
+[data-theme] .hover\:bg-slate-800:hover,
+[data-theme] .hover\:bg-slate-800\/80:hover,
+[data-theme] .hover\:bg-slate-700:hover {
+  background-color: var(--app-surface-hover) !important;
+}
+
+/* Theme Borders */
+[data-theme] .border-slate-800,
+[data-theme] .border-\[\#1e293b\],
+[data-theme] .border-slate-900 {
+  border-color: var(--app-border) !important;
+}
+
+[data-theme] .border-slate-800\/80,
+[data-theme] .border-slate-800\/90 {
+  border-color: color-mix(in srgb, var(--app-border) 85%, transparent) !important;
+}
+
+[data-theme] .border-slate-700,
+[data-theme] .border-\[\#334155\],
+[data-theme] .border-slate-600 {
+  border-color: var(--app-border-light) !important;
+}
+
+[data-theme] .hover\:border-slate-600:hover,
+[data-theme] .hover\:border-slate-700:hover {
+  border-color: var(--app-border-light) !important;
+}
+
+/* Selected Card Highlight Accent Border */
+[data-theme] .border-\[\#38BDF8\] {
+  border-color: var(--app-accent-text) !important;
+}
+
+/* Custom scrollbars for clean studio aesthetic with theme tokens */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #080c16;
+  background: var(--app-bg);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: var(--app-border);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: var(--app-border-light);
 }
 
 /* Audio visualizer bar animations */

@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavigationTab } from '../types';
+import { useTranslation } from '../i18n/I18nContext';
 import {
   LayoutDashboard,
   Tv,
@@ -22,18 +23,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onOpenDrawer,
   pendingRequestsCount = 0,
 }) => {
+  const { t } = useTranslation();
   const primaryTabs: {
     id: NavigationTab;
     label: string;
     icon: React.ElementType;
     badge?: number;
   }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'studio', label: 'Studio', icon: Tv },
-    { id: 'live_center', label: 'Live', icon: Radio },
-    { id: 'remote_deck', label: 'Deck', icon: Smartphone },
-    { id: 'integrations', label: 'Integrasi', icon: Plug },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'dashboard', label: t('nav.dashboard', 'Dashboard'), icon: LayoutDashboard },
+    { id: 'studio', label: t('nav.studio', 'Studio'), icon: Tv },
+    { id: 'live_center', label: t('nav.live_center', 'Live'), icon: Radio },
+    { id: 'remote_deck', label: t('nav.remote_deck', 'Deck'), icon: Smartphone },
+    { id: 'integrations', label: t('nav.integrations', 'Integrasi'), icon: Plug },
+    { id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings },
   ];
 
   return (

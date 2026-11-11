@@ -6,6 +6,7 @@ import {
   NavigationTab,
   IntegrationProvider,
 } from '../types';
+import { useTranslation } from '../i18n/I18nContext';
 import {
   Radio,
   Tv,
@@ -57,6 +58,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onOpenModeModal,
 }) => {
+  const { t, isEnglish } = useTranslation();
+
   const isModeA =
     settings.operatingMode === 'MODE_A_TIKTOK_COMPANION' ||
     settings.operatingMode === 'MODE_A_OVERLAY';
@@ -223,13 +226,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-blue-400 uppercase">
               <span>Mobile Streaming Studio</span>
               <span className="text-slate-500">·</span>
-              <span>Pusat Kendali Siaran</span>
+              <span>{isEnglish ? 'Broadcast Control Center' : 'Pusat Kendali Siaran'}</span>
             </div>
             <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight mt-1">
               SYNTXRR STREAM
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1.5 max-w-xl leading-relaxed">
-              Studio produksi siaran langsung Android mandiri. Kelola overlay visual, event interaktif penonton, song request, dan encoder streaming dalam satu aplikasi.
+              {t('dash.heroDesc')}
             </p>
           </div>
 
@@ -239,10 +242,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
               <div className="text-left">
                 <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
-                  Status Siaran
+                  {t('dash.broadcastStatus')}
                 </div>
                 <div className="text-xs font-bold text-amber-300">
-                  Belum Terhubung
+                  {t('dash.statusNotConnected')}
                 </div>
               </div>
             </div>
@@ -251,7 +254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <Cpu className="w-3.5 h-3.5 text-blue-400" />
               <div className="text-left">
                 <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
-                  Target Encoder
+                  {t('dash.targetEncoder')}
                 </div>
                 <div className="text-xs font-bold text-white font-mono">
                   {settings.targetResolution} · {settings.frameRate} FPS
@@ -267,17 +270,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
-              Pilihan Mode Operasi Siaran
+              {t('dash.modeSectionTitle')}
             </h2>
             <p className="text-xs text-slate-400">
-              Pilih alur kerja sesuai jenis siaran yang Anda jalankan di HP Android
+              {t('dash.modeSectionDesc')}
             </p>
           </div>
           <button
             onClick={onOpenModeModal}
             className="text-xs font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors min-h-[36px]"
           >
-            Arsitektur Mode <ArrowRight className="w-3.5 h-3.5" />
+            {t('dash.modeArchitecture')} <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
@@ -329,29 +332,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               {isModeA ? (
                 <span className="flex items-center gap-1 text-[11px] font-bold text-blue-400 bg-blue-950/90 border border-blue-700 px-2.5 py-1 rounded-full">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Mode Terpilih
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {t('dash.modeSelected')}
                 </span>
               ) : (
                 <span className="text-[11px] text-slate-400 hover:text-slate-200">
-                  Ketuk untuk Pilih
+                  {t('dash.tapToSelect')}
                 </span>
               )}
             </div>
 
             <h3 className="text-base font-bold text-white mt-4">
-              Mode A: TikTok LIVE Companion
+              {isEnglish ? 'Mode A: TikTok LIVE Companion' : 'Mode A: TikTok LIVE Companion'}
             </h3>
             <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-              Membantu streamer mengelola overlay pendamping, Text-to-Speech (TTS) komentar, dan floating control saat live streaming berjalan di aplikasi TikTok. Tidak memerlukan stream key.
+              {isEnglish
+                ? 'Assists streamers in managing companion overlays, comment TTS, and floating controls during TikTok LIVE. No stream key required.'
+                : 'Membantu streamer mengelola overlay pendamping, Text-to-Speech (TTS) komentar, dan floating control saat live streaming berjalan di aplikasi TikTok. Tidak memerlukan stream key.'}
             </p>
 
             <div className="mt-4 pt-3 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-[11px]">
               <div>
-                <span className="text-slate-400">Penggunaan RAM:</span>
-                <span className="ml-1 text-emerald-400 font-semibold font-mono">~45 MB (Rendah)</span>
+                <span className="text-slate-400">{isEnglish ? 'RAM Usage:' : 'Penggunaan RAM:'}</span>
+                <span className="ml-1 text-emerald-400 font-semibold font-mono">~45 MB ({isEnglish ? 'Low' : 'Rendah'})</span>
               </div>
               <div>
-                <span className="text-slate-400">Jendela Floating:</span>
+                <span className="text-slate-400">{isEnglish ? 'Floating Window:' : 'Jendela Floating:'}</span>
                 <span className="ml-1 text-slate-200 font-semibold">Overlay HUD</span>
               </div>
             </div>
@@ -369,7 +374,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {isModeA ? 'Mode A Aktif' : 'Pilih Mode A'}
+                {isModeA ? (isEnglish ? 'Mode A Active' : 'Mode A Aktif') : (isEnglish ? 'Select Mode A' : 'Pilih Mode A')}
               </button>
               <button
                 type="button"
@@ -379,7 +384,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 }}
                 className="py-2.5 px-3 rounded-xl bg-[#080c16] border border-slate-700 text-xs font-semibold text-slate-200 hover:text-white transition-colors"
               >
-                Buka Studio
+                {t('dash.openStudioBtn')}
               </button>
             </div>
           </div>
@@ -402,29 +407,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               {!isModeA ? (
                 <span className="flex items-center gap-1 text-[11px] font-bold text-sky-400 bg-sky-950/90 border border-sky-700 px-2.5 py-1 rounded-full">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Mode Terpilih
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {t('dash.modeSelected')}
                 </span>
               ) : (
                 <span className="text-[11px] text-slate-400 hover:text-slate-200">
-                  Ketuk untuk Pilih
+                  {t('dash.tapToSelect')}
                 </span>
               )}
             </div>
 
             <h3 className="text-base font-bold text-white mt-4">
-              Mode B: Streaming Encoder Mandiri
+              {isEnglish ? 'Mode B: Standalone Streaming Encoder' : 'Mode B: Streaming Encoder Mandiri'}
             </h3>
             <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-              Encoder siaran mandiri dengan input RTMP/RTMPS, penangkapan layar (MediaProjection), kamera, mikrofon, dan komposisi overlay langsung menjadi video stream 1080p.
+              {isEnglish
+                ? 'Standalone broadcast encoder with RTMP/RTMPS output, screen capture (MediaProjection), camera, microphone, and direct overlay compositing into a 1080p stream.'
+                : 'Encoder siaran mandiri dengan input RTMP/RTMPS, penangkapan layar (MediaProjection), kamera, mikrofon, dan komposisi overlay langsung menjadi video stream 1080p.'}
             </p>
 
             <div className="mt-4 pt-3 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-[11px]">
               <div>
-                <span className="text-slate-400">Pipa Encoder:</span>
+                <span className="text-slate-400">{isEnglish ? 'Encoder Pipe:' : 'Pipa Encoder:'}</span>
                 <span className="ml-1 text-sky-400 font-semibold font-mono">1080p H.264</span>
               </div>
               <div>
-                <span className="text-slate-400">Alokasi RAM:</span>
+                <span className="text-slate-400">{isEnglish ? 'RAM Allocation:' : 'Alokasi RAM:'}</span>
                 <span className="ml-1 text-amber-400 font-semibold font-mono">~130 MB</span>
               </div>
             </div>
@@ -442,7 +449,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {!isModeA ? 'Mode B Aktif' : 'Pilih Mode B'}
+                {!isModeA ? (isEnglish ? 'Mode B Active' : 'Mode B Aktif') : (isEnglish ? 'Select Mode B' : 'Pilih Mode B')}
               </button>
               <button
                 type="button"
@@ -471,10 +478,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 mt-0.5">
                 <Layers className="w-5 h-5 text-blue-400" />
-                Kontroler Native Floating HUD
+                {t('dash.hudTitle')}
               </h2>
               <p className="text-xs text-slate-300 mt-0.5 max-w-xl">
-                Bubble mengambang 56dp di atas aplikasi TikTok LIVE untuk kontrol cepat dan pemantauan siaran.
+                {t('dash.hudSubtitle')}
               </p>
             </div>
 
@@ -483,12 +490,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {isHudVisible ? (
                 <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-950/90 text-emerald-400 border border-emerald-600/60 flex items-center gap-2 shadow-sm">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  HUD Aktif di Layar
+                  {t('dash.hudActive')}
                 </span>
               ) : (
                 <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-900/90 text-slate-400 border border-slate-700 flex items-center gap-2 shadow-sm">
                   <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
-                  HUD Nonaktif
+                  {t('dash.hudInactive')}
                 </span>
               )}
             </div>
@@ -511,7 +518,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ) : (
                 <Eye className="w-4 h-4 text-blue-200" />
               )}
-              <span>Tampilkan Floating HUD</span>
+              <span>{t('dash.showHud')}</span>
             </button>
 
             <button
@@ -529,7 +536,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ) : (
                 <EyeOff className="w-4 h-4 text-rose-300" />
               )}
-              <span>Sembunyikan Floating HUD</span>
+              <span>{t('dash.hideHud')}</span>
             </button>
 
             <button
@@ -539,7 +546,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="py-3 px-4 rounded-xl bg-[#080c16] hover:bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white flex items-center justify-center gap-2 transition-colors"
             >
               <CheckCircle2 className="w-4 h-4 text-slate-400" />
-              <span>Cek Status Native</span>
+              <span>{t('dash.checkNativeStatus')}</span>
             </button>
           </div>
 
@@ -549,9 +556,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div>
-                  <div className="font-bold text-amber-300">Izin Overlay Belum Diaktifkan</div>
+                  <div className="font-bold text-amber-300">{t('dash.overlayWarningTitle')}</div>
                   <div className="text-slate-300 text-[11px] leading-relaxed">
-                    Android memerlukan izin "Tampilkan di atas aplikasi lain" agar bubble dapat melayang di atas TikTok.
+                    {t('dash.overlayWarningDesc')}
                   </div>
                 </div>
               </div>
@@ -560,7 +567,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 onClick={handleRequestOverlay}
                 className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shrink-0 self-start sm:self-auto transition-colors flex items-center gap-1.5"
               >
-                <span>Buka Izin Overlay</span>
+                <span>{t('dash.openOverlayPerm')}</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -614,14 +621,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
               <Sliders className="w-4 h-4 text-blue-400" />
-              Status Kesiapan Komponen Produksi
+              {t('dash.hardwareTitle')}
             </h2>
             <p className="text-xs text-slate-400">
-              Pemeriksaan hardware kamera, mikrofon, audio, dan encoder perangkat
+              {t('dash.hardwareDesc')}
             </p>
           </div>
           <span className="text-[11px] font-semibold text-blue-300 bg-blue-950/60 border border-blue-900/60 px-2.5 py-1 rounded-md">
-            Profil: Seimbang (Balanced)
+            {isEnglish ? 'Profile: Balanced' : 'Profil: Seimbang (Balanced)'}
           </span>
         </div>
 
@@ -629,47 +636,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80">
             <div className="flex items-center gap-1.5 text-slate-400 mb-1">
               <Camera className="w-3.5 h-3.5 text-blue-400" />
-              <span>Kamera Video</span>
+              <span>{isEnglish ? 'Video Camera' : 'Kamera Video'}</span>
             </div>
-            <div className="text-sm font-bold text-emerald-400">Siap (Kamera Depan/Belakang)</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Mendukung orientasi 9:16</div>
+            <div className="text-sm font-bold text-emerald-400">{isEnglish ? 'Ready (Front/Back)' : 'Siap (Kamera Depan/Belakang)'}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{isEnglish ? 'Supports 9:16 portrait' : 'Mendukung orientasi 9:16'}</div>
           </div>
 
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80">
             <div className="flex items-center gap-1.5 text-slate-400 mb-1">
               <Mic className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Mikrofon &amp; Audio</span>
+              <span>{isEnglish ? 'Microphone & Audio' : 'Mikrofon & Audio'}</span>
             </div>
-            <div className="text-sm font-bold text-emerald-400">Mic Aktif + SFX</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Audio internal didukung</div>
+            <div className="text-sm font-bold text-emerald-400">{isEnglish ? 'Mic Active + SFX' : 'Mic Aktif + SFX'}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{isEnglish ? 'Internal audio supported' : 'Audio internal didukung'}</div>
           </div>
 
           <div
             onClick={() => onNavigate('studio')}
             className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80 hover:border-blue-500/60 transition-colors cursor-pointer"
-            title="Buka Preset di Studio Editor"
+            title={isEnglish ? 'Open Preset in Studio Editor' : 'Buka Preset di Studio Editor'}
           >
             <div className="flex items-center gap-1.5 text-slate-400 mb-1">
               <Tv className="w-3.5 h-3.5 text-purple-400" />
-              <span>Status Scene Studio</span>
+              <span>{isEnglish ? 'Studio Scene Status' : 'Status Scene Studio'}</span>
             </div>
             <div className="text-sm font-bold text-white font-mono truncate">
               {activePreset ? activePreset.name : 'Mobile Gaming (9:16)'}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              {visibleElementsCount} elemen aktif ({activePreset?.canvasOrientation || '9:16'})
+              {visibleElementsCount} {isEnglish ? 'active elements' : 'elemen aktif'} ({activePreset?.canvasOrientation || '9:16'})
             </div>
           </div>
 
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800/80">
             <div className="flex items-center gap-1.5 text-slate-400 mb-1">
               <Thermometer className="w-3.5 h-3.5 text-amber-400" />
-              <span>Suhu &amp; Baterai</span>
+              <span>{isEnglish ? 'Thermal & Battery' : 'Suhu & Baterai'}</span>
             </div>
             <div className="text-sm font-bold text-white font-mono">
               36.2°C · ~4.1%/jam
             </div>
-            <div className="text-[10px] text-emerald-400 mt-0.5">Suhu aman (Dingin)</div>
+            <div className="text-[10px] text-emerald-400 mt-0.5">{isEnglish ? 'Thermal safe (Cool)' : 'Suhu aman (Dingin)'}</div>
           </div>
         </div>
       </section>
@@ -679,13 +686,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-blue-400 font-bold">
             <ShieldAlert className="w-4 h-4 text-blue-400" />
-            <span>Pemeriksaan Izin Sistem Android (Capacitor Ready)</span>
+            <span>{t('dash.permCheckTitle')}</span>
           </div>
           <button
             onClick={() => onNavigate('settings')}
             className="text-xs text-blue-400 hover:underline"
           >
-            Kelola Izin
+            {t('dash.managePerm')}
           </button>
         </div>
         <p className="leading-relaxed text-[11px] text-slate-300">
