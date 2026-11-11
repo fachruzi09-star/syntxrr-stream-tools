@@ -57,7 +57,15 @@ import { Radio } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { hideFloatingHud } from './services/nativeCompanionBridge';
+import {
+  hideFloatingHud,
+  onFloatingHudClick,
+  startCompanion,
+  stopCompanion,
+  isCompanionRunning,
+} from './services/nativeCompanionBridge';
+import { FloatingHudPanel } from './components/FloatingHudPanel';
+import type { HudMixerKey, HudPanelId } from './components/FloatingHudPanel';
 import { applyTheme } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 
@@ -764,6 +772,84 @@ export default function App() {
     });
   };
 
+  // ===================== FLOATING HUD PANEL (Phase 1) =====================
+  const [isHudPanelOpen, setIsHudPanelOpen] = useState(false);
+  const [companionRunning, setCompanionRunning] = useState(false);
+  const isNativeAndroidPlatform = Capacitor.getPlatform() === 'android';
+
+  /**
+   * Bubble native mengirim event "floatingHudClick" lewat bridge. Listener didaftarkan
+   * sekali dan dilepas saat unmount agar tidak ada listener ganda.
+   */
+  useEffect(() => {
+    let disposed = false;
+    let handle: Awaited<ReturnType<typeof onFloatingHudClick>> = null;
+
+    onFloatingHudClick(() => {
+      if (!disposed) setIsHudPanelOpen(true);
+    })
+      .then((registered) => {
+        if (disposed) {
+          void registered?.remove();
+          return;
+        }
+        handle = registered;
+      })
+      .catch((err) => {
+        console.warn('Gagal mendaftarkan listener Floating HUD:', err);
+      });
+
+    return () => {
+      disposed = true;
+      void handle?.remove();
+    };
+  }, []);
+
+  // Status Companion Service yang sebenarnya, bukan asumsi dari UI.
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+    let cancelled = false;
+    void isCompanionRunning()
+      .then((res) => {
+        if (!cancelled) setCompanionRunning(!!res?.isRunning);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isNativeAndroidPlatform]);
+
+  // Panel yang diizinkan mengikuti preferensi di Settings.
+  const hudPanels: HudPanelId[] = [];
+  if (settings.hudPanelChat !== false) hudPanels.push('chat');
+  if (settings.hudPanelSoundboard !== false) hudPanels.push('soundboard');
+  if (settings.hudPanelMusic !== false) hudPanels.push('music');
+  if (settings.hudPanelMixer !== false) hudPanels.push('mixer');
+  if (settings.hudPanelLiveControl !== false) hudPanels.push('live');
+  if (settings.hudPanelSettings !== false) hudPanels.push('settings');
+
+  /**
+   * Mixer HUD memakai handleUpdateSettings yang sudah men-debounce penulisan storage
+   * (300-500 ms), jadi slider tetap responsif tanpa menulis setiap piksel.
+   */
+  const handleHudMixerChange = (key: HudMixerKey, value: number) => {
+    const next: AppSettings = { ...settings };
+    if (key === 'audioVolume') next.audioVolume = value;
+    else if (key === 'soundboardVolume') next.soundboardVolume = value;
+    else next.micGain = value;
+    void handleUpdateSettings(next);
+  };
+
+  const handleToggleCompanion = async () => {
+    try {
+      const res = companionRunning ? await stopCompanion() : await startCompanion();
+      setCompanionRunning(!!res?.isRunning);
+      if (!res?.success && res?.message) console.warn(res.message);
+    } catch (err) {
+      console.warn('Gagal mengubah status Companion Service:', err);
+    }
+  };
+
   // Pastikan tulisan tertunda tidak hilang saat app di-background atau ditutup.
   useEffect(() => {
     const flushPending = () => {
@@ -1075,6 +1161,34 @@ export default function App() {
         onNavigate={handleNavigate}
         onOpenDrawer={() => setIsDrawerOpen(true)}
         pendingRequestsCount={pendingRequestsCount}
+      />
+
+      {/* Panel Floating HUD: dibuka dari bubble native lewat event floatingHudClick */}
+      <FloatingHudPanel
+        open={isHudPanelOpen}
+        onClose={() => setIsHudPanelOpen(false)}
+        enabledPanels={hudPanels}
+        alerts={alertHistory}
+        sounds={soundboardItems}
+        onPlaySound={handlePlaySoundFromDeck}
+        nowPlaying={nowPlayingSong}
+        isPlayingMusic={isPlayingMusic}
+        onTogglePlayMusic={handleTogglePlayMusic}
+        queueCount={unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
+        masterVolume={settings.audioVolume ?? 60}
+        soundboardVolume={settings.soundboardVolume ?? 80}
+        micGain={settings.micGain ?? 100}
+        onMixerChange={handleHudMixerChange}
+        operatingMode={settings.operatingMode}
+        isNativeAndroid={isNativeAndroidPlatform}
+        companionRunning={companionRunning}
+        onToggleCompanion={() => {
+          void handleToggleCompanion();
+        }}
+        onOpenSettingsPage={() => {
+          setIsHudPanelOpen(false);
+          handleNavigate('settings');
+        }}
       />
       </div>
     </I18nProvider>

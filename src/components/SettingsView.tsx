@@ -1100,7 +1100,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={async () => {
-                  const result = await showFloatingHud();
+                  const result = await showFloatingHud({
+                    sizeDp: settings.hudButtonSize ?? 48,
+                    opacity: settings.hudOpacity ?? 92,
+                    position: (settings.hudPosition ?? 'right') as 'left' | 'right',
+                  });
                   setHudMessage(result.message ?? (isEnglish ? 'Show HUD request sent.' : 'Permintaan tampilkan HUD dikirim.'));
                 }}
                 className="px-3 py-1.5 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
@@ -1164,18 +1168,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <p className="text-[10px] text-slate-500 leading-relaxed">
-          Ukuran, transparansi, dan posisi tersimpan di perangkat, tetapi FloatingHudManager.java masih
-          memakai ukuran internal (WRAP_CONTENT) sehingga nilai ini belum diterapkan ke bubble native.
-          Statusnya ditandai Pending, bukan diklaim aktif.
+          Ukuran, transparansi, dan sisi layar dikirim ke bubble native saat Anda menekan
+          "Tampilkan HUD Native". Posisi akhir tetap bisa digeser langsung oleh pengguna, dan
+          setelah itu posisi diingat oleh WindowManager Android.
         </p>
 
         <FieldRow
           title={t('settings.hudPosition.title', 'Posisi Tombol')}
           description={t(
             'settings.hudPosition.desc',
-            'Sisi layar tempat tombol mengambang berlabuh. Nilai tersimpan; posisi awal bubble native masih dihitung FloatingHudManager.'
+            'Sisi layar tempat tombol mengambang berlabuh saat pertama kali ditampilkan. Setelah itu pengguna bebas menggesernya.'
           )}
-          status="pending"
+          status={nativeAndroid ? 'active' : 'not_supported'}
         >
           <Segmented<HudPosition>
             options={[
