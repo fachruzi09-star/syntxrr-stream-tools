@@ -57,6 +57,8 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { hideFloatingHud } from './services/nativeCompanionBridge';
+import { applyTheme } from './theme/themeEngine';
+import { I18nProvider } from './i18n/I18nContext';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -164,6 +166,9 @@ export default function App() {
         if (savedSettings.audioVolume !== undefined) {
           audioEngine.setVolume(savedSettings.audioVolume);
         }
+
+        // Apply saved theme immediately on startup
+        applyTheme(savedSettings.theme || 'navy_dark');
       } catch (err) {
         console.error('Error loading data from IndexedDB:', err);
       } finally {
@@ -173,6 +178,11 @@ export default function App() {
 
     loadInitialData();
   }, []);
+
+  // Synchronize theme changes in real time across the entire application
+  useEffect(() => {
+    applyTheme(settings.theme || 'navy_dark');
+  }, [settings.theme]);
 
   useEffect(() => {
     const activeUrls = new Map(
@@ -877,7 +887,8 @@ export default function App() {
   const pendingRequestsCount = unifiedQueue.filter((s) => s.status === 'pending').length;
 
   return (
-    <div className="min-h-screen bg-[#080c16] text-slate-100 flex flex-col font-sans">
+    <I18nProvider language={settings.language || 'id-ID'}>
+      <div className="min-h-screen bg-[#080c16] text-slate-100 flex flex-col font-sans">
       {/* Top Header Bar */}
       <Header
         activeNav={activeNav}
@@ -1052,6 +1063,7 @@ export default function App() {
         onOpenDrawer={() => setIsDrawerOpen(true)}
         pendingRequestsCount={pendingRequestsCount}
       />
-    </div>
+      </div>
+    </I18nProvider>
   );
 }

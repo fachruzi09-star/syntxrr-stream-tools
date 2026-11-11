@@ -610,7 +610,7 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
     if (value === undefined || value === null) continue; // jangan menghapus nilai lokal
     merged[key] = value;
   }
-  return merged as AppSettings;
+  return merged as unknown as AppSettings;
 }
 
 export const StorageService = {
