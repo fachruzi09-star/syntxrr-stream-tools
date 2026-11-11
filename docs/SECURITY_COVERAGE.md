@@ -5,7 +5,7 @@ Status keseluruhan: **INCOMPLETE / BELUM LENGKAP.**
 Dokumen ini mencatat apa yang benar-benar diperiksa, apa yang belum tercakup, dan prasyarat untuk
 melengkapinya. Jangan pernah menyebut hasil ini sebagai "scan bersih" atau "dependency aman".
 
-Diperbarui pada HEAD `73ee907`, branch `appjet`.
+Diperbarui pada branch `appjet` setelah commit `1befd9f`.
 
 ## 1. Yang sudah diperiksa (npm / JavaScript)
 
@@ -53,18 +53,29 @@ wajib mengulang resolusi ini.
 
 `.github/workflows/android.yml` memiliki job `dependency-submission`
 (`gradle/actions/dependency-submission@v6`, `build-root-directory: android`,
-`dependency-graph: generate-and-submit`). Berdasarkan verifikasi pemilik: GitHub Dependency Graph
-mendeteksi npm **dan** Maven, Dependabot alerts aktif, dan kedua job hijau. Jalur ini menjaga graph
-Maven tetap mutakhir tanpa menambahkan scanner eksternal atau secret baru.
+`dependency-graph: generate-and-submit`). Jalur ini menjaga graph Maven tetap mutakhir tanpa
+menambahkan scanner eksternal atau secret baru.
 
-## 5. Prasyarat untuk melengkapi
+Status terverifikasi pemilik (2026-11-11): GitHub Dependency Graph mendeteksi dependency **npm dan
+Maven**, Dependabot alerts aktif, dan kedua job (`build` + `dependency-submission`) hijau. Artinya
+graph Maven untuk proyek Android sudah tersedia di GitHub dan advisory Gradle terbaca di sana.
 
-1. Jalankan job `dependency-submission` pada branch `appjet` melalui `workflow_dispatch` agar graph
-   Maven terkirim. Langkah ini belum dijalankan dari workspace ini.
-2. Setelah graph tersedia, periksa alert Dependabot kategori Maven dan prioritaskan temuan
-   high/critical pada library yang benar-benar masuk APK (AndroidX/Capacitor), bukan classpath plugin.
-3. Jika ada temuan runtime, perbaiki dengan menaikkan versi AGP/Gradle atau menambah constraint,
-   lalu jalankan ulang `bun run build` dan build APK di CI.
+Yang tidak dapat dilakukan dari sandbox ini hanyalah **membaca hasilnya**: tidak ada token GitHub
+maupun izin API di workspace, dan pencarian kredensial tidak diizinkan. Karena itu laporan dari sini
+tidak boleh mengutip angka advisory Maven seolah-olah baru diverifikasi.
+
+## 5. Prasyarat yang tersisa
+
+1. ~~Jalankan job `dependency-submission` pada branch `appjet` via `workflow_dispatch`~~ —
+   **sudah terpenuhi** (pemilik mengonfirmasi kedua job hijau dan graph Maven terdeteksi).
+2. Masih perlu dilakukan pemilik di UI GitHub: buka **Security → Dependabot alerts**, filter
+   ekosistem **Maven**, lalu prioritaskan temuan high/critical pada library yang benar-benar masuk
+   APK (AndroidX/Capacitor). Temuan pada classpath plugin (guava, netty, commons-compress, jose4j,
+   bouncycastle, jdom2) bersifat build-time dan tidak dikirim ke pengguna.
+3. Jika ada temuan runtime: naikkan versi AGP/Gradle atau tambahkan constraint, lalu jalankan ulang
+   `bun run build` dan build APK di CI.
+4. Scanner sandbox **tidak akan pernah** melaporkan status lengkap untuk proyek ini selama Android
+   SDK tidak tersedia. Itu batasan alat, bukan indikasi bahaya dan bukan bukti kebersihan.
 
 ## 6. Aturan pelaporan
 
