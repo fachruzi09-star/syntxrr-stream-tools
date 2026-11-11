@@ -851,8 +851,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </button>
       )}
 
+      {/* Dua kolom selalu aktif, termasuk di layar HP sempit (tanpa prefiks sm:) */}
       {activeCategory === null && (
-        {/* Dua kolom selalu aktif, termasuk di layar HP sempit (tanpa prefiks sm:) */}
         <div className="grid grid-cols-2 gap-2.5 w-full">
           {([
             { id: 'general' as const, title: t('settings.secA.title', 'Umum (General)'), detail: isEnglish ? 'Language, theme, haptics, and end-LIVE confirmation.' : 'Bahasa, tema, getar, dan konfirmasi akhiri siaran.' },
