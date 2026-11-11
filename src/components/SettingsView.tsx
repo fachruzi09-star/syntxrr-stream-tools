@@ -8,6 +8,7 @@ import {
   AppTheme,
   HudPosition,
 } from '../types';
+import { isHapticSupported, vibrateNow } from '../services/haptics';
 import {
   Settings,
   Monitor,
@@ -862,12 +863,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.haptic.title', 'Umpan Balik Getar (Haptic Feedback)')}
-          description={t('settings.haptic.desc', 'Getaran singkat saat kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE.')}
-          status={
-            typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
-              ? 'functional'
-              : 'not_supported'
-          }
+          description={t('settings.haptic.desc', 'Getaran singkat saat navigasi utama dan kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE.')}
+          status={isHapticSupported() ? 'functional' : 'not_supported'}
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
@@ -877,15 +874,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof navigator.vibrate === 'function') {
-                    const ok = navigator.vibrate(50);
-                    showSaveStatus(
-                      ok ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat') : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
-                      ok ? 'success' : 'error'
-                    );
-                  } else {
+                  if (!isHapticSupported()) {
                     showSaveStatus(t('settings.haptic.unsupported', 'Perangkat ini tidak mendukung getar melalui WebView'), 'error');
+                    return;
                   }
+                  const ok = vibrateNow('medium');
+                  showSaveStatus(
+                    ok ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat') : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
+                    ok ? 'success' : 'error'
+                  );
                 }}
                 className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
               >
@@ -902,7 +899,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.confirmEnd.title', 'Konfirmasi Sebelum Mengakhiri LIVE')}
-          description={t('settings.confirmEnd.desc', 'Tampilkan dialog konfirmasi proteksi sebelum sesi siaran ditutup untuk mencegah kepencet tidak sengaja.')}
+          description={t('settings.confirmEnd.desc', 'Preferensi tersimpan, tetapi belum ada aksi yang bisa dikonfirmasi: Mode A tidak dapat mengakhiri LIVE TikTok (aplikasi TikTok resmi yang mengontrol siaran) dan Mode B belum memiliki sesi encoder.')}
           status="pending"
         >
           <div className="flex items-center justify-between gap-3">
@@ -1002,8 +999,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.micGain.title', 'Sensitivitas / Gain Input')}
-          description={t('settings.micGain.desc', 'Penguatan diterapkan pada meter tes. Nilai belum memengaruhi encoder siaran.')}
-          status="pending"
+          description={t('settings.micGain.desc', 'Penguatan diterapkan pada meter tes mikrofon di halaman ini. Belum ada encoder siaran yang memakainya, jadi nilai ini tidak mengubah suara LIVE.')}
+          status="stored"
         >
           <SliderRow
             label={t('settings.micGain.title', 'Gain mikrofon')}
