@@ -308,7 +308,7 @@ function formatBytes(bytes: number): string {
 
 const APP_VERSION = '1.0.0';
 /** Versi dokumen spesifikasi Settings — bukan versi aplikasi. */
-const SETTINGS_SPEC_VERSION = '3.0.0';
+const SETTINGS_SPEC_VERSION = '4.0.0';
 
 const OSS_COMPONENTS = [
   { name: 'React / React DOM', license: 'MIT' },

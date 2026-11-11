@@ -2,15 +2,25 @@
 
 **Dokumen:** `docs/SETTINGS_SPEC.md`  
 **Aplikasi:** SYNTXRR STREAM (Android ID: `com.syntxrr.streamtools`)  
-**Versi Spesifikasi:** 3.0.0 (Master Release)  
-**Status Implementasi:** Foundation Complete (Single Scrollable Viewport, 6 Sections, Honest Status Badging)  
+**Versi Spesifikasi:** 4.0.0 (Category Grid Release)  
+**Status Implementasi:** Foundation Complete (Category Grid + Halaman per Kategori, 6 Sections, Honest Status Badging)  
 **Basis Kode:** `src/types/index.ts`, `src/services/storage.ts`, `src/components/SettingsView.tsx`, `android/app/src/main/java/com/syntxrr/streamtools/FloatingHudManager.java`
 
 ---
 
 ## 1. INVENTARIS LENGKAP ENAM BAGIAN SETTINGS
 
-Menu Settings disajikan dalam **satu halaman vertikal tunggal yang dapat di-scroll (single scrollable view)** untuk kenyamanan navigasi satu tangan pada smartphone:
+Menu Settings disajikan sebagai **grid kategori dua kolom** yang membuka **satu halaman per kategori**, dengan tombol kembali ke grid:
+
+| Kolom kiri | Kolom kanan |
+| --- | --- |
+| A. Umum (General) | B. Audio & Mikrofon |
+| C. Floating HUD | D. Grafis & Performa Perangkat |
+| E. Sistem | *(slot kosong)* |
+
+**Support SYNTXRR** (Donasi, Discord Server) dan **F. Tentang SYNTXRR** tampil langsung di halaman grid — tidak punya halaman kategori sendiri dan tidak perlu membuka halaman lain. Tombol Donasi dan Discord sengaja belum dihubungkan sampai pemilik menyediakan URL resmi.
+
+Setiap halaman kategori tetap satu kolom vertikal yang dapat di-scroll, sehingga nyaman dipakai satu tangan pada smartphone. Tidak ada tab bertingkat atau submenu di dalam kategori.
 
 ### A. Umum (General)
 Mengatur preferensi dasar aplikasi, visualisasi, dan interaksi pengguna.
@@ -70,7 +80,7 @@ Manajemen izin native, pembersihan cache, telemetri diagnostik, dan perlindungan
 
 ### F. Tentang SYNTXRR (About SYNTXRR)
 Identitas dan status legal aplikasi.
-* **Metadata Aplikasi:** Versi aplikasi (3.0.0 Master Release), Application ID (`com.syntxrr.streamtools`), dan Runtime Aktif (Android APK vs Browser/Desktop).
+* **Metadata Aplikasi:** Versi aplikasi (`1.0.0`, disamakan dengan `package.json` dan `versionName` Gradle), Application ID (`com.syntxrr.streamtools`), dan Runtime Aktif (Android APK vs Browser/Desktop).
 * **Informasi Pembaruan:** Penjelasan status rilis APK/CI dan ketiadaan OTA updater internal.
 * **Lisensi Open-Source:** Daftar 8 komponen OSS utama beserta lisensi resminya (React, Vite, Capacitor, Tailwind CSS, Lucide, Motion, Express, Google GenAI).
 
@@ -151,7 +161,8 @@ Untuk menjaga kerapian arsitektur dan mencegah kebingungan pengguna:
 
 Gunakan checklist ini pada setiap audit verifikasi berikutnya:
 
-- [ ] **Struktur Tunggal:** Keenam bagian (A sampai F) berada dalam satu halaman vertikal `SettingsView.tsx`.
+- [ ] **Struktur Grid:** Halaman grid menampilkan lima kategori (A–E) dalam dua kolom plus satu slot kosong; memilih kategori hanya menampilkan bagian itu dan tombol kembali mengembalikan ke grid.
+- [ ] **Support & About Inline:** Support SYNTXRR dan Tentang SYNTXRR tampil di halaman grid tanpa halaman terpisah, dan tombol Donasi/Discord tetap nonaktif sampai URL resmi tersedia.
 - [ ] **Persistensi Debounce:** Perubahan input disimpan ke `AppSettings` via debounce `SETTINGS_SAVE_DEBOUNCE_MS` dan tersimpan di IndexedDB.
 - [ ] **Kejujuran Status:** Tidak ada status "Berfungsi" pada fitur yang belum memiliki pipeline aktif (seperti RTMP pusher atau tema CSS global).
 - [ ] **VU Meter Mikrofon:** Meter level bergerak nyata saat mikrofon aktif dan izin diberikan.
