@@ -275,7 +275,18 @@ export async function isCompanionRunning(): Promise<CompanionStatusResult> {
  * Display the native Android Floating HUD bubble overlay over other apps.
  * Fallback gracefully in web/browser environment.
  */
-export async function showFloatingHud(): Promise<FloatingHudStatusResult> {
+export interface FloatingHudOptions {
+  /** Ukuran bubble dalam dp (native men-clamp ke 40-64). */
+  sizeDp?: number;
+  /** Opacity 30-100 (%). */
+  opacity?: number;
+  /** Sisi layar tempat bubble menempel. */
+  position?: 'left' | 'right';
+}
+
+export async function showFloatingHud(
+  options?: FloatingHudOptions
+): Promise<FloatingHudStatusResult> {
   if (!isNativeAndroid()) {
     return {
       success: false,
@@ -285,7 +296,7 @@ export async function showFloatingHud(): Promise<FloatingHudStatusResult> {
   }
 
   try {
-    const res = await FloatingCompanion.showFloatingHud();
+    const res = await FloatingCompanion.showFloatingHud(options ?? {});
     return {
       success: !!res?.success,
       isVisible: !!res?.isVisible,

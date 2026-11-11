@@ -71,6 +71,17 @@ public class FloatingHudManager {
      * @return true if successfully attached, false otherwise.
      */
     public synchronized boolean showHud() {
+        return showHud(56, 100, false);
+    }
+
+    /**
+     * Menampilkan bubble dengan ukuran, opacity, dan posisi dari halaman Settings.
+     *
+     * @param sizeDp         ukuran bubble dalam dp (di-clamp 40-64 agar tetap bisa disentuh)
+     * @param opacityPercent opacity 30-100 (%)
+     * @param alignLeft      true = menempel di kiri, false = menempel di kanan
+     */
+    public synchronized boolean showHud(int sizeDp, int opacityPercent, boolean alignLeft) {
         // 1. Guard against duplicate addView() calls
         if (mIsAttached && mFloatingView != null) {
             Log.d(TAG, "Floating HUD is already visible on screen.");
@@ -130,11 +141,27 @@ public class FloatingHudManager {
             // Position at top-left origin for accurate absolute coordinate calculations
             mParams.gravity = Gravity.TOP | Gravity.START;
 
-            // Default safe starting position (e.g. 16dp from right edge, 120dp from top)
+            // Posisi awal aman (16dp dari tepi kiri/kanan, 120dp dari atas) memakai nilai pengaturan
             DisplayMetrics metrics = mContext.getResources().getDisplayMetrics();
-            int viewSizePx = (int) (56 * metrics.density);
-            mParams.x = Math.max(0, metrics.widthPixels - viewSizePx - (int) (16 * metrics.density));
+            int clampedSizeDp = Math.min(64, Math.max(40, sizeDp));
+            int viewSizePx = (int) (clampedSizeDp * metrics.density);
+            int marginPx = (int) (16 * metrics.density);
+            mParams.x = alignLeft ? marginPx : Math.max(0, metrics.widthPixels - viewSizePx - marginPx);
             mParams.y = (int) (120 * metrics.density);
+
+            // Terapkan ukuran bubble dan opacity dari pengaturan (sebelumnya selalu 56dp / 100%)
+            if (bubbleContainer != null) {
+                android.view.ViewGroup.LayoutParams bubbleParams = bubbleContainer.getLayoutParams();
+                if (bubbleParams != null) {
+                    bubbleParams.width = viewSizePx;
+                    bubbleParams.height = viewSizePx;
+                    bubbleContainer.setLayoutParams(bubbleParams);
+                }
+            }
+            if (mFloatingView != null) {
+                int clampedOpacity = Math.min(100, Math.max(30, opacityPercent));
+                mFloatingView.setAlpha(clampedOpacity / 100f);
+            }
 
             // 6. Setup touch and drag handling
             setupTouchListener(mFloatingView, mParams, viewSizePx);

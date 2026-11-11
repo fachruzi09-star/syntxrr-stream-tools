@@ -223,6 +223,14 @@ public class FloatingCompanionPlugin extends Plugin {
     public void showFloatingHud(PluginCall call) {
         Context context = getContext();
 
+        // 0. Baca geometri bubble dari pengaturan (default 56dp, 100%, sisi kanan)
+        Integer sizeDpOpt = call.getInt("sizeDp", 56);
+        Integer opacityOpt = call.getInt("opacity", 100);
+        String positionOpt = call.getString("position", "right");
+        final int sizeDp = sizeDpOpt != null ? sizeDpOpt : 56;
+        final int opacity = opacityOpt != null ? opacityOpt : 100;
+        final boolean alignLeft = "left".equalsIgnoreCase(positionOpt);
+
         // 1. Verifikasi izin overlay terlebih dahulu
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             call.reject("Izin Tampilkan di Atas Aplikasi Lain (Overlay) belum aktif.");
@@ -235,7 +243,7 @@ public class FloatingCompanionPlugin extends Plugin {
                 @Override
                 public void run() {
                     try {
-                        boolean shown = getHudManager().showHud();
+                        boolean shown = getHudManager().showHud(sizeDp, opacity, alignLeft);
                         JSObject ret = new JSObject();
                         ret.put("success", shown);
                         ret.put("isVisible", shown);
