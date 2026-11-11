@@ -16,7 +16,7 @@ Menu Settings disajikan dalam **satu halaman vertikal tunggal yang dapat di-scro
 Mengatur preferensi dasar aplikasi, visualisasi, dan interaksi pengguna.
 * **Bahasa Antarmuka (`language`):** Pilihan `id-ID` (Indonesia) dan `en-US` (English).
 * **Tema Tampilan (`theme`):** Pilihan `navy_dark` (Default Dark Navy), `obsidian_dark` (Gelap Pekat), dan `cyber_slate` (Kontras Tinggi).
-* **Umpan Balik Getar (`hapticFeedback`):** Saklar aktivasi haptic dan tombol pengujian langsung (`navigator.vibrate(50)`).
+* **Umpan Balik Getar (`hapticFeedback`):** Saklar aktivasi haptic dan tombol pengujian langsung (`navigator.vibrate(50)`). Membutuhkan izin `android.permission.VIBRATE` yang dideklarasikan di `android/app/src/main/AndroidManifest.xml`; tanpa izin tersebut `navigator.vibrate()` tidak berefek pada APK.
 * **Konfirmasi Sebelum Mengakhiri LIVE (`confirmBeforeEndLive`):** Dialog konfirmasi proteksi sebelum mematikan sesi siaran langsung.
 
 ### B. Audio & Mikrofon (Audio & Microphone)
@@ -31,9 +31,11 @@ Mengatur penangkapan suara, pengujian input real-time, sensitivitas, dan filter 
 ### C. Floating HUD
 Mengatur overlay tombol melayang dan panel kontrol cepat yang digunakan bersama oleh Mode A dan Mode B.
 * **Aktivasi Floating HUD (`hudEnabled`):** Saklar On/Off dan tombol pemanggilan service overlay native Android.
-* **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp).
-* **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%).
-* **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`).
+* **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp). Status: **Pending**.
+* **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%). Status: **Pending**.
+* **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`). Status: **Pending**.
+
+> **Catatan kejujuran (hasil audit):** Ketiga nilai di atas **tersimpan** di perangkat dan ikut dalam backup, tetapi `FloatingHudManager.java` masih memakai ukuran internal (`WRAP_CONTENT`) serta posisi awal hasil perhitungannya sendiri. Nilai tersebut **belum diterapkan** ke bubble native, sehingga ditandai **Pending** di UI dan bukan diklaim aktif. Penerapannya memerlukan perubahan native (membaca preferensi lalu memanggil `updateViewLayout` / `setAlpha`), di luar cakupan patch Settings ini.
 * **Preferensi 6 Tampilan Panel:**
   * `hudPanelChat`: Toggle menu Chat & Gift.
   * `hudPanelSoundboard`: Toggle menu Soundboard SFX.
