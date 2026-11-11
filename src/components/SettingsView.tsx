@@ -1136,7 +1136,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <span className="text-[11px] font-semibold text-white">
                 {t('settings.hudSize.title', 'Ukuran Tombol')}
               </span>
-              <StatusBadge status="pending" />
+              <StatusBadge status="functional" />
             </div>
             <SliderRow
               label={t('settings.hudSize.slider', 'Ukuran')}
@@ -1153,7 +1153,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <span className="text-[11px] font-semibold text-white">
                 {t('settings.hudOpacity.title', 'Transparansi')}
               </span>
-              <StatusBadge status="pending" />
+              <StatusBadge status="functional" />
             </div>
             <SliderRow
               label={t('settings.hudOpacity.slider', 'Opasitas')}
@@ -1179,7 +1179,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             'settings.hudPosition.desc',
             'Sisi layar tempat tombol mengambang berlabuh saat pertama kali ditampilkan. Setelah itu pengguna bebas menggesernya.'
           )}
-          status={nativeAndroid ? 'active' : 'not_supported'}
+          status={nativeAndroid ? 'functional' : 'not_supported'}
         >
           <Segmented<HudPosition>
             options={[
