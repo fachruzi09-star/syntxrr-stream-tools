@@ -16,14 +16,14 @@ Menu Settings disajikan dalam **satu halaman vertikal tunggal yang dapat di-scro
 Mengatur preferensi dasar aplikasi, visualisasi, dan interaksi pengguna.
 * **Bahasa Antarmuka (`language`):** Pilihan `id-ID` (Indonesia) dan `en-US` (English).
 * **Tema Tampilan (`theme`):** Pilihan `navy_dark` (Default Dark Navy), `obsidian_dark` (Gelap Pekat), dan `cyber_slate` (Kontras Tinggi).
-* **Umpan Balik Getar (`hapticFeedback`):** Saklar aktivasi haptic dan tombol pengujian langsung (`navigator.vibrate(50)`). Membutuhkan izin `android.permission.VIBRATE` yang dideklarasikan di `android/app/src/main/AndroidManifest.xml`; tanpa izin tersebut `navigator.vibrate()` tidak berefek pada APK.
-* **Konfirmasi Sebelum Mengakhiri LIVE (`confirmBeforeEndLive`):** Dialog konfirmasi proteksi sebelum mematikan sesi siaran langsung.
+* **Umpan Balik Getar (`hapticFeedback`):** Saklar aktivasi haptic. Nilai ini dibaca oleh helper bersama `src/services/haptics.ts` (`triggerHaptic`) yang dipakai navigasi utama di `src/App.tsx`, serta oleh tombol pengujian di Settings. Membutuhkan izin `android.permission.VIBRATE` di `android/app/src/main/AndroidManifest.xml`; tanpa izin tersebut `navigator.vibrate()` tidak berefek pada APK. Status: **Berfungsi** bila WebView/perangkat mendukung, selain itu **Tidak Didukung**.
+* **Konfirmasi Sebelum Mengakhiri LIVE (`confirmBeforeEndLive`):** Preferensi tersimpan, tetapi belum ada aksi yang bisa dikonfirmasi. Mode A tidak boleh mengakhiri LIVE TikTok (aplikasi TikTok resmi yang mengontrol siaran) dan Mode B belum memiliki sesi encoder. Status: **Pending** — jangan membuat tombol stop palsu demi memenuhi preferensi ini.
 
 ### B. Audio & Mikrofon (Audio & Microphone)
 Mengatur penangkapan suara, pengujian input real-time, sensitivitas, dan filter pemrosesan suara.
 * **Pemilihan Mikrofon (`microphoneDeviceId`):** Dropdown enumerasi perangkat nyata (`audioinput`) dan tombol muat ulang daftar perangkat.
 * **Tes Mikrofon (Real-Time VU Meter):** Pengujian tingkat suara nyata menggunakan Web Audio API (`AudioContext`, `createMediaStreamSource`, `createAnalyser`) dengan loop RMS live.
-* **Sensitivitas / Gain Input (`micGain`):** Slider 0%–200% (kelipatan 5%) untuk amplifikasi sinyal input.
+* **Sensitivitas / Gain Input (`micGain`):** Slider 0%–200% (kelipatan 5%). Nilai ini benar-benar diterapkan pada meter VU tes mikrofon (`startMicTest` menghitung `gain = micGain / 100`), tetapi belum ada encoder siaran yang memakainya, sehingga tidak mengubah suara LIVE. Status: **Tersimpan (efek tes saja)**.
 * **Noise Suppression (`noiseSuppression`):** Constraint penekan derau latar belakang dari mikrofon.
 * **Echo Cancellation (`micEchoCancellation`):** Constraint pencegah gema suara dari speaker perangkat.
 * **Auto Gain Control (`micAutoGainControl`):** Normalisasi volume mikrofon secara otomatis.
@@ -34,6 +34,7 @@ Mengatur overlay tombol melayang dan panel kontrol cepat yang digunakan bersama 
 * **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp). Status: **Pending**.
 * **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%). Status: **Pending**.
 * **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`). Status: **Pending**.
+* **Catatan implementasi HUD:** `showFloatingHud()` di `src/services/nativeCompanionBridge.ts` dan `FloatingCompanionPlugin.java` tidak menerima parameter, sehingga ukuran, transparansi, dan posisi belum dikirim ke `FloatingHudManager`. Ketiga kontrol tetap **Pending** sampai bridge dan Java diperbarui lalu diverifikasi pada APK.
 
 > **Catatan kejujuran (hasil audit):** Ketiga nilai di atas **tersimpan** di perangkat dan ikut dalam backup, tetapi `FloatingHudManager.java` masih memakai ukuran internal (`WRAP_CONTENT`) serta posisi awal hasil perhitungannya sendiri. Nilai tersebut **belum diterapkan** ke bubble native, sehingga ditandai **Pending** di UI dan bukan diklaim aktif. Penerapannya memerlukan perubahan native (membaca preferensi lalu memanggil `updateViewLayout` / `setAlpha`), di luar cakupan patch Settings ini.
 * **Preferensi 6 Tampilan Panel:**
