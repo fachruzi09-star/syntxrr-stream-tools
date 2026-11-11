@@ -1130,9 +1130,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </FieldRow>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-white">
+                {t('settings.hudSize.title', 'Ukuran Tombol')}
+              </span>
+              <StatusBadge status="pending" />
+            </div>
             <SliderRow
-              label={t('settings.hudSize.title', 'Ukuran Tombol')}
+              label={t('settings.hudSize.slider', 'Ukuran')}
               value={settings.hudButtonSize ?? 48}
               min={40}
               max={64}
@@ -1141,9 +1147,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onChange={(value) => handleUpdate('hudButtonSize', value)}
             />
           </div>
-          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-white">
+                {t('settings.hudOpacity.title', 'Transparansi')}
+              </span>
+              <StatusBadge status="pending" />
+            </div>
             <SliderRow
-              label={t('settings.hudOpacity.title', 'Transparansi')}
+              label={t('settings.hudOpacity.slider', 'Opasitas')}
               value={settings.hudOpacity ?? 92}
               min={30}
               max={100}
@@ -1154,10 +1166,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        <p className="text-[10px] text-slate-500 leading-relaxed">
+          Ukuran, transparansi, dan posisi tersimpan di perangkat, tetapi FloatingHudManager.java masih
+          memakai ukuran internal (WRAP_CONTENT) sehingga nilai ini belum diterapkan ke bubble native.
+          Statusnya ditandai Pending, bukan diklaim aktif.
+        </p>
+
         <FieldRow
           title={t('settings.hudPosition.title', 'Posisi Tombol')}
-          description={t('settings.hudPosition.desc', 'Sisi layar tempat tombol mengambang berlabuh.')}
-          status="stored"
+          description={t(
+            'settings.hudPosition.desc',
+            'Sisi layar tempat tombol mengambang berlabuh. Nilai tersimpan; posisi awal bubble native masih dihitung FloatingHudManager.'
+          )}
+          status="pending"
         >
           <Segmented<HudPosition>
             options={[
