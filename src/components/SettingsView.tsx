@@ -918,7 +918,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ================================ A. GENERAL ================================ */}
       {activeCategory === 'general' && (
       <Section
-        index=""
         icon={SlidersHorizontal}
         title={t('settings.secA.title', 'Umum (General)')}
         subtitle={t('settings.secA.subtitle', 'Bahasa, tema tampilan, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran')}
@@ -1016,7 +1015,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ========================= B. AUDIO & MICROPHONE ========================= */}
       {activeCategory === 'audio' && (
       <Section
-        index=""
         icon={Mic}
         title={t('settings.secB.title', 'Audio & Mikrofon')}
         subtitle={t('settings.secB.subtitle', 'Pemilihan perangkat input, tes level mikrofon, sensitivitas, dan pemrosesan suara')}
@@ -1176,7 +1174,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ============================ C. FLOATING HUD ============================ */}
       {activeCategory === 'hud' && (
       <Section
-        index=""
         icon={PanelRight}
         title={t('settings.secC.title', 'Floating HUD')}
         subtitle={t('settings.secC.subtitle', 'Tombol mengambang kecil dan panel satu tangan yang dipakai bersama Mode A dan Mode B')}
@@ -1384,7 +1381,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ================= D. GRAPHICS & DEVICE PERFORMANCE ================= */}
       {activeCategory === 'performance' && (
       <Section
-        index=""
         icon={Monitor}
         title={t('settings.secD.title', 'Grafis & Performa Perangkat')}
         subtitle={t('settings.secD.subtitle', 'Uji perangkat, rekomendasi, kontrol manual resolusi/FPS/bitrate, dan peringatan risiko')}
@@ -1693,7 +1689,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* =============================== E. SYSTEM =============================== */}
       {activeCategory === 'system' && (
       <Section
-        index=""
         icon={Lock}
         title={t('settings.secE.title', 'Sistem (System)')}
         subtitle={t('settings.secE.subtitle', 'Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data')}
@@ -1980,7 +1975,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* About tampil langsung di halaman grid, tidak butuh halaman sendiri. */}
       {activeCategory === null && (
       <Section
-        index=""
         icon={Info}
         title={t('settings.secF.title', 'Tentang SYNTXRR')}
         subtitle={t('settings.secF.subtitle', 'Versi aplikasi, informasi pembaruan, dan lisensi komponen')}
