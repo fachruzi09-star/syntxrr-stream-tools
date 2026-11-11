@@ -41,12 +41,20 @@ Mengatur penangkapan suara, pengujian input real-time, sensitivitas, dan filter 
 ### C. Floating HUD
 Mengatur overlay tombol melayang dan panel kontrol cepat yang digunakan bersama oleh Mode A dan Mode B.
 * **Aktivasi Floating HUD (`hudEnabled`):** Saklar On/Off dan tombol pemanggilan service overlay native Android.
-* **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp). Status: **Pending**.
-* **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%). Status: **Pending**.
-* **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`). Status: **Pending**.
-* **Catatan implementasi HUD:** `showFloatingHud()` di `src/services/nativeCompanionBridge.ts` dan `FloatingCompanionPlugin.java` tidak menerima parameter, sehingga ukuran, transparansi, dan posisi belum dikirim ke `FloatingHudManager`. Ketiga kontrol tetap **Pending** sampai bridge dan Java diperbarui lalu diverifikasi pada APK.
+* **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp). Diterapkan langsung ke bubble yang sedang tampil.
+* **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%). Diterapkan langsung ke bubble yang sedang tampil.
+* **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`). Memindahkan bubble yang sedang tampil ke sisi yang dipilih.
+* **Catatan implementasi HUD:** `updateFloatingHud()` di `src/services/nativeCompanionBridge.ts` → `FloatingCompanionPlugin.java` → `FloatingHudManager.updateHudAppearance()` memakai `updateViewLayout()` + `setAlpha()` pada view yang sama. Tidak ada hide/show, tidak ada overlay kedua, dan posisi geser pengguna dipertahankan (sumbu Y tidak diubah; sumbu X hanya berpindah saat sisi benar-benar berubah).
 
-> **Catatan kejujuran (hasil audit):** Ketiga nilai di atas **tersimpan** di perangkat dan ikut dalam backup, tetapi `FloatingHudManager.java` masih memakai ukuran internal (`WRAP_CONTENT`) serta posisi awal hasil perhitungannya sendiri. Nilai tersebut **belum diterapkan** ke bubble native, sehingga ditandai **Pending** di UI dan bukan diklaim aktif. Penerapannya memerlukan perubahan native (membaca preferensi lalu memanggil `updateViewLayout` / `setAlpha`), di luar cakupan patch Settings ini.
+> **Catatan kejujuran:** Ukuran, transparansi, dan sisi kini benar-benar diterapkan ke bubble native saat nilainya berubah. Status ini adalah hasil inspeksi source + build web yang lulus; verifikasi pada APK fisik (bubble terlihat berubah tanpa hide/show) **belum** dilakukan.
+
+* **Perilaku Launcher (bubble sebagai master toggle):**
+  * Kondisi tertutup: hanya bubble native yang tampil, tanpa ikon atau panel.
+  * Tap bubble: muncul launcher berisi enam ikon kecil (Chat, Soundboard, Music, Audio Mixer, Live Control, Settings) di sisi layar yang sama dengan bubble.
+  * Tap ikon: hanya panel fitur itu yang terbuka, kompak (`17rem`, `max-h 42vh`, scroll internal) dan bukan halaman penuh. Berpindah ikon menggantikan panel sebelumnya — panel tidak pernah bertumpuk.
+  * Tap bubble lagi: panel dan launcher ditutup, bubble tetap tampil.
+  * Drag tidak dihitung sebagai tap (ambang gerak native `CLICK_THRESHOLD_PX`).
+  * Tidak ada backdrop penuh layar atau dimming; panel memakai `pointer-events-none` pada wadah agar area LIVE tetap bisa disentuh.
 * **Preferensi 6 Tampilan Panel:**
   * `hudPanelChat`: Toggle menu Chat & Gift.
   * `hudPanelSoundboard`: Toggle menu Soundboard SFX.
