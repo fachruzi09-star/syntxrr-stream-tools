@@ -306,7 +306,9 @@ function formatBytes(bytes: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '1.0.0';
+/** Versi dokumen spesifikasi Settings — bukan versi aplikasi. */
+const SETTINGS_SPEC_VERSION = '3.0.0';
 
 const OSS_COMPONENTS = [
   { name: 'React / React DOM', license: 'MIT' },
@@ -1288,8 +1290,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       >
         <FieldRow
           title={t('settings.deviceTest.title', 'Uji Perangkat Otomatis')}
-          description={t('settings.deviceTest.desc', 'Membaca jumlah core logis CPU, perkiraan memori, dan renderer GPU WebGL nyata.')}
-          status="pending"
+          description={t('settings.deviceTest.desc', 'Membaca jumlah core logis CPU, perkiraan memori, dan renderer GPU WebGL nyata. Uji ini berjalan di WebView/browser; benchmark native Android belum tersedia.')}
+          status="functional"
         >
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1329,11 +1331,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {t('settings.deviceTest.notTested', 'Belum ada hasil uji. Tidak ada nilai yang ditampilkan sebelum pengujian dijalankan.')}
             </p>
           )}
-          <p className="text-[10px] text-slate-500">
-            {isEnglish
-              ? 'Thermal test, native MediaCodec encoder profile, and Android hardware benchmarks require native modules — marked Coming Soon.'
-              : 'Uji termal, profil encoder MediaCodec, dan benchmark hardware Android memerlukan modul native — statusnya Coming Soon.'}
-          </p>
+          <div className="space-y-1.5">
+            {[
+              {
+                label: isEnglish ? 'Thermal test (native Android)' : 'Uji termal (native Android)',
+                detail: isEnglish
+                  ? 'Needs a native thermal module. No native implementation exists yet.'
+                  : 'Memerlukan modul termal native. Implementasinya belum ada.',
+              },
+              {
+                label: isEnglish ? 'MediaCodec encoder benchmark' : 'Benchmark encoder MediaCodec',
+                detail: isEnglish
+                  ? 'Needs the native RTMP/MediaCodec pipeline. Not available yet.'
+                  : 'Memerlukan pipeline RTMP/MediaCodec native. Belum tersedia.',
+              },
+            ].map((row) => (
+              <div
+                key={row.label}
+                className="flex items-start justify-between gap-2 p-2 rounded-lg bg-[#0e1626] border border-slate-800"
+              >
+                <div>
+                  <div className="text-[11px] text-slate-200">{row.label}</div>
+                  <div className="text-[10px] text-slate-500">{row.detail}</div>
+                </div>
+                <StatusBadge status="coming_soon" />
+              </div>
+            ))}
+          </div>
         </FieldRow>
 
         <FieldRow
@@ -1860,7 +1884,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.version', 'Versi Aplikasi')}</div>
             <div className="text-sm font-bold text-white">{APP_VERSION}</div>
             <div className="text-[10px] text-slate-500">
-              {isEnglish ? 'Settings spec version' : 'Versi spesifikasi Settings'}
+              {isEnglish
+                ? `package.json & Gradle versionName · spec v${SETTINGS_SPEC_VERSION}`
+                : `package.json & versionName Gradle · spesifikasi v${SETTINGS_SPEC_VERSION}`}
             </div>
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
@@ -1885,14 +1911,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           status="pending"
         >
           <ul className="space-y-1 text-[11px] text-slate-400 font-mono break-words">
-            <li>package.json → name: &quot;react-example&quot; · version: &quot;0.0.0&quot;</li>
-            <li>android/app/build.gradle → versionName: &quot;1.0&quot;</li>
+            <li>package.json → name: &quot;syntxrr-stream&quot; · version: &quot;1.0.0&quot;</li>
+            <li>android/app/build.gradle → versionName: &quot;1.0.0&quot; · versionCode: 1</li>
             <li>capacitor.config.ts → appId: &quot;com.syntxrr.streamtools&quot;</li>
           </ul>
           <p className="text-[10px] text-slate-500 leading-relaxed">
             {isEnglish
-              ? 'Application ID matches. The 3.0.0 shown above is the Settings spec version; package.json and Gradle still carry placeholder or inconsistent version values. Aligning them requires changes to package.json and Gradle, which are outside this task scope.'
-              : 'Application ID sudah sesuai. Angka 3.0.0 di atas adalah versi spesifikasi Settings; package.json dan Gradle masih memuat nilai versi placeholder atau tidak konsisten. Penyelarasan memerlukan perubahan package.json dan Gradle, di luar cakupan tugas ini.'}
+              ? `Application ID, package name and version are now aligned. The app version ${APP_VERSION} matches package.json and Gradle versionName; ${SETTINGS_SPEC_VERSION} is only the Settings specification revision.`
+              : `Application ID, nama package, dan versi sudah selaras. Versi aplikasi ${APP_VERSION} sama dengan package.json dan versionName Gradle; ${SETTINGS_SPEC_VERSION} hanyalah revisi spesifikasi Settings.`}
           </p>
         </FieldRow>
 
