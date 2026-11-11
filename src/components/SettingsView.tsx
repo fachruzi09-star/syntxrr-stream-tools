@@ -1858,7 +1858,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.version', 'Versi Aplikasi')}</div>
             <div className="text-sm font-bold text-white">{APP_VERSION}</div>
-            <div className="text-[10px] text-slate-500">Master Release</div>
+            <div className="text-[10px] text-slate-500">
+              {isEnglish ? 'Settings spec version' : 'Versi spesifikasi Settings'}
+            </div>
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.appId', 'Application ID')}</div>
@@ -1872,6 +1874,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </div>
+
+        <FieldRow
+          title={t('settings.about.buildMeta', 'Metadata Build')}
+          description={t(
+            'settings.about.buildMetaDesc',
+            'Sumber metadata build sebenarnya, diverifikasi langsung dari file proyek.'
+          )}
+          status="pending"
+        >
+          <ul className="space-y-1 text-[11px] text-slate-400 font-mono break-words">
+            <li>package.json → name: &quot;react-example&quot; · version: &quot;0.0.0&quot;</li>
+            <li>android/app/build.gradle → versionName: &quot;1.0&quot;</li>
+            <li>capacitor.config.ts → appId: &quot;com.syntxrr.streamtools&quot;</li>
+          </ul>
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            {isEnglish
+              ? 'Application ID matches. The 3.0.0 shown above is the Settings spec version; package.json and Gradle still carry placeholder or inconsistent version values. Aligning them requires changes to package.json and Gradle, which are outside this task scope.'
+              : 'Application ID sudah sesuai. Angka 3.0.0 di atas adalah versi spesifikasi Settings; package.json dan Gradle masih memuat nilai versi placeholder atau tidak konsisten. Penyelarasan memerlukan perubahan package.json dan Gradle, di luar cakupan tugas ini.'}
+          </p>
+        </FieldRow>
 
         <FieldRow
           title={t('settings.about.updates', 'Informasi Pembaruan')}
