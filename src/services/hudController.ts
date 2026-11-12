@@ -283,3 +283,20 @@ export function buildMixerModel(options: {
     emptyText: 'Mikrofon tidak terdeteksi.',
   };
 }
+
+/**
+ * Snapshot semua panel sekaligus.
+ *
+ * Dikirim ke overlay native agar panel mana pun dapat digambar tanpa WebView aktif.
+ * Ini hanya cache tampilan: tidak ada event LIVE yang dibuat atau diproses di native.
+ */
+export interface HudSnapshot {
+  panels: Partial<Record<'chat' | 'soundboard' | 'music' | 'mixer', HudStateModel>>;
+  generatedAt: number;
+}
+
+export function buildHudSnapshot(
+  panels: Partial<Record<'chat' | 'soundboard' | 'music' | 'mixer', HudStateModel>>
+): HudSnapshot {
+  return { panels, generatedAt: Date.now() };
+}

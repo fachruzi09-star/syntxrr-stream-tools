@@ -520,10 +520,21 @@ export async function onFloatingHudClick(
 }
 
 /**
- * Kirim model panel HUD ke overlay native.
+ * Snapshot semua panel untuk overlay native (lihat buildHudSnapshot di hudController).
+ * Native menyimpan tiap panel agar tetap dapat digambar saat WebView ditangguhkan.
+ */
+export interface HudSnapshotPayload {
+  panels: Partial<Record<HudPanelId, HudStateModel>>;
+  generatedAt: number;
+}
+
+/**
+ * Kirim model panel (atau snapshot semua panel) HUD ke overlay native.
  * Native hanya menggambar; semua nilai berasal dari state aplikasi.
  */
-export async function pushHudState(model: HudStateModel): Promise<{ accepted: boolean }> {
+export async function pushHudState(
+  model: HudStateModel | HudSnapshotPayload
+): Promise<{ accepted: boolean }> {
   if (!isNativeAndroid()) {
     return { accepted: false };
   }
