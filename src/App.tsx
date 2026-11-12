@@ -73,6 +73,7 @@ import { FloatingHudPanel } from './components/FloatingHudPanel';
 import type { HudMixerKey } from './components/FloatingHudPanel';
 import {
   HUD_EVENT_BUFFER_LIMIT,
+  buildHudSnapshot,
   buildChatModel,
   buildMixerModel,
   buildMusicModel,
@@ -1266,74 +1267,103 @@ export default function App() {
     };
   }, [isNativeAndroidPlatform]);
 
-  // Kirim model panel aktif ke overlay native (hanya bila isinya berubah).
-  useEffect(() => {
-    if (!isNativeAndroidPlatform || !hudPanel) return;
-
-    const chatEvents = hudChatPaused ? hudPausedSnapshot ?? hudEvents : hudEvents;
-
-    let model: HudStateModel;
-    if (hudPanel === 'chat') {
-      model = buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread);
-    } else if (hudPanel === 'soundboard') {
-      model = buildSoundboardModel(
-        soundboardItems.map((sound) => ({
-          id: sound.id,
-          name: sound.name,
-          icon: sound.icon,
-          isFavorite: sound.isFavorite,
-          isQuickSlot: sound.isQuickSlot,
-        })),
-        hudPlayingSoundId,
-        soundboardVolumeUnit,
-        ttsVolumeUnit
-      );
-    } else if (hudPanel === 'music') {
-      model = buildMusicModel({
-        nowPlaying: nowPlayingSong ? { title: nowPlayingSong.title, artist: nowPlayingSong.artist } : null,
-        isPlaying: isPlayingMusic,
-        muted: musicMuted,
-        volume: Math.round(musicVolumeUnit * 100),
-        queue: unifiedQueue
-          .filter((item) => item.status === 'approved' || item.status === 'pending' || item.status === 'playing')
-          .slice(0, 6)
-          .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
-        requestSourceConnected: hudEventSourceStatus(hudEvents).tone === 'ok',
-      });
-    } else {
-      model = buildMixerModel({
+  // Bangun model untuk panel mana pun dari state aplikasi yang sama (single source of truth).
+  const buildHudModelFor = useCallback(
+    (panel: HudPanelId): HudStateModel => {
+      const chatEvents = hudChatPaused ? hudPausedSnapshot ?? hudEvents : hudEvents;
+      if (panel === 'chat') {
+        return buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread);
+      }
+      if (panel === 'soundboard') {
+        return buildSoundboardModel(
+          soundboardItems.map((sound) => ({
+            id: sound.id,
+            name: sound.name,
+            icon: sound.icon,
+            isFavorite: sound.isFavorite,
+            isQuickSlot: sound.isQuickSlot,
+          })),
+          hudPlayingSoundId,
+          soundboardVolumeUnit,
+          ttsVolumeUnit
+        );
+      }
+      if (panel === 'music') {
+        return buildMusicModel({
+          nowPlaying: nowPlayingSong
+            ? { title: nowPlayingSong.title, artist: nowPlayingSong.artist }
+            : null,
+          isPlaying: isPlayingMusic,
+          muted: musicMuted,
+          volume: Math.round(musicVolumeUnit * 100),
+          queue: unifiedQueue
+            .filter(
+              (item) =>
+                item.status === 'approved' || item.status === 'pending' || item.status === 'playing'
+            )
+            .slice(0, 6)
+            .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
+          requestSourceConnected: hudEventSourceStatus(hudEvents).tone === 'ok',
+        });
+      }
+      return buildMixerModel({
         available: micState.available,
         metering: micState.metering,
         muted: micState.muted,
         level: micState.level,
         reason: micState.reason,
       });
-    }
+    },
+    [
+      hudChatPaused,
+      hudPausedSnapshot,
+      hudEvents,
+      hudChatTab,
+      hudUnread,
+      soundboardItems,
+      hudPlayingSoundId,
+      soundboardVolumeUnit,
+      ttsVolumeUnit,
+      nowPlayingSong,
+      isPlayingMusic,
+      musicMuted,
+      musicVolumeUnit,
+      unifiedQueue,
+      micState,
+    ]
+  );
 
-    const serialized = JSON.stringify(model);
+  // Kirim snapshot SEMUA panel, bukan hanya panel aktif. Native menyimpan tiap panel sehingga
+  // panel mana pun tetap dapat digambar ketika WebView ditangguhkan Android di background.
+  const sendHudSnapshot = useCallback(() => {
+    if (!isNativeAndroidPlatform) return;
+    const snapshot = buildHudSnapshot({
+      chat: buildHudModelFor('chat'),
+      soundboard: buildHudModelFor('soundboard'),
+      music: buildHudModelFor('music'),
+      mixer: buildHudModelFor('mixer'),
+    });
+    const serialized = JSON.stringify(snapshot);
     if (serialized === hudLastModelRef.current) return;
     hudLastModelRef.current = serialized;
-    void pushHudState(model);
-  }, [
-    hudPanel,
-    hudChatTab,
-    hudChatPaused,
-    hudPausedSnapshot,
-    hudEvents,
-    hudUnread,
-    soundboardItems,
-    hudPlayingSoundId,
-    soundboardVolumeUnit,
-    ttsVolumeUnit,
-    nowPlayingSong,
-    isPlayingMusic,
-    musicMuted,
-    musicVolumeUnit,
-    unifiedQueue,
-    micState,
-    hudResyncNonce,
-    isNativeAndroidPlatform,
-  ]);
+    void pushHudState(snapshot);
+  }, [buildHudModelFor, isNativeAndroidPlatform]);
+
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+    const timer = window.setTimeout(sendHudSnapshot, 180);
+    return () => window.clearTimeout(timer);
+  }, [sendHudSnapshot, hudResyncNonce, isNativeAndroidPlatform]);
+
+  // Kirim snapshot tepat sebelum WebView dijeda agar cache native lengkap saat background.
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') sendHudSnapshot();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [sendHudSnapshot, isNativeAndroidPlatform]);
 
   useEffect(() => {
     return () => {

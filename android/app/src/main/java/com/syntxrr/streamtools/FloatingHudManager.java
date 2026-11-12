@@ -327,14 +327,49 @@ public class FloatingHudManager {
         return mIsAttached && mRoot != null;
     }
 
+    /** Cache model per panel agar overlay dapat digambar tanpa WebView aktif. */
+    private final java.util.HashMap<String, String> mPanelModels = new java.util.HashMap<>();
+
     /**
      * Terima model panel dari WebView (JSON). Native hanya menggambar; seluruh nilai
      * (musik, queue, soundboard, mic) berasal dari state aplikasi.
+     *
+     * Menerima dua bentuk: satu model panel, atau snapshot berisi semua panel
+     * ({"panels":{chat:...,soundboard:...,music:...,mixer:...}}). Snapshot disimpan per
+     * panel sehingga panel mana pun tetap dapat dirender saat WebView dijeda Android.
      */
     public synchronized boolean pushPanelModel(@Nullable String json) {
         if (json == null || json.isEmpty()) {
             return false;
         }
+
+        try {
+            JSONObject root = new JSONObject(json);
+            JSONObject panels = root.optJSONObject("panels");
+            if (panels != null) {
+                java.util.Iterator<String> keys = panels.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    JSONObject model = panels.optJSONObject(key);
+                    if (model != null) {
+                        mPanelModels.put(key, model.toString());
+                    }
+                }
+                if (mActivePanel != null && mPanelModels.containsKey(mActivePanel)) {
+                    mLastModelJson = mPanelModels.get(mActivePanel);
+                }
+                renderLastKnownModel(false);
+                return true;
+            }
+            String panel = root.optString("panel", "");
+            if (!panel.isEmpty()) {
+                mPanelModels.put(panel, json);
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Model HUD tidak valid: " + e.getMessage());
+            return false;
+        }
+
         mLastModelJson = json;
 
         if (!mIsAttached || mRoot == null || mPanelContainer == null) {
@@ -517,14 +552,22 @@ public class FloatingHudManager {
      * tampil seolah-olah masih segar atau masih terhubung ke sumber LIVE.
      */
     public synchronized void renderLastKnownModel(boolean markStale) {
-        if (mActivePanel == null || mLastModelJson == null) {
+        if (mActivePanel == null) {
             return;
         }
         if (!mIsAttached || mPanelContainer == null) {
             return;
         }
+        // Utamakan cache khusus panel aktif; mLastModelJson hanya cadangan.
+        String cachedJson = mPanelModels.get(mActivePanel);
+        if (cachedJson == null) {
+            cachedJson = mLastModelJson;
+        }
+        if (cachedJson == null) {
+            return;
+        }
         try {
-            JSONObject cached = new JSONObject(mLastModelJson);
+            JSONObject cached = new JSONObject(cachedJson);
             if (!mActivePanel.equals(cached.optString("panel"))) {
                 return; // cache milik panel lain
             }
