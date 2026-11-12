@@ -7,9 +7,12 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -23,6 +26,11 @@ import com.getcapacitor.annotation.PermissionCallback;
  * FloatingCompanionPlugin
  * Capacitor bridge exposing native Android permissions and CompanionService
  * lifecycle controls to the SYNTXRR STREAM web application.
+ *
+ * Phase 4.4: the Floating HUD is fully native (it must render above the TikTok app),
+ * so the WebView only supplies panel models and receives user commands. No state is
+ * duplicated here: the plugin forwards "hudCommand" / "hudPanelChanged" to JS, and JS
+ * applies them to the same services that the main application uses.
  */
 @CapacitorPlugin(
     name = "FloatingCompanion",
@@ -197,7 +205,7 @@ public class FloatingCompanionPlugin extends Plugin {
     }
 
     // =========================================================================
-    // NATIVE FLOATING HUD INTEGRATION (PHASE 4.3B)
+    // NATIVE FLOATING HUD INTEGRATION
     // =========================================================================
 
     @Nullable
@@ -207,6 +215,8 @@ public class FloatingCompanionPlugin extends Plugin {
         if (mHudManager == null) {
             Context appContext = getContext().getApplicationContext();
             mHudManager = new FloatingHudManager(appContext);
+
+            // Kompatibilitas: event klik bubble tetap dikirim.
             mHudManager.setOnHudClickListener(new FloatingHudManager.OnHudClickListener() {
                 @Override
                 public void onHudClick() {
@@ -215,13 +225,52 @@ public class FloatingCompanionPlugin extends Plugin {
                     notifyListeners("floatingHudClick", data);
                 }
             });
+
+            // Kanal perintah HUD -> aplikasi (satu sumber kebenaran di JS).
+            mHudManager.setOnHudActionListener(new FloatingHudManager.OnHudActionListener() {
+                @Override
+                public void onHudCommand(@NonNull String action, @Nullable String id, int value) {
+                    JSObject data = new JSObject();
+                    data.put("action", action);
+                    if (id != null) {
+                        data.put("id", id);
+                    }
+                    data.put("value", value);
+                    notifyListeners("hudCommand", data);
+                }
+
+                @Override
+                public void onHudPanelChanged(@Nullable String panel) {
+                    JSObject data = new JSObject();
+                    if (panel != null) {
+                        data.put("panel", panel);
+                    }
+                    notifyListeners("hudPanelChanged", data);
+                }
+            });
         }
         return mHudManager;
+    }
+
+    private void runOnUi(Runnable task) {
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(task);
+        } else {
+            task.run();
+        }
     }
 
     @PluginMethod
     public void showFloatingHud(PluginCall call) {
         Context context = getContext();
+
+        // 0. Baca geometri bubble dari pengaturan (default 56dp, 100%, sisi kanan)
+        Integer sizeDpOpt = call.getInt("sizeDp", 56);
+        Integer opacityOpt = call.getInt("opacity", 100);
+        String positionOpt = call.getString("position", "right");
+        final int sizeDp = sizeDpOpt != null ? sizeDpOpt : 56;
+        final int opacity = opacityOpt != null ? opacityOpt : 100;
+        final boolean alignLeft = "left".equalsIgnoreCase(positionOpt);
 
         // 1. Verifikasi izin overlay terlebih dahulu
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
@@ -230,60 +279,91 @@ public class FloatingCompanionPlugin extends Plugin {
         }
 
         // 2. Operasi WindowManager harus dijalankan pada UI Thread
-        if (getActivity() != null) {
-            getActivity().runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        boolean shown = getHudManager().showHud();
-                        JSObject ret = new JSObject();
-                        ret.put("success", shown);
-                        ret.put("isVisible", shown);
-                        ret.put("message", shown
-                            ? "Floating HUD berhasil ditampilkan."
-                            : "Gagal menampilkan Floating HUD.");
-                        call.resolve(ret);
-                    } catch (Exception e) {
-                        call.reject("Gagal menampilkan Floating HUD: " + e.getMessage());
-                    }
-                }
-            });
-        } else {
+        if (getActivity() == null) {
             call.reject("Activity tidak tersedia untuk menampilkan Floating HUD.");
+            return;
         }
+
+        getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean shown = getHudManager().showHud(sizeDp, opacity, alignLeft);
+                    JSObject ret = new JSObject();
+                    ret.put("success", shown);
+                    ret.put("isVisible", shown);
+                    ret.put("message", shown
+                        ? "Floating HUD berhasil ditampilkan."
+                        : "Gagal menampilkan Floating HUD.");
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    call.reject("Gagal menampilkan Floating HUD: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /**
+     * Terapkan ukuran/opacity/sisi pada bubble yang sedang tampil, tanpa hide/show.
+     * Dipanggil dari Settings setiap kali slider atau pilihan sisi berubah.
+     */
+    @PluginMethod
+    public void updateFloatingHud(PluginCall call) {
+        Integer sizeDpOpt = call.getInt("sizeDp", 56);
+        Integer opacityOpt = call.getInt("opacity", 100);
+        String positionOpt = call.getString("position", "right");
+        final int sizeDp = sizeDpOpt != null ? sizeDpOpt : 56;
+        final int opacity = opacityOpt != null ? opacityOpt : 100;
+        final boolean alignLeft = "left".equalsIgnoreCase(positionOpt);
+
+        // Belum tampil: tidak perlu membuat overlay baru, nilai akan dipakai saat showHud.
+        if (mHudManager == null || !mHudManager.isHudVisible()) {
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("isVisible", false);
+            ret.put("updated", false);
+            ret.put("message", "Floating HUD belum tampil; nilai akan dipakai saat ditampilkan.");
+            call.resolve(ret);
+            return;
+        }
+
+        runOnUi(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean updated = getHudManager().updateHudAppearance(sizeDp, opacity, alignLeft);
+                    JSObject ret = new JSObject();
+                    ret.put("success", true);
+                    ret.put("isVisible", true);
+                    ret.put("updated", updated);
+                    ret.put("message", updated
+                        ? "Tampilan Floating HUD diperbarui."
+                        : "Gagal memperbarui tampilan Floating HUD.");
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    call.reject("Gagal memperbarui Floating HUD: " + e.getMessage());
+                }
+            }
+        });
     }
 
     @PluginMethod
     public void hideFloatingHud(PluginCall call) {
-        if (getActivity() != null) {
-            getActivity().runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        boolean hidden = getHudManager().hideHud();
-                        JSObject ret = new JSObject();
-                        ret.put("success", hidden);
-                        ret.put("isVisible", false);
-                        ret.put("message", "Floating HUD disembunyikan.");
-                        call.resolve(ret);
-                    } catch (Exception e) {
-                        call.reject("Gagal menyembunyikan Floating HUD: " + e.getMessage());
-                    }
+        runOnUi(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean hidden = getHudManager().hideHud();
+                    JSObject ret = new JSObject();
+                    ret.put("success", hidden);
+                    ret.put("isVisible", false);
+                    ret.put("message", "Floating HUD disembunyikan.");
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    call.reject("Gagal menyembunyikan Floating HUD: " + e.getMessage());
                 }
-            });
-        } else {
-            // Fallback jika activity dilepas, tetap jalankan hide
-            try {
-                boolean hidden = getHudManager().hideHud();
-                JSObject ret = new JSObject();
-                ret.put("success", hidden);
-                ret.put("isVisible", false);
-                ret.put("message", "Floating HUD disembunyikan.");
-                call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Gagal menyembunyikan Floating HUD: " + e.getMessage());
             }
-        }
+        });
     }
 
     @PluginMethod
@@ -291,6 +371,67 @@ public class FloatingCompanionPlugin extends Plugin {
         boolean visible = mHudManager != null && mHudManager.isHudVisible();
         JSObject ret = new JSObject();
         ret.put("isVisible", visible);
+        call.resolve(ret);
+    }
+
+    /**
+     * Kirim model panel HUD (JSON) dari WebView ke overlay native.
+     * Model berisi judul, status, tab, slider, meter, dan baris daftar.
+     */
+    @PluginMethod
+    public void pushHudState(PluginCall call) {
+        String model = call.getString("model");
+        if (model == null || model.isEmpty()) {
+            call.reject("Model HUD kosong.");
+            return;
+        }
+
+        final String payload = model;
+        runOnUi(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean accepted = getHudManager().pushPanelModel(payload);
+                    JSObject ret = new JSObject();
+                    ret.put("accepted", accepted);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    call.reject("Gagal mengirim model HUD: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /** Tutup toolbar/panel tanpa menyembunyikan bubble. */
+    @PluginMethod
+    public void collapseHudContent(PluginCall call) {
+        runOnUi(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    getHudManager().collapseContent();
+                    JSObject ret = new JSObject();
+                    ret.put("success", true);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    call.reject("Gagal menutup panel HUD: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /** Status HUD saat ini, dipakai aplikasi untuk menampilkan kondisi sebenarnya. */
+    @PluginMethod
+    public void getHudState(PluginCall call) {
+        JSObject ret = new JSObject();
+        boolean visible = mHudManager != null && mHudManager.isHudVisible();
+        ret.put("isVisible", visible);
+        if (mHudManager != null) {
+            String panel = mHudManager.getActivePanel();
+            if (panel != null) {
+                ret.put("activePanel", panel);
+            }
+        }
         call.resolve(ret);
     }
 

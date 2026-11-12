@@ -8,6 +8,7 @@ import {
   AppTheme,
   HudPosition,
 } from '../types';
+import { isHapticSupported, vibrateNow } from '../services/haptics';
 import {
   Settings,
   Monitor,
@@ -55,6 +56,7 @@ import {
   checkOverlayPermission,
   requestOverlayPermission,
   showFloatingHud,
+  updateFloatingHud,
   hideFloatingHud,
 } from '../services/nativeCompanionBridge';
 import { applyTheme } from '../theme/themeEngine';
@@ -98,19 +100,14 @@ const StatusBadge: React.FC<{ status: UiStatus }> = ({ status }) => {
  * ========================================================================== */
 
 const Section: React.FC<{
-  index: string;
   icon: React.ElementType;
   title: string;
   subtitle: string;
   children: React.ReactNode;
-}> = ({ index, icon: Icon, title, subtitle, children }) => {
-  const { isEnglish } = useTranslation();
+}> = ({ icon: Icon, title, subtitle, children }) => {
   return (
     <section className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-slate-800 space-y-4">
       <div>
-        <div className="text-[10px] font-semibold tracking-wider text-blue-400 uppercase">
-          {isEnglish ? `Section ${index}` : `Bagian ${index}`}
-        </div>
         <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 mt-0.5">
           <Icon className="w-4 h-4 text-blue-400" />
           {title}
@@ -305,7 +302,9 @@ function formatBytes(bytes: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '1.0.0';
+/** Versi dokumen spesifikasi Settings — bukan versi aplikasi. */
+const SETTINGS_SPEC_VERSION = '4.0.0';
 
 const OSS_COMPONENTS = [
   { name: 'React / React DOM', license: 'MIT' },
@@ -379,6 +378,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Floating HUD
   const [hudMessage, setHudMessage] = useState<string | null>(null);
+
+  /**
+   * Terapkan perubahan ukuran/opacity/sisi ke bubble native yang SEDANG tampil.
+   * Tidak ada hide/show: native memakai updateViewLayout pada view yang sama, jadi
+   * posisi geser pengguna dan status tampil tetap terjaga.
+   */
+  const hudAppearanceSignatureRef = useRef<string>('');
+  useEffect(() => {
+    const sizeDp = settings.hudButtonSize ?? 48;
+    const opacity = settings.hudOpacity ?? 92;
+    const position = (settings.hudPosition ?? 'right') as 'left' | 'right';
+    const signature = `${sizeDp}|${opacity}|${position}`;
+    if (hudAppearanceSignatureRef.current === signature) return;
+    const isBaseline = hudAppearanceSignatureRef.current === '';
+    hudAppearanceSignatureRef.current = signature;
+    if (isBaseline) return; // nilai awal hanya dijadikan baseline, tidak dikirim
+    void updateFloatingHud({ sizeDp, opacity, position }).catch(() => {});
+  }, [settings.hudButtonSize, settings.hudOpacity, settings.hudPosition]);
 
   const nativeAndroid = useMemo(() => isNativeAndroid(), []);
 
@@ -771,13 +788,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   /* --------------------------------------------------------------- RENDER */
 
   const warnings = computeWarnings(settings, isEnglish);
+
+  // Phase 5: navigasi kategori (grid dua kolom). null = halaman grid.
+  const [activeCategory, setActiveCategory] = useState<
+    'general' | 'audio' | 'hud' | 'performance' | 'system' | null
+  >(null);
   const hudPanelMenus: Array<{ id: string; name: string; detail: string; status: UiStatus }> = [
-    { id: 'chat', name: '1. Chat', detail: isEnglish ? 'Chat, gifts, viewers, and LIVE activity.' : 'Chat, gift, penonton, dan aktivitas LIVE.', status: 'not_connected' },
-    { id: 'soundboard', name: '2. Soundboard', detail: isEnglish ? '4–6 favorite sounds sourced from Studio.' : '4–6 suara favorit yang bersumber dari Studio.', status: 'pending' },
-    { id: 'music', name: '3. Music', detail: isEnglish ? 'Now playing track, queue, history, Song Request, and volume.' : 'Lagu aktif, antrean, riwayat, Song Request, dan volume.', status: 'pending' },
-    { id: 'mixer', name: '4. Audio Mixer', detail: isEnglish ? 'Master, Music, Soundboard, Mic, and Mute.' : 'Master, Music, Soundboard, Mic, dan Mute.', status: 'pending' },
-    { id: 'live', name: '5. Live Control', detail: isEnglish ? 'Pause, Resume, Stop — only if active mode natively supports it.' : 'Pause, Resume, Stop — hanya jika mode yang dipilih benar-benar mendukung.', status: 'not_connected' },
-    { id: 'settings', name: '6. Settings', detail: isEnglish ? 'Opens Floating HUD configuration within this Settings page.' : 'Membuka konfigurasi Floating HUD pada halaman Settings ini.', status: 'pending' },
+    { id: 'chat', name: '1. Chat', detail: isEnglish ? 'Chat, gifts, likes, and follows with pause/latest controls.' : 'Chat, gift, like, dan follow dengan kontrol jeda/terbaru.', status: 'not_connected' },
+    { id: 'soundboard', name: '2. Soundboard', detail: isEnglish ? 'Favorite sounds from Studio, one at a time, plus soundboard and TTS volume.' : 'Suara favorit dari Studio, satu per satu, plus volume soundboard dan TTS.', status: 'pending' },
+    { id: 'music', name: '3. Music', detail: isEnglish ? 'Now playing, play/pause, next (streamer only), mute, volume, and queue.' : 'Lagu aktif, play/pause, next (hanya streamer), mute, volume, dan antrean.', status: 'pending' },
+    { id: 'mixer', name: '4. Audio Mixer', detail: isEnglish ? 'Microphone mute and real input level for the SYNTXRR audio path.' : 'Mute mikrofon dan level input nyata untuk jalur audio SYNTXRR.', status: 'pending' },
   ];
 
   return (
@@ -790,7 +810,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {t('settings.title', 'Pengaturan Studio (Settings)')}
           </h1>
           <p className="text-xs text-slate-400">
-            {t('settings.subtitle', 'Satu halaman pengaturan — Umum, Audio, Floating HUD, Grafis, Sistem, dan Tentang')}
+            {t('settings.subtitle', 'Pilih kategori pengaturan. Support dan Tentang tersedia langsung di halaman ini.')}
           </p>
         </div>
 
@@ -818,9 +838,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
+      {/* ================= KATEGORI GRID (2 kolom) ================= */}
+      {activeCategory !== null && (
+        <button
+          type="button"
+          onClick={() => setActiveCategory(null)}
+          className="self-start px-3 py-1.5 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
+        >
+          ← {isEnglish ? 'Back to categories' : 'Kembali ke kategori'}
+        </button>
+      )}
+
+      {/* Dua kolom selalu aktif, termasuk di layar HP sempit (tanpa prefiks sm:) */}
+      {activeCategory === null && (
+        <div className="grid grid-cols-2 gap-2.5 w-full">
+          {([
+            { id: 'general' as const, title: t('settings.secA.title', 'Umum (General)'), detail: isEnglish ? 'Language, theme, haptics, and end-LIVE confirmation.' : 'Bahasa, tema, getar, dan konfirmasi akhiri siaran.' },
+            { id: 'audio' as const, title: t('settings.secB.title', 'Audio & Mikrofon'), detail: isEnglish ? 'Microphone, test meter, gain, and processing.' : 'Mikrofon, meter tes, gain, dan pemrosesan.' },
+            { id: 'hud' as const, title: t('settings.secC.title', 'Floating HUD'), detail: isEnglish ? 'Bubble size, opacity, side, and six panel menus.' : 'Ukuran bubble, opacity, sisi, dan enam menu panel.' },
+            { id: 'performance' as const, title: t('settings.secD.title', 'Grafis & Performa Perangkat'), detail: isEnglish ? 'Device test, recommendations, manual resolution/FPS/bitrate.' : 'Uji perangkat, rekomendasi, resolusi/FPS/bitrate manual.' },
+            { id: 'system' as const, title: t('settings.secE.title', 'Sistem'), detail: isEnglish ? 'Permissions, storage & cache, diagnostics.' : 'Izin, penyimpanan & cache, diagnostik.' },
+          ]).map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              onClick={() => setActiveCategory(category.id)}
+              className="text-left p-3 rounded-2xl bg-[#080c16] border border-slate-800 hover:border-blue-500 transition-colors min-w-0"
+            >
+              <div className="flex items-center justify-end gap-2">
+                <span className="text-[10px] text-slate-500">{isEnglish ? 'Open' : 'Buka'} →</span>
+              </div>
+              <div className="mt-1 text-[13px] font-semibold text-white leading-snug break-words">{category.title}</div>
+              <p className="mt-0.5 text-[10px] text-slate-400 leading-snug">{category.detail}</p>
+            </button>
+          ))}
+          {/* Slot kosong sesuai layout yang disetujui; selalu tampil agar grid tetap 2 kolom */}
+          <div className="rounded-2xl border border-dashed border-slate-800 min-h-[76px]" aria-hidden="true" />
+        </div>
+      )}
+
+      {/* ================= SUPPORT SYNTXRR (langsung di halaman grid) ================= */}
+      {activeCategory === null && (
+        <div className="p-4 rounded-2xl bg-[#080c16] border border-slate-800 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-white">{isEnglish ? 'Support SYNTXRR' : 'Dukung SYNTXRR'}</span>
+            <StatusBadge status="not_connected" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {([
+              {
+                label: 'Donasi',
+                detail: isEnglish
+                  ? 'Official donation link has not been supplied yet, so this action is intentionally not wired.'
+                  : 'Tautan donasi resmi belum tersedia, jadi tombol ini sengaja belum dihubungkan.',
+              },
+              {
+                label: 'Discord Server',
+                detail: isEnglish
+                  ? 'Official Discord invite has not been supplied yet, so this action is intentionally not wired.'
+                  : 'Undangan Discord resmi belum tersedia, jadi tombol ini sengaja belum dihubungkan.',
+              },
+            ]).map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                disabled
+                className="text-left p-3 rounded-xl bg-[#0e1626] border border-slate-800 disabled:opacity-70"
+              >
+                <div className="text-[11px] font-semibold text-white">{item.label}</div>
+                <p className="mt-0.5 text-[10px] text-slate-500 leading-snug">{item.detail}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ================================ A. GENERAL ================================ */}
+      {activeCategory === 'general' && (
       <Section
-        index="A"
         icon={SlidersHorizontal}
         title={t('settings.secA.title', 'Umum (General)')}
         subtitle={t('settings.secA.subtitle', 'Bahasa, tema tampilan, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran')}
@@ -862,12 +957,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.haptic.title', 'Umpan Balik Getar (Haptic Feedback)')}
-          description={t('settings.haptic.desc', 'Getaran singkat saat kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE.')}
-          status={
-            typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
-              ? 'functional'
-              : 'not_supported'
-          }
+          description={t('settings.haptic.desc', 'Getaran singkat saat navigasi utama dan kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE.')}
+          status={isHapticSupported() ? 'functional' : 'not_supported'}
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
@@ -877,15 +968,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof navigator.vibrate === 'function') {
-                    const ok = navigator.vibrate(50);
-                    showSaveStatus(
-                      ok ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat') : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
-                      ok ? 'success' : 'error'
-                    );
-                  } else {
+                  if (!isHapticSupported()) {
                     showSaveStatus(t('settings.haptic.unsupported', 'Perangkat ini tidak mendukung getar melalui WebView'), 'error');
+                    return;
                   }
+                  const ok = vibrateNow('medium');
+                  showSaveStatus(
+                    ok ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat') : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
+                    ok ? 'success' : 'error'
+                  );
                 }}
                 className="px-2.5 py-1 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
               >
@@ -902,7 +993,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.confirmEnd.title', 'Konfirmasi Sebelum Mengakhiri LIVE')}
-          description={t('settings.confirmEnd.desc', 'Tampilkan dialog konfirmasi proteksi sebelum sesi siaran ditutup untuk mencegah kepencet tidak sengaja.')}
+          description={t('settings.confirmEnd.desc', 'Preferensi tersimpan, tetapi belum ada aksi yang bisa dikonfirmasi: Mode A tidak dapat mengakhiri LIVE TikTok (aplikasi TikTok resmi yang mengontrol siaran) dan Mode B belum memiliki sesi encoder.')}
           status="pending"
         >
           <div className="flex items-center justify-between gap-3">
@@ -917,10 +1008,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </FieldRow>
       </Section>
+      )}
 
       {/* ========================= B. AUDIO & MICROPHONE ========================= */}
+      {activeCategory === 'audio' && (
       <Section
-        index="B"
         icon={Mic}
         title={t('settings.secB.title', 'Audio & Mikrofon')}
         subtitle={t('settings.secB.subtitle', 'Pemilihan perangkat input, tes level mikrofon, sensitivitas, dan pemrosesan suara')}
@@ -1002,8 +1094,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.micGain.title', 'Sensitivitas / Gain Input')}
-          description={t('settings.micGain.desc', 'Penguatan diterapkan pada meter tes. Nilai belum memengaruhi encoder siaran.')}
-          status="pending"
+          description={t('settings.micGain.desc', 'Penguatan diterapkan pada meter tes mikrofon di halaman ini. Belum ada encoder siaran yang memakainya, jadi nilai ini tidak mengubah suara LIVE.')}
+          status="stored"
         >
           <SliderRow
             label={t('settings.micGain.title', 'Gain mikrofon')}
@@ -1075,10 +1167,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
       </Section>
+      )}
 
       {/* ============================ C. FLOATING HUD ============================ */}
+      {activeCategory === 'hud' && (
       <Section
-        index="C"
         icon={PanelRight}
         title={t('settings.secC.title', 'Floating HUD')}
         subtitle={t('settings.secC.subtitle', 'Tombol mengambang kecil dan panel satu tangan yang dipakai bersama Mode A dan Mode B')}
@@ -1103,7 +1196,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={async () => {
-                  const result = await showFloatingHud();
+                  const result = await showFloatingHud({
+                    sizeDp: settings.hudButtonSize ?? 48,
+                    opacity: settings.hudOpacity ?? 92,
+                    position: (settings.hudPosition ?? 'right') as 'left' | 'right',
+                  });
                   setHudMessage(result.message ?? (isEnglish ? 'Show HUD request sent.' : 'Permintaan tampilkan HUD dikirim.'));
                 }}
                 className="px-3 py-1.5 rounded-lg bg-[#0e1626] border border-slate-700 text-[11px] text-slate-200 hover:border-blue-500"
@@ -1130,9 +1227,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </FieldRow>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-white">
+                {t('settings.hudSize.title', 'Ukuran Tombol')}
+              </span>
+              <StatusBadge status="functional" />
+            </div>
             <SliderRow
-              label={t('settings.hudSize.title', 'Ukuran Tombol')}
+              label={t('settings.hudSize.slider', 'Ukuran')}
               value={settings.hudButtonSize ?? 48}
               min={40}
               max={64}
@@ -1141,9 +1244,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onChange={(value) => handleUpdate('hudButtonSize', value)}
             />
           </div>
-          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+          <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-white">
+                {t('settings.hudOpacity.title', 'Transparansi')}
+              </span>
+              <StatusBadge status="functional" />
+            </div>
             <SliderRow
-              label={t('settings.hudOpacity.title', 'Transparansi')}
+              label={t('settings.hudOpacity.slider', 'Opasitas')}
               value={settings.hudOpacity ?? 92}
               min={30}
               max={100}
@@ -1154,10 +1263,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        <p className="text-[10px] text-slate-500 leading-relaxed">
+          Ukuran, transparansi, dan sisi layar langsung diterapkan ke bubble native yang sedang
+          tampil — tanpa perlu menyembunyikan HUD lalu menampilkannya lagi. Posisi geser pengguna
+          tetap dipertahankan, dan nilai tersimpan dipakai lagi setelah aplikasi dibuka ulang.
+        </p>
+
         <FieldRow
           title={t('settings.hudPosition.title', 'Posisi Tombol')}
-          description={t('settings.hudPosition.desc', 'Sisi layar tempat tombol mengambang berlabuh.')}
-          status="stored"
+          description={t(
+            'settings.hudPosition.desc',
+            'Sisi layar tempat tombol mengambang berlabuh. Mengubahnya langsung memindahkan bubble yang sedang tampil, dan pengguna tetap bebas menggesernya.'
+          )}
+          status={nativeAndroid ? 'functional' : 'not_supported'}
         >
           <Segmented<HudPosition>
             options={[
@@ -1182,8 +1300,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 { key: 'hudPanelSoundboard', label: 'Soundboard' },
                 { key: 'hudPanelMusic', label: 'Music' },
                 { key: 'hudPanelMixer', label: 'Audio Mixer' },
-                { key: 'hudPanelLiveControl', label: 'Live Control' },
-                { key: 'hudPanelSettings', label: 'Settings' },
               ] as const
             ).map((panel) => (
               <div
@@ -1256,18 +1372,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
       </Section>
+      )}
 
       {/* ================= D. GRAPHICS & DEVICE PERFORMANCE ================= */}
+      {activeCategory === 'performance' && (
       <Section
-        index="D"
         icon={Monitor}
         title={t('settings.secD.title', 'Grafis & Performa Perangkat')}
         subtitle={t('settings.secD.subtitle', 'Uji perangkat, rekomendasi, kontrol manual resolusi/FPS/bitrate, dan peringatan risiko')}
       >
         <FieldRow
           title={t('settings.deviceTest.title', 'Uji Perangkat Otomatis')}
-          description={t('settings.deviceTest.desc', 'Membaca jumlah core logis CPU, perkiraan memori, dan renderer GPU WebGL nyata.')}
-          status="pending"
+          description={t('settings.deviceTest.desc', 'Membaca jumlah core logis CPU, perkiraan memori, dan renderer GPU WebGL nyata. Uji ini berjalan di WebView/browser; benchmark native Android belum tersedia.')}
+          status="functional"
         >
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1307,11 +1424,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {t('settings.deviceTest.notTested', 'Belum ada hasil uji. Tidak ada nilai yang ditampilkan sebelum pengujian dijalankan.')}
             </p>
           )}
-          <p className="text-[10px] text-slate-500">
-            {isEnglish
-              ? 'Thermal test, native MediaCodec encoder profile, and Android hardware benchmarks require native modules — marked Coming Soon.'
-              : 'Uji termal, profil encoder MediaCodec, dan benchmark hardware Android memerlukan modul native — statusnya Coming Soon.'}
-          </p>
+          <div className="space-y-1.5">
+            {[
+              {
+                label: isEnglish ? 'Thermal test (native Android)' : 'Uji termal (native Android)',
+                detail: isEnglish
+                  ? 'Needs a native thermal module. No native implementation exists yet.'
+                  : 'Memerlukan modul termal native. Implementasinya belum ada.',
+              },
+              {
+                label: isEnglish ? 'MediaCodec encoder benchmark' : 'Benchmark encoder MediaCodec',
+                detail: isEnglish
+                  ? 'Needs the native RTMP/MediaCodec pipeline. Not available yet.'
+                  : 'Memerlukan pipeline RTMP/MediaCodec native. Belum tersedia.',
+              },
+            ].map((row) => (
+              <div
+                key={row.label}
+                className="flex items-start justify-between gap-2 p-2 rounded-lg bg-[#0e1626] border border-slate-800"
+              >
+                <div>
+                  <div className="text-[11px] text-slate-200">{row.label}</div>
+                  <div className="text-[10px] text-slate-500">{row.detail}</div>
+                </div>
+                <StatusBadge status="coming_soon" />
+              </div>
+            ))}
+          </div>
         </FieldRow>
 
         <FieldRow
@@ -1541,10 +1680,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
       </Section>
+      )}
 
       {/* =============================== E. SYSTEM =============================== */}
+      {activeCategory === 'system' && (
       <Section
-        index="E"
         icon={Lock}
         title={t('settings.secE.title', 'Sistem (System)')}
         subtitle={t('settings.secE.subtitle', 'Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data')}
@@ -1825,10 +1965,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </Section>
+      )}
 
       {/* ================================ F. ABOUT ================================ */}
+      {/* About tampil langsung di halaman grid, tidak butuh halaman sendiri. */}
+      {activeCategory === null && (
       <Section
-        index="F"
         icon={Info}
         title={t('settings.secF.title', 'Tentang SYNTXRR')}
         subtitle={t('settings.secF.subtitle', 'Versi aplikasi, informasi pembaruan, dan lisensi komponen')}
@@ -1837,7 +1979,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.version', 'Versi Aplikasi')}</div>
             <div className="text-sm font-bold text-white">{APP_VERSION}</div>
-            <div className="text-[10px] text-slate-500">Master Release</div>
+            <div className="text-[10px] text-slate-500">
+              {isEnglish
+                ? `package.json & Gradle versionName · spec v${SETTINGS_SPEC_VERSION}`
+                : `package.json & versionName Gradle · spesifikasi v${SETTINGS_SPEC_VERSION}`}
+            </div>
           </div>
           <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
             <div className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.about.appId', 'Application ID')}</div>
@@ -1851,6 +1997,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         </div>
+
+        <FieldRow
+          title={t('settings.about.buildMeta', 'Metadata Build')}
+          description={t(
+            'settings.about.buildMetaDesc',
+            'Sumber metadata build sebenarnya, diverifikasi langsung dari file proyek.'
+          )}
+          status="pending"
+        >
+          <ul className="space-y-1 text-[11px] text-slate-400 font-mono break-words">
+            <li>package.json → name: &quot;syntxrr-stream&quot; · version: &quot;1.0.0&quot;</li>
+            <li>android/app/build.gradle → versionName: &quot;1.0.0&quot; · versionCode: 1</li>
+            <li>capacitor.config.ts → appId: &quot;com.syntxrr.streamtools&quot;</li>
+          </ul>
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            {isEnglish
+              ? `Application ID, package name and version are now aligned. The app version ${APP_VERSION} matches package.json and Gradle versionName; ${SETTINGS_SPEC_VERSION} is only the Settings specification revision.`
+              : `Application ID, nama package, dan versi sudah selaras. Versi aplikasi ${APP_VERSION} sama dengan package.json dan versionName Gradle; ${SETTINGS_SPEC_VERSION} hanyalah revisi spesifikasi Settings.`}
+          </p>
+        </FieldRow>
 
         <FieldRow
           title={t('settings.about.updates', 'Informasi Pembaruan')}
@@ -1899,6 +2065,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="text-slate-500">{t('settings.about.footer', 'Mobile Streaming Studio & TikTok LIVE Companion')}</div>
         </div>
       </Section>
+      )}
     </div>
   );
 };

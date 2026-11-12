@@ -2,28 +2,38 @@
 
 **Dokumen:** `docs/SETTINGS_SPEC.md`  
 **Aplikasi:** SYNTXRR STREAM (Android ID: `com.syntxrr.streamtools`)  
-**Versi Spesifikasi:** 3.0.0 (Master Release)  
-**Status Implementasi:** Foundation Complete (Single Scrollable Viewport, 6 Sections, Honest Status Badging)  
+**Versi Spesifikasi:** 4.0.0 (Category Grid Release)  
+**Status Implementasi:** Foundation Complete (Category Grid + Halaman per Kategori, 6 Sections, Honest Status Badging)  
 **Basis Kode:** `src/types/index.ts`, `src/services/storage.ts`, `src/components/SettingsView.tsx`, `android/app/src/main/java/com/syntxrr/streamtools/FloatingHudManager.java`
 
 ---
 
 ## 1. INVENTARIS LENGKAP ENAM BAGIAN SETTINGS
 
-Menu Settings disajikan dalam **satu halaman vertikal tunggal yang dapat di-scroll (single scrollable view)** untuk kenyamanan navigasi satu tangan pada smartphone:
+Menu Settings disajikan sebagai **grid kategori dua kolom** yang membuka **satu halaman per kategori**, dengan tombol kembali ke grid:
+
+| Kolom kiri | Kolom kanan |
+| --- | --- |
+| A. Umum (General) | B. Audio & Mikrofon |
+| C. Floating HUD | D. Grafis & Performa Perangkat |
+| E. Sistem | *(slot kosong)* |
+
+**Support SYNTXRR** (Donasi, Discord Server) dan **F. Tentang SYNTXRR** tampil langsung di halaman grid — tidak punya halaman kategori sendiri dan tidak perlu membuka halaman lain. Tombol Donasi dan Discord sengaja belum dihubungkan sampai pemilik menyediakan URL resmi.
+
+Setiap halaman kategori tetap satu kolom vertikal yang dapat di-scroll, sehingga nyaman dipakai satu tangan pada smartphone. Tidak ada tab bertingkat atau submenu di dalam kategori.
 
 ### A. Umum (General)
 Mengatur preferensi dasar aplikasi, visualisasi, dan interaksi pengguna.
 * **Bahasa Antarmuka (`language`):** Pilihan `id-ID` (Indonesia) dan `en-US` (English).
 * **Tema Tampilan (`theme`):** Pilihan `navy_dark` (Default Dark Navy), `obsidian_dark` (Gelap Pekat), dan `cyber_slate` (Kontras Tinggi).
-* **Umpan Balik Getar (`hapticFeedback`):** Saklar aktivasi haptic dan tombol pengujian langsung (`navigator.vibrate(50)`).
-* **Konfirmasi Sebelum Mengakhiri LIVE (`confirmBeforeEndLive`):** Dialog konfirmasi proteksi sebelum mematikan sesi siaran langsung.
+* **Umpan Balik Getar (`hapticFeedback`):** Saklar aktivasi haptic. Nilai ini dibaca oleh helper bersama `src/services/haptics.ts` (`triggerHaptic`) yang dipakai navigasi utama di `src/App.tsx`, serta oleh tombol pengujian di Settings. Membutuhkan izin `android.permission.VIBRATE` di `android/app/src/main/AndroidManifest.xml`; tanpa izin tersebut `navigator.vibrate()` tidak berefek pada APK. Status: **Berfungsi** bila WebView/perangkat mendukung, selain itu **Tidak Didukung**.
+* **Konfirmasi Sebelum Mengakhiri LIVE (`confirmBeforeEndLive`):** Preferensi tersimpan, tetapi belum ada aksi yang bisa dikonfirmasi. Mode A tidak boleh mengakhiri LIVE TikTok (aplikasi TikTok resmi yang mengontrol siaran) dan Mode B belum memiliki sesi encoder. Status: **Pending** — jangan membuat tombol stop palsu demi memenuhi preferensi ini.
 
 ### B. Audio & Mikrofon (Audio & Microphone)
 Mengatur penangkapan suara, pengujian input real-time, sensitivitas, dan filter pemrosesan suara.
 * **Pemilihan Mikrofon (`microphoneDeviceId`):** Dropdown enumerasi perangkat nyata (`audioinput`) dan tombol muat ulang daftar perangkat.
 * **Tes Mikrofon (Real-Time VU Meter):** Pengujian tingkat suara nyata menggunakan Web Audio API (`AudioContext`, `createMediaStreamSource`, `createAnalyser`) dengan loop RMS live.
-* **Sensitivitas / Gain Input (`micGain`):** Slider 0%–200% (kelipatan 5%) untuk amplifikasi sinyal input.
+* **Sensitivitas / Gain Input (`micGain`):** Slider 0%–200% (kelipatan 5%). Nilai ini benar-benar diterapkan pada meter VU tes mikrofon (`startMicTest` menghitung `gain = micGain / 100`), tetapi belum ada encoder siaran yang memakainya, sehingga tidak mengubah suara LIVE. Status: **Tersimpan (efek tes saja)**.
 * **Noise Suppression (`noiseSuppression`):** Constraint penekan derau latar belakang dari mikrofon.
 * **Echo Cancellation (`micEchoCancellation`):** Constraint pencegah gema suara dari speaker perangkat.
 * **Auto Gain Control (`micAutoGainControl`):** Normalisasi volume mikrofon secara otomatis.
@@ -31,9 +41,20 @@ Mengatur penangkapan suara, pengujian input real-time, sensitivitas, dan filter 
 ### C. Floating HUD
 Mengatur overlay tombol melayang dan panel kontrol cepat yang digunakan bersama oleh Mode A dan Mode B.
 * **Aktivasi Floating HUD (`hudEnabled`):** Saklar On/Off dan tombol pemanggilan service overlay native Android.
-* **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp).
-* **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%).
-* **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`).
+* **Ukuran Tombol (`hudButtonSize`):** Slider 40–64 dp (default 48 dp). Diterapkan langsung ke bubble yang sedang tampil.
+* **Transparansi Tombol (`hudOpacity`):** Slider 30%–100% (default 92%). Diterapkan langsung ke bubble yang sedang tampil.
+* **Posisi Tombol (`hudPosition`):** Pilihan Kiri (`left`) atau Kanan (`right`). Memindahkan bubble yang sedang tampil ke sisi yang dipilih.
+* **Catatan implementasi HUD:** `updateFloatingHud()` di `src/services/nativeCompanionBridge.ts` → `FloatingCompanionPlugin.java` → `FloatingHudManager.updateHudAppearance()` memakai `updateViewLayout()` + `setAlpha()` pada view yang sama. Tidak ada hide/show, tidak ada overlay kedua, dan posisi geser pengguna dipertahankan (sumbu Y tidak diubah; sumbu X hanya berpindah saat sisi benar-benar berubah).
+
+> **Catatan kejujuran:** Ukuran, transparansi, dan sisi kini benar-benar diterapkan ke bubble native saat nilainya berubah. Status ini adalah hasil inspeksi source + build web yang lulus; verifikasi pada APK fisik (bubble terlihat berubah tanpa hide/show) **belum** dilakukan.
+
+* **Perilaku Launcher (bubble sebagai master toggle):**
+  * Kondisi tertutup: hanya bubble native yang tampil, tanpa ikon atau panel.
+  * Tap bubble: muncul launcher berisi enam ikon kecil (Chat, Soundboard, Music, Audio Mixer, Live Control, Settings) di sisi layar yang sama dengan bubble.
+  * Tap ikon: hanya panel fitur itu yang terbuka, kompak (`17rem`, `max-h 42vh`, scroll internal) dan bukan halaman penuh. Berpindah ikon menggantikan panel sebelumnya — panel tidak pernah bertumpuk.
+  * Tap bubble lagi: panel dan launcher ditutup, bubble tetap tampil.
+  * Drag tidak dihitung sebagai tap (ambang gerak native `CLICK_THRESHOLD_PX`).
+  * Tidak ada backdrop penuh layar atau dimming; panel memakai `pointer-events-none` pada wadah agar area LIVE tetap bisa disentuh.
 * **Preferensi 6 Tampilan Panel:**
   * `hudPanelChat`: Toggle menu Chat & Gift.
   * `hudPanelSoundboard`: Toggle menu Soundboard SFX.
@@ -67,7 +88,7 @@ Manajemen izin native, pembersihan cache, telemetri diagnostik, dan perlindungan
 
 ### F. Tentang SYNTXRR (About SYNTXRR)
 Identitas dan status legal aplikasi.
-* **Metadata Aplikasi:** Versi aplikasi (3.0.0 Master Release), Application ID (`com.syntxrr.streamtools`), dan Runtime Aktif (Android APK vs Browser/Desktop).
+* **Metadata Aplikasi:** Versi aplikasi (`1.0.0`, disamakan dengan `package.json` dan `versionName` Gradle), Application ID (`com.syntxrr.streamtools`), dan Runtime Aktif (Android APK vs Browser/Desktop).
 * **Informasi Pembaruan:** Penjelasan status rilis APK/CI dan ketiadaan OTA updater internal.
 * **Lisensi Open-Source:** Daftar 8 komponen OSS utama beserta lisensi resminya (React, Vite, Capacitor, Tailwind CSS, Lucide, Motion, Express, Google GenAI).
 
@@ -148,7 +169,8 @@ Untuk menjaga kerapian arsitektur dan mencegah kebingungan pengguna:
 
 Gunakan checklist ini pada setiap audit verifikasi berikutnya:
 
-- [ ] **Struktur Tunggal:** Keenam bagian (A sampai F) berada dalam satu halaman vertikal `SettingsView.tsx`.
+- [ ] **Struktur Grid:** Halaman grid menampilkan lima kategori (A–E) dalam dua kolom plus satu slot kosong; memilih kategori hanya menampilkan bagian itu dan tombol kembali mengembalikan ke grid.
+- [ ] **Support & About Inline:** Support SYNTXRR dan Tentang SYNTXRR tampil di halaman grid tanpa halaman terpisah, dan tombol Donasi/Discord tetap nonaktif sampai URL resmi tersedia.
 - [ ] **Persistensi Debounce:** Perubahan input disimpan ke `AppSettings` via debounce `SETTINGS_SAVE_DEBOUNCE_MS` dan tersimpan di IndexedDB.
 - [ ] **Kejujuran Status:** Tidak ada status "Berfungsi" pada fitur yang belum memiliki pipeline aktif (seperti RTMP pusher atau tema CSS global).
 - [ ] **VU Meter Mikrofon:** Meter level bergerak nyata saat mikrofon aktif dan izin diberikan.

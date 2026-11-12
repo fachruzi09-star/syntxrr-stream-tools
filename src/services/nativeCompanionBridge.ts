@@ -37,6 +37,67 @@ export interface FloatingHudStatusResult {
   message?: string;
 }
 
+// =========================================================================
+// Floating HUD model (native overlay panel content)
+// =========================================================================
+
+export type HudPanelId = 'chat' | 'soundboard' | 'music' | 'mixer';
+export type HudChatTab = 'chat' | 'gift' | 'like' | 'follow';
+export type HudStatusTone = 'ok' | 'warn' | 'off';
+
+export interface HudRowModel {
+  label: string;
+  sub?: string;
+  trailing?: string;
+  /** Aksi yang dikirim balik lewat hudCommand. Kosong = baris pasif. */
+  action?: string;
+  id?: string;
+}
+
+export interface HudTabModel {
+  id: string;
+  label: string;
+}
+
+export interface HudSliderModel {
+  id: string;
+  label: string;
+  value: number;
+  max?: number;
+  action: string;
+}
+
+export interface HudMeterModel {
+  label: string;
+  value: number;
+  muted: boolean;
+  available: boolean;
+}
+
+export interface HudStateModel {
+  panel: HudPanelId;
+  title: string;
+  status: { text: string; tone: HudStatusTone };
+  tabs?: HudTabModel[];
+  activeTab?: string;
+  sliders?: HudSliderModel[];
+  meter?: HudMeterModel;
+  rows?: HudRowModel[];
+  /** Tinggi area daftar (dp) agar panel tidak berubah ukuran saat event baru masuk. */
+  listHeightDp?: number;
+  emptyText?: string;
+}
+
+export interface HudCommandPayload {
+  action: string;
+  id?: string;
+  value?: number;
+}
+
+export interface HudPanelChangedPayload {
+  panel?: HudPanelId;
+}
+
 export interface FloatingCompanionPluginInterface {
   checkOverlayPermission(): Promise<{ granted: boolean }>;
   requestOverlayPermission(): Promise<{ granted: boolean; openedSettings: boolean }>;
@@ -57,12 +118,25 @@ export interface FloatingCompanionPluginInterface {
   }>;
   isCompanionRunning(): Promise<{ isRunning: boolean }>;
   // Phase 4.3B: Native Floating HUD Methods
-  showFloatingHud(): Promise<FloatingHudStatusResult>;
+  showFloatingHud(options?: FloatingHudOptions): Promise<FloatingHudStatusResult>;
+  updateFloatingHud(options?: FloatingHudOptions): Promise<FloatingHudStatusResult>;
   hideFloatingHud(): Promise<FloatingHudStatusResult>;
   isFloatingHudVisible(): Promise<{ isVisible: boolean }>;
+  // Phase 4.4: HUD model + command channel
+  pushHudState(options: { model: string }): Promise<{ accepted: boolean }>;
+  collapseHudContent(): Promise<{ success: boolean }>;
+  getHudState(): Promise<{ isVisible: boolean; activePanel?: HudPanelId }>;
   addListener(
     eventName: 'floatingHudClick',
     listenerFunc: (data: { timestamp: number }) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'hudCommand',
+    listenerFunc: (data: HudCommandPayload) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'hudPanelChanged',
+    listenerFunc: (data: HudPanelChangedPayload) => void
   ): Promise<PluginListenerHandle>;
 }
 
@@ -275,7 +349,18 @@ export async function isCompanionRunning(): Promise<CompanionStatusResult> {
  * Display the native Android Floating HUD bubble overlay over other apps.
  * Fallback gracefully in web/browser environment.
  */
-export async function showFloatingHud(): Promise<FloatingHudStatusResult> {
+export interface FloatingHudOptions {
+  /** Ukuran bubble dalam dp (native men-clamp ke 40-64). */
+  sizeDp?: number;
+  /** Opacity 30-100 (%). */
+  opacity?: number;
+  /** Sisi layar tempat bubble menempel. */
+  position?: 'left' | 'right';
+}
+
+export async function showFloatingHud(
+  options?: FloatingHudOptions
+): Promise<FloatingHudStatusResult> {
   if (!isNativeAndroid()) {
     return {
       success: false,
@@ -285,7 +370,7 @@ export async function showFloatingHud(): Promise<FloatingHudStatusResult> {
   }
 
   try {
-    const res = await FloatingCompanion.showFloatingHud();
+    const res = await FloatingCompanion.showFloatingHud(options ?? {});
     return {
       success: !!res?.success,
       isVisible: !!res?.isVisible,
@@ -296,6 +381,39 @@ export async function showFloatingHud(): Promise<FloatingHudStatusResult> {
       success: false,
       isVisible: false,
       message: error?.message || 'Gagal menampilkan Floating HUD.',
+    };
+  }
+}
+
+/**
+ * Terapkan ukuran/opacity/sisi pada bubble yang SEDANG tampil, tanpa hide/show.
+ * Native memakai updateViewLayout pada view yang sama, jadi tidak ada overlay ganda.
+ * Di luar Android (atau saat bubble belum tampil) panggilan ini aman dan tidak
+ * mengubah apa pun.
+ */
+export async function updateFloatingHud(
+  options?: FloatingHudOptions
+): Promise<FloatingHudStatusResult> {
+  if (!isNativeAndroid()) {
+    return {
+      success: false,
+      isVisible: false,
+      message: 'Floating HUD native hanya didukung saat dijalankan di aplikasi Android (APK).',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.updateFloatingHud(options ?? {});
+    return {
+      success: !!res?.success,
+      isVisible: !!res?.isVisible,
+      message: res?.message || 'Tampilan Floating HUD diperbarui.',
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      isVisible: false,
+      message: error?.message || 'Gagal memperbarui Floating HUD.',
     };
   }
 }
@@ -374,6 +492,89 @@ export async function onFloatingHudClick(
   }
 }
 
+/**
+ * Kirim model panel HUD ke overlay native.
+ * Native hanya menggambar; semua nilai berasal dari state aplikasi.
+ */
+export async function pushHudState(model: HudStateModel): Promise<{ accepted: boolean }> {
+  if (!isNativeAndroid()) {
+    return { accepted: false };
+  }
+
+  try {
+    const res = await FloatingCompanion.pushHudState({ model: JSON.stringify(model) });
+    return { accepted: !!res?.accepted };
+  } catch (error: any) {
+    console.warn('Gagal mengirim model HUD:', error);
+    return { accepted: false };
+  }
+}
+
+/** Tutup toolbar/panel HUD tanpa menyembunyikan bubble. */
+export async function collapseHudContent(): Promise<{ success: boolean }> {
+  if (!isNativeAndroid()) {
+    return { success: false };
+  }
+
+  try {
+    const res = await FloatingCompanion.collapseHudContent();
+    return { success: !!res?.success };
+  } catch (error: any) {
+    console.warn('Gagal menutup panel HUD:', error);
+    return { success: false };
+  }
+}
+
+/** Status HUD sebenarnya (terpasang atau tidak, panel aktif). */
+export async function getHudState(): Promise<{ isVisible: boolean; activePanel: HudPanelId | null }> {
+  if (!isNativeAndroid()) {
+    return { isVisible: false, activePanel: null };
+  }
+
+  try {
+    const res = await FloatingCompanion.getHudState();
+    return {
+      isVisible: !!res?.isVisible,
+      activePanel: (res?.activePanel as HudPanelId | undefined) ?? null,
+    };
+  } catch (error: any) {
+    console.warn('Gagal membaca status HUD:', error);
+    return { isVisible: false, activePanel: null };
+  }
+}
+
+/** Perintah dari toolbar/panel HUD native. */
+export async function onHudCommand(
+  callback: (data: HudCommandPayload) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('hudCommand', callback);
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener hudCommand:', error);
+    return null;
+  }
+}
+
+/** Panel HUD dibuka/ditutup di sisi native. */
+export async function onHudPanelChanged(
+  callback: (data: HudPanelChangedPayload) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('hudPanelChanged', callback);
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener hudPanelChanged:', error);
+    return null;
+  }
+}
+
 export const nativeCompanionBridge = {
   isNativeAndroid,
   checkOverlayPermission,
@@ -385,9 +586,16 @@ export const nativeCompanionBridge = {
   isCompanionRunning,
   // Phase 4.3B HUD Methods
   showFloatingHud,
+  updateFloatingHud,
   hideFloatingHud,
   isFloatingHudVisible,
   onFloatingHudClick,
+  // Phase 4.4 HUD model + command channel
+  pushHudState,
+  collapseHudContent,
+  getHudState,
+  onHudCommand,
+  onHudPanelChanged,
 };
 
 export default nativeCompanionBridge;

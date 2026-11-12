@@ -61,6 +61,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Haptic feedback (Settings > Umum). WebView navigator.vibrate() is a no-op without this normal permission. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Mode A Companion Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

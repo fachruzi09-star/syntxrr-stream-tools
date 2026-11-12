@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ActiveNav,
   NavigationTab,
@@ -32,6 +32,7 @@ import {
   DEFAULT_MARKETPLACE_ITEMS,
   DEFAULT_INTEGRATIONS,
 } from './services/storage';
+import { triggerHaptic } from './services/haptics';
 import { audioEngine } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
 import { dispatchSoundboard } from './services/soundboardDispatcher';
@@ -56,7 +57,30 @@ import { Radio } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { hideFloatingHud } from './services/nativeCompanionBridge';
+import {
+  hideFloatingHud,
+  onFloatingHudClick,
+  onHudCommand,
+  onHudPanelChanged,
+  pushHudState,
+  startCompanion,
+  stopCompanion,
+  isCompanionRunning,
+} from './services/nativeCompanionBridge';
+import type { HudChatTab, HudPanelId, HudStateModel } from './services/nativeCompanionBridge';
+import { FloatingHudPanel } from './components/FloatingHudPanel';
+import type { HudMixerKey } from './components/FloatingHudPanel';
+import {
+  HUD_EVENT_BUFFER_LIMIT,
+  buildChatModel,
+  buildMixerModel,
+  buildMusicModel,
+  buildSoundboardModel,
+  hudEventSourceStatus,
+} from './services/hudController';
+import type { HudChatEntry } from './services/hudController';
+import { micMonitor } from './services/micMonitor';
+import type { MicMonitorState } from './services/micMonitor';
 import { applyTheme } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 
@@ -68,6 +92,18 @@ export default function App() {
 
   // App Settings
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+
+  /**
+   * Navigation wrapper: gives the haptic feedback toggle a real effect by applying it to
+   * primary navigation. Nothing vibrates while the setting is off or the device cannot vibrate.
+   */
+  const handleNavigate = useCallback(
+    (nav: NavigationTab) => {
+      triggerHaptic(settings, 'light');
+      setActiveNav(nav);
+    },
+    [settings]
+  );
 
   // Studio & Presets State
   const [presets, setPresets] = useState<StudioPreset[]>(DEFAULT_PRESETS);
@@ -579,6 +615,64 @@ export default function App() {
     await StorageService.saveUnifiedQueue(updatedQueue);
   };
 
+  // Handler terbaru untuk listener yang dipasang sekali (menghindari closure basi).
+  const addSongRequestRef = useRef(handleAddSongRequest);
+  useEffect(() => {
+    addSongRequestRef.current = handleAddSongRequest;
+  });
+
+  /**
+   * Buffer event LIVE untuk panel Chat HUD.
+   * - terbatas di memori (HUD_EVENT_BUFFER_LIMIT), terbaru lebih dulu
+   * - identitas event unik agar tidak duplikat saat reconnect
+   * - perintah viewer "!play <judul>" menambah antrean lagu yang sama dengan Music
+   *   ("!next" sengaja TIDAK didukung: Next hanya untuk streamer)
+   */
+  useEffect(() => {
+    type BusEvent = ReturnType<typeof streamEventBus.getHistory>[number];
+
+    const pushEvent = (streamEvent: BusEvent) => {
+      setHudEvents((prev) => {
+        if (prev.some((item) => item.id === streamEvent.id)) return prev;
+        const next: HudChatEntry[] = [
+          {
+            id: streamEvent.id,
+            type: streamEvent.type,
+            username: streamEvent.username,
+            detail: streamEvent.detail,
+            timestamp: streamEvent.timestamp,
+            isSimulation: streamEvent.isSimulation,
+          },
+          ...prev,
+        ];
+        return next.length > HUD_EVENT_BUFFER_LIMIT ? next.slice(0, HUD_EVENT_BUFFER_LIMIT) : next;
+      });
+      if (hudPausedRef.current) setHudUnread((count) => count + 1);
+    };
+
+    streamEventBus.getHistory().forEach((item) => pushEvent(item));
+
+    return streamEventBus.subscribe((streamEvent) => {
+      pushEvent(streamEvent);
+
+      if (streamEvent.type !== 'chat') return;
+      const match = /^!play\s+(.+)$/i.exec(streamEvent.detail.trim());
+      if (!match) return;
+      const title = match[1].trim().slice(0, 120);
+      if (!title) return;
+
+      void addSongRequestRef.current({
+        title,
+        artist: 'Song Request',
+        duration: 180,
+        requesterName: streamEvent.username || 'Viewer',
+        platform: 'TikTok',
+        status: 'queued',
+        source: 'viewer_request',
+      });
+    });
+  }, []);
+
   const handleDeleteSongRequest = async (id: string) => {
     const updated = songRequests.filter((s) => s.id !== id);
     setSongRequests(updated);
@@ -751,6 +845,99 @@ export default function App() {
     });
   };
 
+  // ===================== FLOATING HUD PANEL (Phase 1) =====================
+  const [isHudPanelOpen, setIsHudPanelOpen] = useState(false);
+  const [companionRunning, setCompanionRunning] = useState(false);
+  const isNativeAndroidPlatform = Capacitor.getPlatform() === 'android';
+
+  // State panel HUD native. Sumber kebenaran tetap state aplikasi di bawah ini.
+  const [hudPanel, setHudPanel] = useState<HudPanelId | null>(null);
+  const [hudChatTab, setHudChatTab] = useState<HudChatTab>('chat');
+  const [hudChatPaused, setHudChatPaused] = useState(false);
+  const [hudPausedSnapshot, setHudPausedSnapshot] = useState<HudChatEntry[] | null>(null);
+  const [hudEvents, setHudEvents] = useState<HudChatEntry[]>([]);
+  const [hudUnread, setHudUnread] = useState(0);
+  const [hudPlayingSoundId, setHudPlayingSoundId] = useState<string | null>(null);
+  const [musicMuted, setMusicMuted] = useState(false);
+  const [micState, setMicState] = useState<MicMonitorState>(micMonitor.getState());
+
+  /**
+   * Bubble native mengirim event "floatingHudClick" lewat bridge. Listener didaftarkan
+   * sekali dan dilepas saat unmount agar tidak ada listener ganda.
+   */
+  useEffect(() => {
+    let disposed = false;
+    let handle: Awaited<ReturnType<typeof onFloatingHudClick>> = null;
+
+    // Bubble adalah master toggle: buka launcher/panel, tekan lagi untuk menutup semuanya.
+    // Di Android, bubble mengendalikan toolbar/panel native sepenuhnya, jadi state WebView
+    // hanya dipakai sebagai fallback web.
+    onFloatingHudClick(() => {
+      if (disposed) return;
+      if (Capacitor.getPlatform() === 'android') return;
+      setIsHudPanelOpen((prev) => !prev);
+    })
+      .then((registered) => {
+        if (disposed) {
+          void registered?.remove();
+          return;
+        }
+        handle = registered;
+      })
+      .catch((err) => {
+        console.warn('Gagal mendaftarkan listener Floating HUD:', err);
+      });
+
+    return () => {
+      disposed = true;
+      void handle?.remove();
+    };
+  }, []);
+
+  // Status Companion Service yang sebenarnya, bukan asumsi dari UI.
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+    let cancelled = false;
+    void isCompanionRunning()
+      .then((res) => {
+        if (!cancelled) setCompanionRunning(!!res?.isRunning);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isNativeAndroidPlatform]);
+
+  // Panel yang diizinkan mengikuti preferensi di Settings.
+  const hudPanels: HudPanelId[] = [];
+  if (settings.hudPanelChat !== false) hudPanels.push('chat');
+  if (settings.hudPanelSoundboard !== false) hudPanels.push('soundboard');
+  if (settings.hudPanelMusic !== false) hudPanels.push('music');
+  if (settings.hudPanelMixer !== false) hudPanels.push('mixer');
+  // Live Control dan Settings sengaja tidak lagi menjadi ikon HUD.
+
+  /**
+   * Mixer HUD memakai handleUpdateSettings yang sudah men-debounce penulisan storage
+   * (300-500 ms), jadi slider tetap responsif tanpa menulis setiap piksel.
+   */
+  const handleHudMixerChange = (key: HudMixerKey, value: number) => {
+    const next: AppSettings = { ...settings };
+    if (key === 'audioVolume') next.audioVolume = value;
+    else if (key === 'soundboardVolume') next.soundboardVolume = value;
+    else next.micGain = value;
+    void handleUpdateSettings(next);
+  };
+
+  const handleToggleCompanion = async () => {
+    try {
+      const res = companionRunning ? await stopCompanion() : await startCompanion();
+      setCompanionRunning(!!res?.isRunning);
+      if (!res?.success && res?.message) console.warn(res.message);
+    } catch (err) {
+      console.warn('Gagal mengubah status Companion Service:', err);
+    }
+  };
+
   // Pastikan tulisan tertunda tidak hilang saat app di-background atau ditutup.
   useEffect(() => {
     const flushPending = () => {
@@ -863,6 +1050,280 @@ export default function App() {
     else soundboardEngine.playSynthesizedSFX('level_up');
   };
 
+  // ===================== FLOATING HUD — NATIVE MODEL SYNC =====================
+  // Overlay native hanya menggambar. Semua nilai berasal dari state aplikasi di atas,
+  // sehingga HUD dan aplikasi utama memakai satu sumber kebenaran.
+  const hudSoundTimerRef = useRef<number | null>(null);
+  const hudLastModelRef = useRef('');
+  const hudPausedRef = useRef(false);
+  const hudEventsRef = useRef<HudChatEntry[]>([]);
+
+  const musicVolumeUnit = (() => {
+    const raw = settings.audioVolume ?? 0.85;
+    return raw <= 1 ? raw : raw / 100;
+  })();
+  const soundboardVolumeUnit = (() => {
+    const raw = settings.soundboardVolume ?? 0.85;
+    return raw <= 1 ? raw : raw / 100;
+  })();
+  const ttsVolumeUnit = (() => {
+    const raw = ttsConfig.volume ?? 0.9;
+    return raw <= 1 ? raw : raw / 100;
+  })();
+
+  /** Tap sound di HUD: memakai engine Soundboard yang sama, satu suara pada satu waktu. */
+  const handleHudPlaySound = (soundId: string) => {
+    const item = soundboardItems.find((sound) => sound.id === soundId);
+    if (!item) return;
+
+    void dispatchSoundboard(item, soundboardItems, settings.soundboardVolume ?? 0.85).then((result) => {
+      if (result.status !== 'played') return;
+
+      setHudPlayingSoundId(item.id);
+      if (hudSoundTimerRef.current !== null) window.clearTimeout(hudSoundTimerRef.current);
+      const durationMs = Math.max(600, Math.min(15, Number(item.durationSec) || 3) * 1000);
+      hudSoundTimerRef.current = window.setTimeout(() => {
+        hudSoundTimerRef.current = null;
+        setHudPlayingSoundId(null);
+      }, durationMs);
+    });
+  };
+
+  const handleHudToggleMusicMute = () => {
+    setMusicMuted((prev) => {
+      const next = !prev;
+      audioEngine.setVolume(next ? 0 : musicVolumeUnit);
+      return next;
+    });
+  };
+
+  const handleHudMusicVolume = (percent: number) => {
+    const clamped = Math.max(0, Math.min(100, percent));
+    if (!musicMuted) audioEngine.setVolume(clamped / 100);
+    const raw = settings.audioVolume ?? 0.85;
+    handleHudMixerChange('audioVolume', raw <= 1 ? clamped / 100 : clamped);
+  };
+
+  const handleHudSoundboardVolume = (percent: number) => {
+    const clamped = Math.max(0, Math.min(100, percent));
+    soundboardEngine.setVolume(clamped / 100);
+    const raw = settings.soundboardVolume ?? 0.85;
+    handleHudMixerChange('soundboardVolume', raw <= 1 ? clamped / 100 : clamped);
+  };
+
+  const handleHudTtsVolume = (percent: number) => {
+    const clamped = Math.max(0, Math.min(100, percent));
+    const raw = ttsConfig.volume ?? 0.9;
+    void handleUpdateTTSConfig({ ...ttsConfig, volume: raw <= 1 ? clamped / 100 : clamped });
+  };
+
+  const handleHudToggleMicMute = () => {
+    micMonitor.setMuted(!micState.muted);
+  };
+
+  const hudCommandHandlersRef = useRef({
+    playSound: handleHudPlaySound,
+    toggleMusic: handleTogglePlayMusic,
+    nextTrack: handleNextTrack,
+    toggleMute: handleHudToggleMusicMute,
+    musicVolume: handleHudMusicVolume,
+    soundboardVolume: handleHudSoundboardVolume,
+    ttsVolume: handleHudTtsVolume,
+    micMute: handleHudToggleMicMute,
+  });
+
+  useEffect(() => {
+    hudCommandHandlersRef.current = {
+      playSound: handleHudPlaySound,
+      toggleMusic: handleTogglePlayMusic,
+      nextTrack: handleNextTrack,
+      toggleMute: handleHudToggleMusicMute,
+      musicVolume: handleHudMusicVolume,
+      soundboardVolume: handleHudSoundboardVolume,
+      ttsVolume: handleHudTtsVolume,
+      micMute: handleHudToggleMicMute,
+    };
+  });
+
+  useEffect(() => {
+    hudPausedRef.current = hudChatPaused;
+  }, [hudChatPaused]);
+
+  useEffect(() => {
+    hudEventsRef.current = hudEvents;
+  }, [hudEvents]);
+
+  // Level mikrofon hanya diukur selama panel Audio Mixer terbuka.
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+    return micMonitor.subscribe(setMicState);
+  }, [isNativeAndroidPlatform]);
+
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+    if (hudPanel !== 'mixer') {
+      micMonitor.stop();
+      return;
+    }
+
+    void micMonitor.start();
+    return () => micMonitor.stop();
+  }, [hudPanel, isNativeAndroidPlatform]);
+
+  // Event native: panel yang dibuka/ditutup + perintah dari panel.
+  useEffect(() => {
+    if (!isNativeAndroidPlatform) return;
+
+    let disposed = false;
+    const handles: Array<{ remove: () => Promise<void> }> = [];
+
+    void onHudPanelChanged((payload) => {
+      if (disposed) return;
+      const panel = (payload?.panel ?? null) as HudPanelId | null;
+      setHudPanel(panel);
+      if (panel === 'chat') setHudUnread(0);
+    }).then((handle) => {
+      if (!handle) return;
+      if (disposed) void handle.remove();
+      else handles.push(handle);
+    });
+
+    void onHudCommand((payload) => {
+      if (disposed || !payload) return;
+
+      const { action, id, value } = payload;
+      const handlers = hudCommandHandlersRef.current;
+
+      switch (action) {
+        case 'chat.tab':
+          if (id) setHudChatTab(id as HudChatTab);
+          setHudUnread(0);
+          return;
+        case 'chat.pause':
+          setHudPausedSnapshot(hudEventsRef.current);
+          setHudChatPaused(true);
+          return;
+        case 'chat.latest':
+          setHudChatPaused(false);
+          setHudPausedSnapshot(null);
+          setHudUnread(0);
+          return;
+        case 'soundboard.play':
+          if (id) handlers.playSound(id);
+          return;
+        case 'soundboard.volume':
+          handlers.soundboardVolume(Number(value) || 0);
+          return;
+        case 'tts.volume':
+          handlers.ttsVolume(Number(value) || 0);
+          return;
+        case 'music.toggle':
+          handlers.toggleMusic();
+          return;
+        case 'music.next':
+          // Next hanya dari streamer (HUD/aplikasi), tidak pernah dari chat viewer.
+          void handlers.nextTrack();
+          return;
+        case 'music.mute':
+          handlers.toggleMute();
+          return;
+        case 'music.volume':
+          handlers.musicVolume(Number(value) || 0);
+          return;
+        case 'mic.mute':
+          handlers.micMute();
+          return;
+        default:
+          return;
+      }
+    }).then((handle) => {
+      if (!handle) return;
+      if (disposed) void handle.remove();
+      else handles.push(handle);
+    });
+
+    return () => {
+      disposed = true;
+      handles.forEach((handle) => {
+        void handle.remove();
+      });
+    };
+  }, [isNativeAndroidPlatform]);
+
+  // Kirim model panel aktif ke overlay native (hanya bila isinya berubah).
+  useEffect(() => {
+    if (!isNativeAndroidPlatform || !hudPanel) return;
+
+    const chatEvents = hudChatPaused ? hudPausedSnapshot ?? hudEvents : hudEvents;
+
+    let model: HudStateModel;
+    if (hudPanel === 'chat') {
+      model = buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread);
+    } else if (hudPanel === 'soundboard') {
+      model = buildSoundboardModel(
+        soundboardItems.map((sound) => ({
+          id: sound.id,
+          name: sound.name,
+          icon: sound.icon,
+          isFavorite: sound.isFavorite,
+          isQuickSlot: sound.isQuickSlot,
+        })),
+        hudPlayingSoundId,
+        soundboardVolumeUnit,
+        ttsVolumeUnit
+      );
+    } else if (hudPanel === 'music') {
+      model = buildMusicModel({
+        nowPlaying: nowPlayingSong ? { title: nowPlayingSong.title, artist: nowPlayingSong.artist } : null,
+        isPlaying: isPlayingMusic,
+        muted: musicMuted,
+        volume: Math.round(musicVolumeUnit * 100),
+        queue: unifiedQueue
+          .filter((item) => item.status === 'approved' || item.status === 'pending' || item.status === 'playing')
+          .slice(0, 6)
+          .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
+        requestSourceConnected: hudEventSourceStatus(hudEvents).tone === 'ok',
+      });
+    } else {
+      model = buildMixerModel({
+        available: micState.available,
+        metering: micState.metering,
+        muted: micState.muted,
+        level: micState.level,
+        reason: micState.reason,
+      });
+    }
+
+    const serialized = JSON.stringify(model);
+    if (serialized === hudLastModelRef.current) return;
+    hudLastModelRef.current = serialized;
+    void pushHudState(model);
+  }, [
+    hudPanel,
+    hudChatTab,
+    hudChatPaused,
+    hudPausedSnapshot,
+    hudEvents,
+    hudUnread,
+    soundboardItems,
+    hudPlayingSoundId,
+    soundboardVolumeUnit,
+    ttsVolumeUnit,
+    nowPlayingSong,
+    isPlayingMusic,
+    musicMuted,
+    musicVolumeUnit,
+    unifiedQueue,
+    micState,
+    isNativeAndroidPlatform,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (hudSoundTimerRef.current !== null) window.clearTimeout(hudSoundTimerRef.current);
+    };
+  }, []);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080c16] flex flex-col items-center justify-center space-y-4">
@@ -894,7 +1355,7 @@ export default function App() {
         activeNav={activeNav}
         operatingMode={settings.operatingMode}
         activePreset={activePreset}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         onOpenModeModal={() => setIsModeModalOpen(true)}
         onOpenDrawer={() => setIsDrawerOpen(true)}
       />
@@ -919,7 +1380,7 @@ export default function App() {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         activeNav={activeNav}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         pendingMusicCount={pendingRequestsCount}
       />
 
@@ -931,7 +1392,7 @@ export default function App() {
             activePreset={activePreset}
             integrations={integrations}
             onSelectMode={handleSelectMode}
-            onNavigate={setActiveNav}
+            onNavigate={handleNavigate}
             onOpenModeModal={() => setIsModeModalOpen(true)}
           />
         )}
@@ -1059,10 +1520,42 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar */}
       <BottomNav
         activeNav={activeNav}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         onOpenDrawer={() => setIsDrawerOpen(true)}
         pendingRequestsCount={pendingRequestsCount}
       />
+
+      {/* Fallback web: overlay native hanya ada di Android. Di Android toolbar/panel
+          digambar langsung oleh FloatingHudManager di atas aplikasi lain. */}
+      {!isNativeAndroidPlatform && (
+      <FloatingHudPanel
+        open={isHudPanelOpen}
+        onClose={() => setIsHudPanelOpen(false)}
+        bubbleSide={(settings.hudPosition ?? 'right') as 'left' | 'right'}
+        enabledPanels={hudPanels}
+        alerts={alertHistory}
+        sounds={soundboardItems}
+        onPlaySound={handlePlaySoundFromDeck}
+        nowPlaying={nowPlayingSong}
+        isPlayingMusic={isPlayingMusic}
+        onTogglePlayMusic={handleTogglePlayMusic}
+        queueCount={unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
+        masterVolume={settings.audioVolume ?? 60}
+        soundboardVolume={settings.soundboardVolume ?? 80}
+        micGain={settings.micGain ?? 100}
+        onMixerChange={handleHudMixerChange}
+        operatingMode={settings.operatingMode}
+        isNativeAndroid={isNativeAndroidPlatform}
+        companionRunning={companionRunning}
+        onToggleCompanion={() => {
+          void handleToggleCompanion();
+        }}
+        onOpenSettingsPage={() => {
+          setIsHudPanelOpen(false);
+          handleNavigate('settings');
+        }}
+      />
+      )}
       </div>
     </I18nProvider>
   );

@@ -1,26 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/floating_hud_root"
-    android:layout_width="56dp"
-    android:layout_height="56dp"
-    android:contentDescription="SYNTXRR Floating Companion HUD">
+<!--
+  Floating Companion HUD — SYNTXRR STREAM (Mode A)
 
-    <!-- Circular Bubble Container -->
+  Satu window overlay saja:
+    [bubble] [content]   -> saat bubble menempel di kiri
+    [content] [bubble]   -> saat bubble menempel di kanan (toolbar melebar ke kiri)
+
+  "content" berisi toolbar 4 ikon ATAU satu panel fitur aktif.
+  Urutan anak diatur dari FloatingHudManager agar toolbar selalu melebar
+  menjauhi tepi layar, sehingga tidak terpotong.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/floating_hud_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="top"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <!-- Circular Bubble Container (master toggle) -->
     <FrameLayout
         android:id="@+id/floating_hud_bubble"
         android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_gravity="center">
+        android:layout_height="56dp">
 
-        <!-- Center SYNTXRR App Icon -->
         <ImageView
             android:id="@+id/floating_hud_icon"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:layout_gravity="center"
             android:src="@mipmap/ic_launcher_round"
             android:contentDescription="SYNTXRR Companion Icon" />
 
     </FrameLayout>
 
-</FrameLayout>
+    <!-- Toolbar 4 ikon atau satu panel fitur aktif -->
+    <LinearLayout
+        android:id="@+id/floating_hud_content"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone" />
+
+</LinearLayout>
