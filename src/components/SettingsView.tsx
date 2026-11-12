@@ -794,12 +794,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     'general' | 'audio' | 'hud' | 'performance' | 'system' | null
   >(null);
   const hudPanelMenus: Array<{ id: string; name: string; detail: string; status: UiStatus }> = [
-    { id: 'chat', name: '1. Chat', detail: isEnglish ? 'Chat, gifts, viewers, and LIVE activity.' : 'Chat, gift, penonton, dan aktivitas LIVE.', status: 'not_connected' },
-    { id: 'soundboard', name: '2. Soundboard', detail: isEnglish ? '4–6 favorite sounds sourced from Studio.' : '4–6 suara favorit yang bersumber dari Studio.', status: 'pending' },
-    { id: 'music', name: '3. Music', detail: isEnglish ? 'Now playing track, queue, history, Song Request, and volume.' : 'Lagu aktif, antrean, riwayat, Song Request, dan volume.', status: 'pending' },
-    { id: 'mixer', name: '4. Audio Mixer', detail: isEnglish ? 'Master, Music, Soundboard, Mic, and Mute.' : 'Master, Music, Soundboard, Mic, dan Mute.', status: 'pending' },
-    { id: 'live', name: '5. Live Control', detail: isEnglish ? 'Pause, Resume, Stop — only if active mode natively supports it.' : 'Pause, Resume, Stop — hanya jika mode yang dipilih benar-benar mendukung.', status: 'not_connected' },
-    { id: 'settings', name: '6. Settings', detail: isEnglish ? 'Opens Floating HUD configuration within this Settings page.' : 'Membuka konfigurasi Floating HUD pada halaman Settings ini.', status: 'pending' },
+    { id: 'chat', name: '1. Chat', detail: isEnglish ? 'Chat, gifts, likes, and follows with pause/latest controls.' : 'Chat, gift, like, dan follow dengan kontrol jeda/terbaru.', status: 'not_connected' },
+    { id: 'soundboard', name: '2. Soundboard', detail: isEnglish ? 'Favorite sounds from Studio, one at a time, plus soundboard and TTS volume.' : 'Suara favorit dari Studio, satu per satu, plus volume soundboard dan TTS.', status: 'pending' },
+    { id: 'music', name: '3. Music', detail: isEnglish ? 'Now playing, play/pause, next (streamer only), mute, volume, and queue.' : 'Lagu aktif, play/pause, next (hanya streamer), mute, volume, dan antrean.', status: 'pending' },
+    { id: 'mixer', name: '4. Audio Mixer', detail: isEnglish ? 'Microphone mute and real input level for the SYNTXRR audio path.' : 'Mute mikrofon dan level input nyata untuk jalur audio SYNTXRR.', status: 'pending' },
   ];
 
   return (
