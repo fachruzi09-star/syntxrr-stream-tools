@@ -1056,6 +1056,7 @@ export default function App() {
   const hudSoundTimerRef = useRef<number | null>(null);
   const hudLastModelRef = useRef('');
   const hudPausedRef = useRef(false);
+  const hudEventsRef = useRef<HudChatEntry[]>([]);
 
   const musicVolumeUnit = (() => {
     const raw = settings.audioVolume ?? 0.85;
@@ -1148,6 +1149,10 @@ export default function App() {
     hudPausedRef.current = hudChatPaused;
   }, [hudChatPaused]);
 
+  useEffect(() => {
+    hudEventsRef.current = hudEvents;
+  }, [hudEvents]);
+
   // Level mikrofon hanya diukur selama panel Audio Mixer terbuka.
   useEffect(() => {
     if (!isNativeAndroidPlatform) return;
@@ -1195,7 +1200,7 @@ export default function App() {
           setHudUnread(0);
           return;
         case 'chat.pause':
-          setHudPausedSnapshot(hudEvents);
+          setHudPausedSnapshot(hudEventsRef.current);
           setHudChatPaused(true);
           return;
         case 'chat.latest':
@@ -1243,7 +1248,7 @@ export default function App() {
         void handle.remove();
       });
     };
-  }, [isNativeAndroidPlatform, hudEvents]);
+  }, [isNativeAndroidPlatform]);
 
   // Kirim model panel aktif ke overlay native (hanya bila isinya berubah).
   useEffect(() => {
