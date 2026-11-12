@@ -1,7 +1,43 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
+// ---------------------------------------------------------------------------
+// Maven dependency security pins (resolution-time overrides only).
+//
+// These four Dependabot alerts are transitive build/tooling dependencies that
+// reach the build through the Android Gradle Plugin and the Android test (UTP)
+// jars, so they must be pinned where those graphs are actually resolved:
+//   - CVE-2021-33813  org.jdom:jdom2                    2.0.6 -> 2.0.6.1
+//   - CVE-2025-14813  org.bouncycastle:bcprov-jdk18on   1.79  -> 1.85
+//   - CVE-2026-8763   org.bouncycastle:bcprov-jdk18on   1.79  -> 1.85
+//   - CVE-2026-75595  io.netty:netty-handler            4.1.110.Final -> 4.1.137.Final
+//
+// No plugin, AGP, Gradle, Kotlin or application dependency is added, removed or
+// upgraded here. The same rule is intentionally written twice: Gradle evaluates
+// the buildscript block before any script-level definition, so a shared closure
+// declared at the top of this file would not yet exist when it is needed.
+// ---------------------------------------------------------------------------
+
 buildscript {
-    
+    // Plugin classpath: AGP 8.13.0 plus its transitive tooling dependencies
+    // (jdom2, Bouncy Castle via apksig, Netty via grpc-netty).
+    configurations.classpath {
+        resolutionStrategy {
+            eachDependency { details ->
+                def group = details.requested.group
+                def name = details.requested.name
+                def version = details.requested.version
+                if (group == 'org.jdom' && name == 'jdom2') {
+                    details.useVersion '2.0.6.1'
+                } else if (group == 'org.bouncycastle' &&
+                           (name == 'bcprov-jdk18on' || name == 'bcpkix-jdk18on' || name == 'bcutil-jdk18on')) {
+                    details.useVersion '1.85'
+                } else if (group == 'io.netty' && version != null && version.startsWith('4.1.')) {
+                    details.useVersion '4.1.137.Final'
+                }
+            }
+        }
+    }
+
     repositories {
         google()
         mavenCentral()
@@ -21,6 +57,27 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+
+    // Tooling configurations that AGP resolves after configuration time, e.g.
+    // androidTestUtil, which pulls com.android.tools.utp:* and their Netty tree.
+    // Same pins as the plugin classpath above (see the note at the top).
+    configurations.all { configuration ->
+        configuration.resolutionStrategy {
+            eachDependency { details ->
+                def group = details.requested.group
+                def name = details.requested.name
+                def version = details.requested.version
+                if (group == 'org.jdom' && name == 'jdom2') {
+                    details.useVersion '2.0.6.1'
+                } else if (group == 'org.bouncycastle' &&
+                           (name == 'bcprov-jdk18on' || name == 'bcpkix-jdk18on' || name == 'bcutil-jdk18on')) {
+                    details.useVersion '1.85'
+                } else if (group == 'io.netty' && version != null && version.startsWith('4.1.')) {
+                    details.useVersion '4.1.137.Final'
+                }
+            }
+        }
     }
 }
 
