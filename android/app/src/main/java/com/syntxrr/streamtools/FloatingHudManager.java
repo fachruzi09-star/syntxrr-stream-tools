@@ -536,6 +536,21 @@ public class FloatingHudManager {
 
             boolean hasBody = false;
 
+            JSONArray buttons = model.optJSONArray("buttons");
+            if (buttons != null && buttons.length() > 0) {
+                mPanelContainer.addView(buildButtons(buttons));
+                hasBody = true;
+            }
+
+            JSONObject grid = model.optJSONObject("grid");
+            if (grid != null) {
+                View gridView = buildGrid(grid);
+                if (gridView != null) {
+                    mPanelContainer.addView(gridView);
+                    hasBody = true;
+                }
+            }
+
             JSONArray sliders = model.optJSONArray("sliders");
             if (sliders != null && sliders.length() > 0) {
                 for (int i = 0; i < sliders.length(); i++) {
@@ -576,7 +591,7 @@ public class FloatingHudManager {
                 LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         listHeightDp > 0 ? dp(listHeightDp) : LinearLayout.LayoutParams.WRAP_CONTENT);
-                scrollParams.topMargin = dp(4);
+                scrollParams.topMargin = dp(3);
                 mPanelContainer.addView(scroll, scrollParams);
                 hasBody = true;
             }
@@ -630,7 +645,7 @@ public class FloatingHudManager {
 
         LinearLayout row = new LinearLayout(mContext);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, 0, 0, dp(6));
+        row.setPadding(0, 0, 0, dp(4));
 
         for (int i = 0; i < tabs.length(); i++) {
             JSONObject tab = tabs.optJSONObject(i);
@@ -641,16 +656,16 @@ public class FloatingHudManager {
             String label = tab.optString("label", id);
             boolean active = id.equals(activeTab);
 
-            TextView chip = text(label, 10.5f, active ? C_TEXT : C_TEXT_DIM, active);
+            TextView chip = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, active);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(10), dp(5), dp(10), dp(5));
+            chip.setPadding(dp(8), dp(4), dp(8), dp(4));
             chip.setBackground(rounded(dp(12), active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
             chip.setContentDescription(label);
             chip.setOnClickListener(v -> emitCommand("chat.tab", id, 0));
 
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            chipParams.setMarginEnd(dp(5));
+            chipParams.setMarginEnd(dp(4));
             row.addView(chip, chipParams);
         }
 
@@ -694,7 +709,7 @@ public class FloatingHudManager {
 
         String sub = row.optString("sub", "");
         if (!sub.isEmpty()) {
-            TextView subView = text(sub, 10f, C_TEXT_DIM, false);
+            TextView subView = text(sub, 9f, C_TEXT_DIM, false);
             subView.setMaxLines(2);
             subView.setEllipsize(TextUtils.TruncateAt.END);
             item.addView(subView);
@@ -710,12 +725,124 @@ public class FloatingHudManager {
         return item;
     }
 
+    /**
+     * Deretan tombol aksi ringkas (Play/Pause, Next, Mute). Teks saja, tanpa emoji,
+     * dan setiap tombol mengirim aksi yang sama seperti sebelumnya.
+     */
+    private View buildButtons(JSONArray buttons) {
+        LinearLayout row = new LinearLayout(mContext);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowParams.bottomMargin = dp(4);
+        row.setLayoutParams(rowParams);
+
+        int count = buttons.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject button = buttons.optJSONObject(i);
+            if (button == null) {
+                continue;
+            }
+            final String action = button.optString("action", "");
+            final String id = button.optString("id", "");
+            boolean active = button.optBoolean("active", false);
+            String label = button.optString("label", "");
+
+            TextView view = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, true);
+            view.setGravity(Gravity.CENTER);
+            view.setSingleLine(true);
+            view.setEllipsize(TextUtils.TruncateAt.END);
+            view.setContentDescription(label);
+            view.setBackground(rounded(dp(9),
+                    active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(30), 1f);
+            if (i > 0) {
+                params.setMarginStart(dp(4));
+            }
+            if (!action.isEmpty() && !"noop".equals(action)) {
+                view.setClickable(true);
+                view.setFocusable(true);
+                view.setOnClickListener(v -> emitCommand(action, id, 0));
+            }
+            row.addView(view, params);
+        }
+        return row;
+    }
+
+    /**
+     * Grid tombol persegi (Soundboard 4 kolom). Ukuran sel dihitung dari lebar panel
+     * agar tetap persegi tanpa membuat panel melebar.
+     */
+    @Nullable
+    private View buildGrid(JSONObject grid) {
+        JSONArray items = grid.optJSONArray("items");
+        if (items == null || items.length() == 0) {
+            return null;
+        }
+
+        int columns = Math.max(1, Math.min(4, grid.optInt("columns", 4)));
+        int innerWidth = dp(PANEL_WIDTH_DP) - dp(PANEL_PADDING_DP) * 2;
+        int gap = dp(4);
+        int cellPx = Math.max(dp(30), (innerWidth - gap * (columns - 1)) / columns);
+
+        LinearLayout wrap = new LinearLayout(mContext);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wrapParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        wrapParams.bottomMargin = dp(4);
+        wrap.setLayoutParams(wrapParams);
+
+        LinearLayout row = null;
+        for (int i = 0; i < items.length(); i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(mContext);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                rowParams.bottomMargin = dp(4);
+                wrap.addView(row, rowParams);
+            }
+
+            JSONObject item = items.optJSONObject(i);
+            if (item == null || row == null) {
+                continue;
+            }
+
+            final String action = item.optString("action", "");
+            final String id = item.optString("id", "");
+            boolean active = item.optBoolean("active", false);
+            String label = item.optString("label", "");
+
+            TextView cell = text(label, 9f, C_TEXT, false);
+            cell.setGravity(Gravity.CENTER);
+            cell.setMaxLines(2);
+            cell.setEllipsize(TextUtils.TruncateAt.END);
+            cell.setContentDescription(label);
+            cell.setBackground(rounded(dp(8),
+                    active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+
+            LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(cellPx, cellPx);
+            if (i % columns != 0) {
+                cellParams.setMarginStart(gap);
+            }
+            if (!action.isEmpty() && !"noop".equals(action)) {
+                cell.setClickable(true);
+                cell.setFocusable(true);
+                cell.setOnClickListener(v -> emitCommand(action, id, 0));
+            }
+            row.addView(cell, cellParams);
+        }
+        return wrap;
+    }
+
     private View buildSlider(JSONObject slider) {
         LinearLayout wrap = new LinearLayout(mContext);
         wrap.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams wrapParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        wrapParams.topMargin = dp(4);
+        wrapParams.topMargin = dp(3);
         wrap.setLayoutParams(wrapParams);
 
         final String action = slider.optString("action", "");
@@ -727,12 +854,12 @@ public class FloatingHudManager {
         labelRow.setOrientation(LinearLayout.HORIZONTAL);
         labelRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView label = text(slider.optString("label", ""), 10.5f, C_TEXT_DIM, false);
+        TextView label = text(slider.optString("label", ""), 9.5f, C_TEXT_DIM, false);
         label.setSingleLine(true);
         labelRow.addView(label, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView valueView = text(value + "%", 10f, C_ACCENT, true);
+        TextView valueView = text(value + "%", 9f, C_ACCENT, true);
         labelRow.addView(valueView);
         wrap.addView(labelRow);
 

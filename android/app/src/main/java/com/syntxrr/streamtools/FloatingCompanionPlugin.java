@@ -138,6 +138,33 @@ public class FloatingCompanionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Menjalankan CompanionService sebagai foreground service. Ini yang mencegah proses
+     * dibekukan Android (cached app freezer) saat pengguna berada di aplikasi TikTok,
+     * sehingga perintah HUD tetap sampai ke JavaScript.
+     */
+    private void startCompanionService(Context context, Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(context, intent);
+        } else {
+            context.startService(intent);
+        }
+    }
+
+    /**
+     * Mengirim event ke JavaScript secara aman. Saat WebView dibekukan atau sedang
+     * dibuat ulang, notifikasi bisa gagal; kegagalan dicatat dan tidak boleh membuat
+     * overlay crash atau mengubah status palsu.
+     */
+    private void emitToJs(@NonNull String event, @NonNull JSObject data) {
+        try {
+            notifyListeners(event, data);
+        } catch (Exception e) {
+            android.util.Log.w("FloatingCompanion",
+                    "Gagal mengirim event " + event + ": " + e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void startCompanion(PluginCall call) {
         Context context = getContext();
@@ -157,11 +184,11 @@ public class FloatingCompanionPlugin extends Plugin {
             return;
         }
 
-        // 4. Start Companion Service
+        // 4. Start Companion Service (foreground agar proses tidak dibekukan)
         try {
             Intent intent = new Intent(context, CompanionService.class);
             intent.setAction(CompanionService.ACTION_START);
-            context.startService(intent);
+            startCompanionService(context, intent);
 
             JSObject ret = new JSObject();
             ret.put("success", true);
@@ -222,8 +249,7 @@ public class FloatingCompanionPlugin extends Plugin {
                 public void onHudClick() {
                     JSObject data = new JSObject();
                     data.put("timestamp", System.currentTimeMillis());
-                    notifyListeners("floatingHudClick", data);
-                }
+                    notifyListeners("floatingHudClick", data);                }
             });
 
             // Kanal perintah HUD -> aplikasi (satu sumber kebenaran di JS).
