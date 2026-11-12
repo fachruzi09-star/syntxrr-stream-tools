@@ -18,8 +18,11 @@ Diperbarui pada branch `appjet` pada commit `7cf6378` (setelah pekerjaan Floatin
 | Status | `incomplete` |
 | Job bukti terakhir | `94b90748f76eea277cdb64db7ebff5a2` (revisi 11, commit `7cf6378`) |
 
-`package.json` dan `bun.lock` terakhir berubah pada commit `acf61c3` dan tidak berubah sampai
-`7cf6378`, sehingga bukti npm di atas masih berlaku untuk kode saat ini.
+`package.json` dan `bun.lock` terakhir berubah pada commit `c7d0622` (nama paket menjadi
+`syntxrr-stream`, versi `1.0.0`; `bun.lock` ikut menyesuaikan satu baris), dan tidak berubah sampai
+`7cf6378`. Pemindaian di atas berjalan terhadap manifest saat ini: `esbuild` tetap `^0.28.0` di
+`package.json` dan ter-resolve `0.28.2` di `bun.lock`, sehingga `bun install --frozen-lockfile`
+konsisten dan bukti npm di atas berlaku untuk kode saat ini.
 
 Catatan penting: pemindaian terakhir dijalankan ulang sekali setelah pekerjaan Floating HUD dan
 menghasilkan cakupan yang identik (353 paket npm, 0 temuan, tetap `incomplete`). Karena file
@@ -44,7 +47,9 @@ Kemampuan yang tidak tersedia di lingkungan ini, dinyatakan eksplisit:
 1. **Tidak ada Android SDK** (`ANDROID_HOME` / `ANDROID_SDK_ROOT` kosong) sehingga graph Gradle/Maven
    tidak dapat di-resolve dari workspace.
 2. **Tidak ada akses API/token GitHub** di workspace, sehingga hasil Dependency Graph dan Dependabot
-   alerts (ekosistem Maven) tidak dapat dibaca dari sini. Pencarian kredensial tidak diizinkan.
+   alerts (ekosistem Maven) tidak dapat dibaca dari sini. Bukti: `gh` tersedia di `/usr/bin/gh`
+   tetapi `gh auth status` melaporkan "not logged into any GitHub hosts", dan `gh api .../dependabot/alerts`
+   meminta autentikasi. Pencarian kredensial tidak diizinkan.
 
 Keduanya prasyarat eksternal di luar repository, bukan cacat kode aplikasi.
 
