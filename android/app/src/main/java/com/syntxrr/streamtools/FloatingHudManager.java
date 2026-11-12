@@ -66,14 +66,15 @@ public class FloatingHudManager {
     /** Jarak gerak (px) sebelum sentuhan dianggap drag, bukan tap. */
     private static final int CLICK_THRESHOLD_PX = 14;
 
-    private static final int PANEL_WIDTH_DP = 272;
-    private static final int TOOLBAR_WIDTH_DP = 56;
-    private static final int GAP_DP = 8;
+    private static final int PANEL_WIDTH_DP = 224;
+    private static final int TOOLBAR_WIDTH_DP = 48;
+    private static final int GAP_DP = 6;
+    private static final int PANEL_PADDING_DP = 8;
     private static final int BUBBLE_MIN_DP = 40;
     private static final int BUBBLE_MAX_DP = 64;
 
     private static final String[] PANEL_IDS = {"chat", "soundboard", "music", "mixer"};
-    private static final String[] PANEL_GLYPHS = {"\uD83D\uDCAC", "\uD83D\uDD0A", "\uD83C\uDFB5", "\uD83C\uDF9A"};
+    private static final String[] PANEL_SHORT_LABELS = {"Chat", "Sound", "Music", "Mix"};
     private static final String[] PANEL_LABELS = {"Chat", "Soundboard", "Music", "Audio Mixer"};
 
     private static final int C_SURFACE = 0xF5162033;
@@ -398,19 +399,20 @@ public class FloatingHudManager {
         // Toolbar 4 ikon
         mToolbar = new LinearLayout(mContext);
         mToolbar.setOrientation(LinearLayout.VERTICAL);
-        mToolbar.setBackground(rounded(dp(18), C_SURFACE, dp(1), C_BORDER));
-        mToolbar.setPadding(dp(6), dp(6), dp(6), dp(6));
+        mToolbar.setBackground(rounded(dp(14), C_SURFACE, dp(1), C_BORDER));
+        mToolbar.setPadding(dp(5), dp(5), dp(5), dp(5));
         mToolbar.setVisibility(View.GONE);
 
         for (int i = 0; i < PANEL_IDS.length; i++) {
             final String panelId = PANEL_IDS[i];
-            TextView icon = text(PANEL_GLYPHS[i], 17f, C_TEXT, false);
+            TextView icon = text(PANEL_SHORT_LABELS[i], 9f, C_TEXT, true);
+            icon.setMaxLines(1);
             icon.setGravity(Gravity.CENTER);
             icon.setContentDescription(PANEL_LABELS[i]);
-            icon.setBackground(rounded(dp(14), C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+            icon.setBackground(rounded(dp(10), C_SURFACE_SOFT, 0, Color.TRANSPARENT));
             LinearLayout.LayoutParams iconParams =
-                    new LinearLayout.LayoutParams(dp(44), dp(44));
-            iconParams.topMargin = i == 0 ? 0 : dp(4);
+                    new LinearLayout.LayoutParams(dp(38), dp(38));
+            iconParams.topMargin = i == 0 ? 0 : dp(3);
             icon.setOnClickListener(v -> openPanel(panelId));
             mToolbar.addView(icon, iconParams);
         }
@@ -422,8 +424,10 @@ public class FloatingHudManager {
         // Container satu panel aktif
         mPanelContainer = new LinearLayout(mContext);
         mPanelContainer.setOrientation(LinearLayout.VERTICAL);
-        mPanelContainer.setBackground(rounded(dp(18), C_SURFACE, dp(1), C_BORDER));
-        mPanelContainer.setPadding(dp(10), dp(10), dp(10), dp(10));
+        mPanelContainer.setBackground(rounded(dp(14), C_SURFACE, dp(1), C_BORDER));
+        mPanelContainer.setPadding(
+                dp(PANEL_PADDING_DP), dp(PANEL_PADDING_DP),
+                dp(PANEL_PADDING_DP), dp(PANEL_PADDING_DP));
         mPanelContainer.setVisibility(View.GONE);
 
         LinearLayout.LayoutParams panelParams = new LinearLayout.LayoutParams(
@@ -589,9 +593,9 @@ public class FloatingHudManager {
         LinearLayout header = new LinearLayout(mContext);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(2), 0, dp(2), dp(8));
+        header.setPadding(dp(2), 0, dp(2), dp(6));
 
-        TextView titleView = text(title, 13f, C_TEXT, true);
+        TextView titleView = text(title, 12f, C_TEXT, true);
         titleView.setSingleLine(true);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(titleView, new LinearLayout.LayoutParams(
