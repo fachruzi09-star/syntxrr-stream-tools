@@ -62,6 +62,7 @@ import {
   onFloatingHudClick,
   onHudCommand,
   onHudPanelChanged,
+  onHudResync,
   pushHudState,
   startCompanion,
   stopCompanion,
@@ -1057,6 +1058,8 @@ export default function App() {
   const hudLastModelRef = useRef('');
   const hudPausedRef = useRef(false);
   const hudEventsRef = useRef<HudChatEntry[]>([]);
+  // Dinaikkan saat native meminta resync agar model panel dikirim ulang setelah app kembali foreground.
+  const [hudResyncNonce, setHudResyncNonce] = useState(0);
 
   const musicVolumeUnit = (() => {
     const raw = settings.audioVolume ?? 0.85;
@@ -1242,6 +1245,19 @@ export default function App() {
       else handles.push(handle);
     });
 
+    // Setelah proses dibekukan sistem (HUD dipakai di atas aplikasi lain), model panel bisa
+    // tertinggal. Native mengirim hudResync saat app kembali foreground; paksa kirim ulang
+    // agar status musik, mic, dan event sesuai kondisi sebenarnya.
+    void onHudResync(() => {
+      if (disposed) return;
+      hudLastModelRef.current = '';
+      setHudResyncNonce((value) => value + 1);
+    }).then((handle) => {
+      if (!handle) return;
+      if (disposed) void handle.remove();
+      else handles.push(handle);
+    });
+
     return () => {
       disposed = true;
       handles.forEach((handle) => {
@@ -1315,6 +1331,7 @@ export default function App() {
     musicVolumeUnit,
     unifiedQueue,
     micState,
+    hudResyncNonce,
     isNativeAndroidPlatform,
   ]);
 

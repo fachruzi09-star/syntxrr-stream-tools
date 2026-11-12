@@ -249,7 +249,7 @@ public class FloatingCompanionPlugin extends Plugin {
                 public void onHudClick() {
                     JSObject data = new JSObject();
                     data.put("timestamp", System.currentTimeMillis());
-                    notifyListeners("floatingHudClick", data);                }
+                    emitToJs("floatingHudClick", data);                }
             });
 
             // Kanal perintah HUD -> aplikasi (satu sumber kebenaran di JS).
@@ -262,7 +262,7 @@ public class FloatingCompanionPlugin extends Plugin {
                         data.put("id", id);
                     }
                     data.put("value", value);
-                    notifyListeners("hudCommand", data);
+                    emitToJs("hudCommand", data);
                 }
 
                 @Override
@@ -271,7 +271,7 @@ public class FloatingCompanionPlugin extends Plugin {
                     if (panel != null) {
                         data.put("panel", panel);
                     }
-                    notifyListeners("hudPanelChanged", data);
+                    emitToJs("hudPanelChanged", data);
                 }
             });
         }
@@ -459,6 +459,24 @@ public class FloatingCompanionPlugin extends Plugin {
             }
         }
         call.resolve(ret);
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        // Setelah proses dibekukan sistem selama aplikasi di background, state JS bisa
+        // tertinggal dari kondisi layanan sebenarnya. Minta aplikasi mengirim ulang model
+        // panel aktif; tidak ada status yang dipalsukan di sisi native.
+        JSObject data = new JSObject();
+        data.put("timestamp", System.currentTimeMillis());
+        data.put("isVisible", mHudManager != null && mHudManager.isHudVisible());
+        if (mHudManager != null) {
+            String panel = mHudManager.getActivePanel();
+            if (panel != null) {
+                data.put("panel", panel);
+            }
+        }
+        emitToJs("hudResync", data);
     }
 
     @Override
