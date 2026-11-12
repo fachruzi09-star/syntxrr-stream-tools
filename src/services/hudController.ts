@@ -6,7 +6,15 @@
  * memutar audio, tidak memalsukan data. Semua nilai berasal dari App.tsx.
  */
 
-import type { HudChatTab, HudRowModel, HudSliderModel, HudStateModel, HudStatusTone } from './nativeCompanionBridge';
+import type {
+  HudButtonModel,
+  HudChatTab,
+  HudGridModel,
+  HudRowModel,
+  HudSliderModel,
+  HudStateModel,
+  HudStatusTone,
+} from './nativeCompanionBridge';
 
 /** Batas buffer event di memori agar HUD ringan. */
 export const HUD_EVENT_BUFFER_LIMIT = 60;
@@ -112,7 +120,7 @@ export function buildChatModel(
     tabs: TAB_DEFS,
     activeTab: tab,
     rows,
-    listHeightDp: 236,
+    listHeightDp: 164,
     emptyText:
       tab === 'chat'
         ? 'Belum ada chat. Panel tetap mengumpulkan event selama sumber aktif.'
@@ -126,15 +134,19 @@ export function buildSoundboardModel(
   soundboardVolume: number,
   ttsVolume: number
 ): HudStateModel {
-  const favorites = sounds.filter((sound) => sound.isFavorite || sound.isQuickSlot).slice(0, 8);
-  const source = favorites.length > 0 ? favorites : sounds.slice(0, 8);
+  const favorites = sounds.filter((sound) => sound.isFavorite || sound.isQuickSlot).slice(0, 16);
+  const source = favorites.length > 0 ? favorites : sounds.slice(0, 16);
 
-  const rows: HudRowModel[] = source.map((sound) => ({
-    label: `${sound.icon ? `${sound.icon} ` : ''}${sound.name}`,
-    trailing: playingId === sound.id ? 'Memutar' : 'Tap',
-    action: 'soundboard.play',
-    id: sound.id,
-  }));
+  // Grid persegi 4 kolom (maks 4x4). Label teks pendek, tanpa emoji.
+  const grid: HudGridModel = {
+    columns: 4,
+    items: source.map((sound) => ({
+      label: sound.name,
+      id: sound.id,
+      action: 'soundboard.play',
+      active: playingId === sound.id,
+    })),
+  };
 
   const sliders: HudSliderModel[] = [
     {
@@ -158,8 +170,7 @@ export function buildSoundboardModel(
     title: 'Soundboard',
     status: playingId ? status('Memutar', 'ok') : status('Siap', 'ok'),
     sliders,
-    rows,
-    listHeightDp: 176,
+    grid,
     emptyText: 'Belum ada sound favorit. Kelola di Studio → Soundboard.',
   };
 }
@@ -174,6 +185,13 @@ export function buildMusicModel(options: {
 }): HudStateModel {
   const { nowPlaying, isPlaying, muted, volume, queue, requestSourceConnected } = options;
 
+  // Hanya Play/Pause, Next, dan Mute. Next tetap hanya untuk streamer.
+  const buttons: HudButtonModel[] = [
+    { label: isPlaying ? 'Pause' : 'Play', action: 'music.toggle', active: isPlaying },
+    { label: 'Next', action: 'music.next' },
+    { label: muted ? 'Unmute' : 'Mute', action: 'music.mute', active: muted },
+  ];
+
   const rows: HudRowModel[] = [];
 
   rows.push({
@@ -184,28 +202,7 @@ export function buildMusicModel(options: {
     trailing: nowPlaying ? (isPlaying ? 'Memutar' : 'Dijeda') : '',
   });
 
-  rows.push({
-    label: isPlaying ? 'Pause' : 'Play',
-    sub: 'Kontrol streamer',
-    trailing: '▶︎/❙❙',
-    action: 'music.toggle',
-  });
-
-  rows.push({
-    label: 'Next lagu',
-    sub: 'Hanya streamer, bukan perintah viewer',
-    trailing: '⏭',
-    action: 'music.next',
-  });
-
-  rows.push({
-    label: muted ? 'Unmute musik' : 'Mute musik',
-    sub: 'Terpisah dari Pause',
-    trailing: muted ? '🔇' : '🔊',
-    action: 'music.mute',
-  });
-
-  queue.slice(0, 4).forEach((item, index) => {
+  queue.slice(0, 3).forEach((item, index) => {
     rows.push({
       label: `${index + 1}. ${item.title}`,
       sub: item.artist || 'Queue',
@@ -232,9 +229,10 @@ export function buildMusicModel(options: {
     panel: 'music',
     title: 'Music & Request',
     status: statusInfo,
+    buttons,
     sliders,
     rows,
-    listHeightDp: 214,
+    listHeightDp: 128,
     emptyText: requestSourceConnected
       ? 'Antrean kosong.'
       : 'Antrean kosong. Perintah !play menunggu sumber event TikTok aktif.',
@@ -250,15 +248,11 @@ export function buildMixerModel(options: {
 }): HudStateModel {
   const { available, metering, muted, level, reason } = options;
 
-  const rows: HudRowModel[] = [
-    {
-      label: muted ? 'Unmute mic' : 'Mute mic',
-      sub: 'Hanya jalur mic SYNTXRR · mic TikTok dikendalikan aplikasi TikTok',
-      trailing: muted ? '🔇' : '🎙',
-      action: 'mic.mute',
-    },
+  const buttons: HudButtonModel[] = [
+    { label: muted ? 'Unmute mic' : 'Mute mic', action: 'mic.mute', active: muted },
   ];
 
+  const rows: HudRowModel[] = [];
   if (reason) {
     rows.push({ label: 'Status', sub: reason });
   }
@@ -284,8 +278,8 @@ export function buildMixerModel(options: {
       muted,
       available: available && metering,
     },
+    buttons,
     rows,
-    listHeightDp: 92,
     emptyText: 'Mikrofon tidak terdeteksi.',
   };
 }
