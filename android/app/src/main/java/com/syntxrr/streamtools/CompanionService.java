@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -17,10 +18,19 @@ import androidx.core.app.NotificationCompat;
  * CompanionService
  * Defensive Lifecycle & Status Controller for SYNTXRR STREAM Mode A (TikTok LIVE Companion).
  * 
- * Architecture Note (Phase 4.2E):
- * Operates as a lightweight background lifecycle and status tracker.
- * Defers claiming FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK until native audio playback / MediaSession
- * is compiled into native Java. Status is safely reflected via Android NotificationManager.
+ * Architecture Note (Phase 4.5):
+ * Runs as a REAL foreground service (FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK).
+ *
+ * Kenapa foreground wajib: Android 12+ membekukan proses aplikasi yang di-cache
+ * (cached app freezer) setelah pengguna berpindah ke aplikasi lain. Overlay Floating HUD
+ * tetap terlihat karena surface WindowManager masih digambar oleh sistem, dan bubble masih
+ * bisa membuka panel, tetapi WebView berhenti mengeksekusi JavaScript sehingga perintah
+ * HUD tidak pernah sampai ke layanan aplikasi (kontrol Music Request menjadi tidak responsif
+ * dan status panel tidak pernah diperbarui). Foreground service menahan proses tetap hidup
+ * selama HUD dipakai, sehingga bridge native -> JS tetap berjalan.
+ *
+ * Service ini hanya menandai status dan menahan proses; audio tetap diputar oleh
+ * NativeAudioPlugin / SoundPool yang sudah ada, dan tidak dihentikan saat HUD ditutup.
  */
 public class CompanionService extends Service {
 
@@ -65,14 +75,15 @@ public class CompanionService extends Service {
         // Handle START action
         if (ACTION_START.equals(action)) {
             if (sIsRunning) {
-                Log.i(TAG, "CompanionService is already active. Ignoring redundant START.");
-                return START_NOT_STICKY;
+                Log.i(TAG, "CompanionService sudah aktif. Menyegarkan status foreground.");
+                promoteToForeground();
+                return START_STICKY;
             }
 
-            Log.i(TAG, "Received START action. Displaying companion status notification.");
-            showStatusNotification();
+            Log.i(TAG, "Received START action. Masuk mode foreground.");
             sIsRunning = true;
-            return START_NOT_STICKY;
+            promoteToForeground();
+            return START_STICKY;
         }
 
         // Unknown action fallback
@@ -81,7 +92,31 @@ public class CompanionService extends Service {
         return START_NOT_STICKY;
     }
 
-    private void showStatusNotification() {
+    /**
+     * Menahan proses tetap hidup selama Floating HUD aktif. Dipanggil pada setiap START
+     * agar status foreground tetap segar walau service sempat di-restart sistem.
+     */
+    private void promoteToForeground() {
+        Notification notification = buildStatusNotification();
+        if (notification == null) {
+            Log.e(TAG, "Notifikasi companion gagal dibangun; service berjalan tanpa foreground.");
+            return;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+            Log.i(TAG, "CompanionService berjalan sebagai foreground service.");
+        } catch (Exception e) {
+            Log.e(TAG, "Gagal masuk foreground: " + e.getMessage());
+        }
+    }
+
+    @Nullable
+    private Notification buildStatusNotification() {
         try {
             Intent notificationIntent = new Intent(this, MainActivity.class);
             notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -107,14 +142,10 @@ public class CompanionService extends Service {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE);
 
-            Notification notification = builder.build();
-
-            NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (notificationManager != null) {
-                notificationManager.notify(NOTIFICATION_ID, notification);
-            }
+            return builder.build();
         } catch (Exception e) {
-            Log.e(TAG, "Gagal memunculkan notifikasi companion: " + e.getMessage());
+            Log.e(TAG, "Gagal membangun notifikasi companion: " + e.getMessage());
+            return null;
         }
     }
 
