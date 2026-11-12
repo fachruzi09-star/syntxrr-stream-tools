@@ -161,6 +161,10 @@ export interface FloatingCompanionPluginInterface {
     eventName: 'hudPanelChanged',
     listenerFunc: (data: HudPanelChangedPayload) => void
   ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'hudResync',
+    listenerFunc: (data: HudResyncPayload) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 // Register the custom Capacitor native plugin

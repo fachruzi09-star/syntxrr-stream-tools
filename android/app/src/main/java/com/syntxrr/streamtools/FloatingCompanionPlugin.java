@@ -249,7 +249,8 @@ public class FloatingCompanionPlugin extends Plugin {
                 public void onHudClick() {
                     JSObject data = new JSObject();
                     data.put("timestamp", System.currentTimeMillis());
-                    emitToJs("floatingHudClick", data);                }
+                    emitToJs("floatingHudClick", data);
+                }
             });
 
             // Kanal perintah HUD -> aplikasi (satu sumber kebenaran di JS).
