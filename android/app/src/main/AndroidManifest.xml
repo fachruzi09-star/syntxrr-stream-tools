@@ -44,11 +44,13 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- Mode A TikTok LIVE Companion Service (Lifecycle & Status Controller) -->
+        <!-- Mode A TikTok LIVE Companion Service (foreground: menahan proses + WebView tetap hidup) -->
         <service
             android:name=".CompanionService"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false" />
     </application>
 
     <!-- Permissions -->
@@ -67,6 +69,9 @@
     <!-- Mode A Companion Permissions -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Foreground service: mencegah proses dibekukan saat Floating HUD dipakai di atas TikTok (Android 12+). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <!-- Camera & Microphone Permissions (Studio camera element, WebView getUserMedia) -->
     <uses-permission android:name="android.permission.CAMERA" />

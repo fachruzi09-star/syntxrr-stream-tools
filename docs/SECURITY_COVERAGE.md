@@ -5,7 +5,7 @@ Status keseluruhan: **INCOMPLETE / BELUM LENGKAP.**
 Dokumen ini mencatat apa yang benar-benar diperiksa, apa yang belum tercakup, dan prasyarat untuk
 melengkapinya. Jangan pernah menyebut hasil ini sebagai "scan bersih" atau "dependency aman".
 
-Diperbarui pada branch `appjet` pada commit `7cf6378` (setelah pekerjaan Floating HUD redesign).
+Diperbarui pada branch `appjet` pada commit `7011f45` (setelah perbaikan kontinuitas data Floating HUD).
 
 ## 1. Yang sudah diperiksa (npm / JavaScript)
 
@@ -16,11 +16,11 @@ Diperbarui pada branch `appjet` pada commit `7cf6378` (setelah pekerjaan Floatin
 | Paket diperiksa | 353 |
 | Temuan | 0 (0 blocking) |
 | Status | `incomplete` |
-| Job bukti terakhir | `94b90748f76eea277cdb64db7ebff5a2` (revisi 11, commit `7cf6378`) |
+| Job bukti terakhir | `98c0fc9328fb75ab7d52f19538683c9f` (revisi 11; status tetap `incomplete`) |
 
 `package.json` dan `bun.lock` terakhir berubah pada commit `c7d0622` (nama paket menjadi
 `syntxrr-stream`, versi `1.0.0`; `bun.lock` ikut menyesuaikan satu baris), dan tidak berubah sampai
-`7cf6378`. Pemindaian di atas berjalan terhadap manifest saat ini: `esbuild` tetap `^0.28.0` di
+`7011f45`. Pemindaian di atas berjalan terhadap manifest saat ini: `esbuild` tetap `^0.28.0` di
 `package.json` dan ter-resolve `0.28.2` di `bun.lock`, sehingga `bun install --frozen-lockfile`
 konsisten dan bukti npm di atas berlaku untuk kode saat ini.
 
@@ -68,6 +68,36 @@ Resolusi classpath plugin dilakukan tanpa Android SDK lewat proyek `/tmp` dan ta
 Keterbatasan: hasil ini statis dan tidak diperbarui otomatis. Setiap kenaikan versi AGP atau Gradle
 wajib mengulang resolusi ini.
 
+### 3.1 Verifikasi ulang setelah pin (commit `68f170b`)
+
+Pin pada `android/build.gradle` diuji ulang dengan probe resolusi Gradle 8.14.3 di `/tmp/mavenprobe`
+(di luar repository). Probe memakai aturan `resolutionStrategy.eachDependency` yang sama dan
+meresolve `buildscript.configurations.classpath` berisi:
+`com.android.tools.build:gradle:8.13.0`,
+`com.android.tools.utp:android-test-plugin-result-listener-gradle:31.13.0`, dan
+`com.android.tools.utp:android-test-plugin-host-emulator-control:31.13.0`.
+
+Hasil `gradle printPinned` (135 artefak ter-resolve):
+
+| Koordinat | Versi ter-resolve | Target patched |
+|---|---|---|
+| `org.jdom:jdom2` | `2.0.6.1` | tercapai |
+| `org.bouncycastle:bcprov-jdk18on` | `1.85` | tercapai |
+| `io.netty:netty-handler` | `4.1.137.Final` | tercapai |
+| `io.netty:netty-codec-http` | `4.1.137.Final` | tercapai |
+
+Batas bukti ini — jangan dilebih-lebihkan:
+
+- Probe mereplikasi aturan pin pada graph yang sama (AGP + dua artefak UTP), **bukan** menjalankan
+  build proyek `:app`; konfigurasi proyek Android tetap membutuhkan Android SDK yang tidak tersedia.
+- Ini membuktikan versi yang **dipilih** pada classpath plugin, bukan bahwa Dependabot alerts
+  #14/#36/#49/#50 sudah tertutup. Penutupan alert hanya terbukti setelah GitHub memindai ulang
+  dependency graph.
+- Probe dijalankan online (unduhan dari `google()`/`mavenCentral()`), sehingga tidak dapat diulang
+  saat offline; hasilnya tidak disimpan sebagai artefak di repository.
+- Probe hanya mencakup classpath plugin. Konfigurasi `androidTestUtil` pada proyek nyata memakai
+  aturan pin yang identik di blok `allprojects`, tetapi tidak dapat di-resolve tanpa Android SDK.
+
 ## 4. Kontrol pengganti yang sudah aktif
 
 `.github/workflows/android.yml` memiliki job `dependency-submission`
@@ -95,6 +125,9 @@ tidak boleh mengutip angka advisory Maven seolah-olah baru diverifikasi.
    `bun run build` dan build APK di CI.
 4. Scanner sandbox **tidak akan pernah** melaporkan status lengkap untuk proyek ini selama Android
    SDK tidak tersedia. Itu batasan alat, bukan indikasi bahaya dan bukan bukti kebersihan.
+5. Pin `android/build.gradle` sudah terbukti memilih versi patched pada classpath plugin
+   (lihat 3.1). Yang masih belum dapat dibuktikan dari workspace ini: konfigurasi penuh proyek
+   `:app` (butuh Android SDK) dan penutupan alert di GitHub (butuh akses Dependabot).
 
 ## 6. Aturan pelaporan
 

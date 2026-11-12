@@ -138,6 +138,33 @@ public class FloatingCompanionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Menjalankan CompanionService sebagai foreground service. Ini yang mencegah proses
+     * dibekukan Android (cached app freezer) saat pengguna berada di aplikasi TikTok,
+     * sehingga perintah HUD tetap sampai ke JavaScript.
+     */
+    private void startCompanionService(Context context, Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(context, intent);
+        } else {
+            context.startService(intent);
+        }
+    }
+
+    /**
+     * Mengirim event ke JavaScript secara aman. Saat WebView dibekukan atau sedang
+     * dibuat ulang, notifikasi bisa gagal; kegagalan dicatat dan tidak boleh membuat
+     * overlay crash atau mengubah status palsu.
+     */
+    private void emitToJs(@NonNull String event, @NonNull JSObject data) {
+        try {
+            notifyListeners(event, data);
+        } catch (Exception e) {
+            android.util.Log.w("FloatingCompanion",
+                    "Gagal mengirim event " + event + ": " + e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void startCompanion(PluginCall call) {
         Context context = getContext();
@@ -157,11 +184,11 @@ public class FloatingCompanionPlugin extends Plugin {
             return;
         }
 
-        // 4. Start Companion Service
+        // 4. Start Companion Service (foreground agar proses tidak dibekukan)
         try {
             Intent intent = new Intent(context, CompanionService.class);
             intent.setAction(CompanionService.ACTION_START);
-            context.startService(intent);
+            startCompanionService(context, intent);
 
             JSObject ret = new JSObject();
             ret.put("success", true);
@@ -222,7 +249,7 @@ public class FloatingCompanionPlugin extends Plugin {
                 public void onHudClick() {
                     JSObject data = new JSObject();
                     data.put("timestamp", System.currentTimeMillis());
-                    notifyListeners("floatingHudClick", data);
+                    emitToJs("floatingHudClick", data);
                 }
             });
 
@@ -236,7 +263,7 @@ public class FloatingCompanionPlugin extends Plugin {
                         data.put("id", id);
                     }
                     data.put("value", value);
-                    notifyListeners("hudCommand", data);
+                    emitToJs("hudCommand", data);
                 }
 
                 @Override
@@ -245,7 +272,7 @@ public class FloatingCompanionPlugin extends Plugin {
                     if (panel != null) {
                         data.put("panel", panel);
                     }
-                    notifyListeners("hudPanelChanged", data);
+                    emitToJs("hudPanelChanged", data);
                 }
             });
         }
@@ -433,6 +460,42 @@ public class FloatingCompanionPlugin extends Plugin {
             }
         }
         call.resolve(ret);
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        // Setelah proses dibekukan sistem selama aplikasi di background, state JS bisa
+        // tertinggal dari kondisi layanan sebenarnya. Minta aplikasi mengirim ulang model
+        // panel aktif; tidak ada status yang dipalsukan di sisi native.
+        CompanionService.updateStatusDetail("Aplikasi aktif \u00b7 Status HUD disegarkan");
+        if (mHudManager != null) {
+            // Tampilkan data terakhir lebih dulu, ditandai "Status terakhir", sampai model
+            // baru dari WebView tiba dan menggantikannya.
+            mHudManager.renderLastKnownModel(true);
+        }
+        JSObject data = new JSObject();
+        data.put("timestamp", System.currentTimeMillis());
+        data.put("isVisible", mHudManager != null && mHudManager.isHudVisible());
+        if (mHudManager != null) {
+            String panel = mHudManager.getActivePanel();
+            if (panel != null) {
+                data.put("panel", panel);
+            }
+        }
+        emitToJs("hudResync", data);
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        // WebView dijeda sistem saat aplikasi masuk background: hentikan klaim kesegaran
+        // data, pertahankan model terakhir yang valid, dan perbarui notifikasi secara jujur.
+        CompanionService.updateStatusDetail(
+                "Aplikasi di latar belakang \u00b7 Status terakhir dipertahankan");
+        if (mHudManager != null) {
+            mHudManager.renderLastKnownModel(true);
+        }
     }
 
     @Override

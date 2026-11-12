@@ -66,14 +66,15 @@ public class FloatingHudManager {
     /** Jarak gerak (px) sebelum sentuhan dianggap drag, bukan tap. */
     private static final int CLICK_THRESHOLD_PX = 14;
 
-    private static final int PANEL_WIDTH_DP = 272;
-    private static final int TOOLBAR_WIDTH_DP = 56;
-    private static final int GAP_DP = 8;
+    private static final int PANEL_WIDTH_DP = 224;
+    private static final int TOOLBAR_WIDTH_DP = 48;
+    private static final int GAP_DP = 6;
+    private static final int PANEL_PADDING_DP = 8;
     private static final int BUBBLE_MIN_DP = 40;
     private static final int BUBBLE_MAX_DP = 64;
 
     private static final String[] PANEL_IDS = {"chat", "soundboard", "music", "mixer"};
-    private static final String[] PANEL_GLYPHS = {"\uD83D\uDCAC", "\uD83D\uDD0A", "\uD83C\uDFB5", "\uD83C\uDF9A"};
+    private static final String[] PANEL_SHORT_LABELS = {"Chat", "Sound", "Music", "Mix"};
     private static final String[] PANEL_LABELS = {"Chat", "Soundboard", "Music", "Audio Mixer"};
 
     private static final int C_SURFACE = 0xF5162033;
@@ -326,14 +327,49 @@ public class FloatingHudManager {
         return mIsAttached && mRoot != null;
     }
 
+    /** Cache model per panel agar overlay dapat digambar tanpa WebView aktif. */
+    private final java.util.HashMap<String, String> mPanelModels = new java.util.HashMap<>();
+
     /**
      * Terima model panel dari WebView (JSON). Native hanya menggambar; seluruh nilai
      * (musik, queue, soundboard, mic) berasal dari state aplikasi.
+     *
+     * Menerima dua bentuk: satu model panel, atau snapshot berisi semua panel
+     * ({"panels":{chat:...,soundboard:...,music:...,mixer:...}}). Snapshot disimpan per
+     * panel sehingga panel mana pun tetap dapat dirender saat WebView dijeda Android.
      */
     public synchronized boolean pushPanelModel(@Nullable String json) {
         if (json == null || json.isEmpty()) {
             return false;
         }
+
+        try {
+            JSONObject root = new JSONObject(json);
+            JSONObject panels = root.optJSONObject("panels");
+            if (panels != null) {
+                java.util.Iterator<String> keys = panels.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    JSONObject model = panels.optJSONObject(key);
+                    if (model != null) {
+                        mPanelModels.put(key, model.toString());
+                    }
+                }
+                if (mActivePanel != null && mPanelModels.containsKey(mActivePanel)) {
+                    mLastModelJson = mPanelModels.get(mActivePanel);
+                }
+                renderLastKnownModel(false);
+                return true;
+            }
+            String panel = root.optString("panel", "");
+            if (!panel.isEmpty()) {
+                mPanelModels.put(panel, json);
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Model HUD tidak valid: " + e.getMessage());
+            return false;
+        }
+
         mLastModelJson = json;
 
         if (!mIsAttached || mRoot == null || mPanelContainer == null) {
@@ -351,7 +387,7 @@ public class FloatingHudManager {
                 if (panel.isEmpty() || mActivePanel == null || !mActivePanel.equals(panel)) {
                     return; // model usang dari panel lain
                 }
-                renderModel(model);
+                renderModel(model, false);
                 layoutWindow(true);
                 if (mRoot != null) {
                     mRoot.post(this::clampAfterContentChange);
@@ -398,19 +434,20 @@ public class FloatingHudManager {
         // Toolbar 4 ikon
         mToolbar = new LinearLayout(mContext);
         mToolbar.setOrientation(LinearLayout.VERTICAL);
-        mToolbar.setBackground(rounded(dp(18), C_SURFACE, dp(1), C_BORDER));
-        mToolbar.setPadding(dp(6), dp(6), dp(6), dp(6));
+        mToolbar.setBackground(rounded(dp(14), C_SURFACE, dp(1), C_BORDER));
+        mToolbar.setPadding(dp(5), dp(5), dp(5), dp(5));
         mToolbar.setVisibility(View.GONE);
 
         for (int i = 0; i < PANEL_IDS.length; i++) {
             final String panelId = PANEL_IDS[i];
-            TextView icon = text(PANEL_GLYPHS[i], 17f, C_TEXT, false);
+            TextView icon = text(PANEL_SHORT_LABELS[i], 9f, C_TEXT, true);
+            icon.setMaxLines(1);
             icon.setGravity(Gravity.CENTER);
             icon.setContentDescription(PANEL_LABELS[i]);
-            icon.setBackground(rounded(dp(14), C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+            icon.setBackground(rounded(dp(10), C_SURFACE_SOFT, 0, Color.TRANSPARENT));
             LinearLayout.LayoutParams iconParams =
-                    new LinearLayout.LayoutParams(dp(44), dp(44));
-            iconParams.topMargin = i == 0 ? 0 : dp(4);
+                    new LinearLayout.LayoutParams(dp(38), dp(38));
+            iconParams.topMargin = i == 0 ? 0 : dp(3);
             icon.setOnClickListener(v -> openPanel(panelId));
             mToolbar.addView(icon, iconParams);
         }
@@ -422,8 +459,10 @@ public class FloatingHudManager {
         // Container satu panel aktif
         mPanelContainer = new LinearLayout(mContext);
         mPanelContainer.setOrientation(LinearLayout.VERTICAL);
-        mPanelContainer.setBackground(rounded(dp(18), C_SURFACE, dp(1), C_BORDER));
-        mPanelContainer.setPadding(dp(10), dp(10), dp(10), dp(10));
+        mPanelContainer.setBackground(rounded(dp(14), C_SURFACE, dp(1), C_BORDER));
+        mPanelContainer.setPadding(
+                dp(PANEL_PADDING_DP), dp(PANEL_PADDING_DP),
+                dp(PANEL_PADDING_DP), dp(PANEL_PADDING_DP));
         mPanelContainer.setVisibility(View.GONE);
 
         LinearLayout.LayoutParams panelParams = new LinearLayout.LayoutParams(
@@ -450,17 +489,9 @@ public class FloatingHudManager {
         notifyPanelChanged(panelId);
         layoutWindow(true);
 
-        // Jika model panel ini sudah pernah dikirim, tampilkan langsung tanpa menunggu.
-        if (mLastModelJson != null) {
-            try {
-                JSONObject cached = new JSONObject(mLastModelJson);
-                if (panelId.equals(cached.optString("panel"))) {
-                    renderModel(cached);
-                }
-            } catch (JSONException ignored) {
-                // model usang diabaikan
-            }
-        }
+        // Jika model panel ini sudah pernah dikirim, tampilkan langsung tanpa menunggu,
+        // ditandai sebagai status terakhir agar tidak terlihat seperti data yang baru.
+        renderLastKnownModel(true);
         if (mRoot != null) {
             mRoot.post(this::clampAfterContentChange);
         }
@@ -506,11 +537,48 @@ public class FloatingHudManager {
             return;
         }
         mPanelContainer.removeAllViews();
-        mPanelContainer.addView(buildHeader(panelTitle(panelId), "Memuat\u2026", "warn"));
-        mPanelContainer.addView(buildEmpty("Menunggu data dari aplikasi\u2026"));
+        // Placeholder jujur: tanpa status palsu dan tanpa keadaan "memuat" tanpa akhir.
+        // Bila model terakhir masih tersedia, renderLastKnownModel() langsung menggantikannya.
+        mPanelContainer.addView(buildHeader(panelTitle(panelId), "Menunggu aplikasi", "warn"));
+        mPanelContainer.addView(buildEmpty("Data panel dimuat saat aplikasi aktif."));
     }
 
-    private void renderModel(@NonNull JSONObject model) {
+    /**
+     * Gambar ulang model terakhir yang valid untuk panel aktif.
+     *
+     * Dipakai ketika WebView dijeda sistem (aplikasi di background) dan saat resume sebelum
+     * model baru dikirim, agar panel mempertahankan data terakhir alih-alih placeholder
+     * kosong. Saat markStale = true header ditandai "Status terakhir" supaya data lama tidak
+     * tampil seolah-olah masih segar atau masih terhubung ke sumber LIVE.
+     */
+    public synchronized void renderLastKnownModel(boolean markStale) {
+        if (mActivePanel == null) {
+            return;
+        }
+        if (!mIsAttached || mPanelContainer == null) {
+            return;
+        }
+        // Utamakan cache khusus panel aktif; mLastModelJson hanya cadangan.
+        String cachedJson = mPanelModels.get(mActivePanel);
+        if (cachedJson == null) {
+            cachedJson = mLastModelJson;
+        }
+        if (cachedJson == null) {
+            return;
+        }
+        try {
+            JSONObject cached = new JSONObject(cachedJson);
+            if (!mActivePanel.equals(cached.optString("panel"))) {
+                return; // cache milik panel lain
+            }
+            renderModel(cached, markStale);
+            layoutWindow(true);
+        } catch (JSONException ignored) {
+            // model usang diabaikan
+        }
+    }
+
+    private void renderModel(@NonNull JSONObject model, boolean stale) {
         if (mPanelContainer == null) {
             return;
         }
@@ -523,6 +591,12 @@ public class FloatingHudManager {
             JSONObject status = model.optJSONObject("status");
             String statusText = status != null ? status.optString("text", "") : "";
             String tone = status != null ? status.optString("tone", "off") : "off";
+            if (stale) {
+                // Data dari cache saat WebView dijeda: jangan mengklaim "Terhubung" atau
+                // nilai yang mungkin sudah kedaluwarsa.
+                statusText = "Status terakhir";
+                tone = "warn";
+            }
             mPanelContainer.addView(buildHeader(title, statusText, tone));
 
             JSONArray tabs = model.optJSONArray("tabs");
@@ -531,6 +605,21 @@ public class FloatingHudManager {
             }
 
             boolean hasBody = false;
+
+            JSONArray buttons = model.optJSONArray("buttons");
+            if (buttons != null && buttons.length() > 0) {
+                mPanelContainer.addView(buildButtons(buttons));
+                hasBody = true;
+            }
+
+            JSONObject grid = model.optJSONObject("grid");
+            if (grid != null) {
+                View gridView = buildGrid(grid);
+                if (gridView != null) {
+                    mPanelContainer.addView(gridView);
+                    hasBody = true;
+                }
+            }
 
             JSONArray sliders = model.optJSONArray("sliders");
             if (sliders != null && sliders.length() > 0) {
@@ -572,7 +661,7 @@ public class FloatingHudManager {
                 LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         listHeightDp > 0 ? dp(listHeightDp) : LinearLayout.LayoutParams.WRAP_CONTENT);
-                scrollParams.topMargin = dp(4);
+                scrollParams.topMargin = dp(3);
                 mPanelContainer.addView(scroll, scrollParams);
                 hasBody = true;
             }
@@ -589,9 +678,9 @@ public class FloatingHudManager {
         LinearLayout header = new LinearLayout(mContext);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(2), 0, dp(2), dp(8));
+        header.setPadding(dp(2), 0, dp(2), dp(6));
 
-        TextView titleView = text(title, 13f, C_TEXT, true);
+        TextView titleView = text(title, 12f, C_TEXT, true);
         titleView.setSingleLine(true);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(titleView, new LinearLayout.LayoutParams(
@@ -626,7 +715,7 @@ public class FloatingHudManager {
 
         LinearLayout row = new LinearLayout(mContext);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, 0, 0, dp(6));
+        row.setPadding(0, 0, 0, dp(4));
 
         for (int i = 0; i < tabs.length(); i++) {
             JSONObject tab = tabs.optJSONObject(i);
@@ -637,16 +726,16 @@ public class FloatingHudManager {
             String label = tab.optString("label", id);
             boolean active = id.equals(activeTab);
 
-            TextView chip = text(label, 10.5f, active ? C_TEXT : C_TEXT_DIM, active);
+            TextView chip = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, active);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(10), dp(5), dp(10), dp(5));
+            chip.setPadding(dp(8), dp(4), dp(8), dp(4));
             chip.setBackground(rounded(dp(12), active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
             chip.setContentDescription(label);
             chip.setOnClickListener(v -> emitCommand("chat.tab", id, 0));
 
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            chipParams.setMarginEnd(dp(5));
+            chipParams.setMarginEnd(dp(4));
             row.addView(chip, chipParams);
         }
 
@@ -690,7 +779,7 @@ public class FloatingHudManager {
 
         String sub = row.optString("sub", "");
         if (!sub.isEmpty()) {
-            TextView subView = text(sub, 10f, C_TEXT_DIM, false);
+            TextView subView = text(sub, 9f, C_TEXT_DIM, false);
             subView.setMaxLines(2);
             subView.setEllipsize(TextUtils.TruncateAt.END);
             item.addView(subView);
@@ -706,12 +795,124 @@ public class FloatingHudManager {
         return item;
     }
 
+    /**
+     * Deretan tombol aksi ringkas (Play/Pause, Next, Mute). Teks saja, tanpa emoji,
+     * dan setiap tombol mengirim aksi yang sama seperti sebelumnya.
+     */
+    private View buildButtons(JSONArray buttons) {
+        LinearLayout row = new LinearLayout(mContext);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowParams.bottomMargin = dp(4);
+        row.setLayoutParams(rowParams);
+
+        int count = buttons.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject button = buttons.optJSONObject(i);
+            if (button == null) {
+                continue;
+            }
+            final String action = button.optString("action", "");
+            final String id = button.optString("id", "");
+            boolean active = button.optBoolean("active", false);
+            String label = button.optString("label", "");
+
+            TextView view = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, true);
+            view.setGravity(Gravity.CENTER);
+            view.setSingleLine(true);
+            view.setEllipsize(TextUtils.TruncateAt.END);
+            view.setContentDescription(label);
+            view.setBackground(rounded(dp(9),
+                    active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(30), 1f);
+            if (i > 0) {
+                params.setMarginStart(dp(4));
+            }
+            if (!action.isEmpty() && !"noop".equals(action)) {
+                view.setClickable(true);
+                view.setFocusable(true);
+                view.setOnClickListener(v -> emitCommand(action, id, 0));
+            }
+            row.addView(view, params);
+        }
+        return row;
+    }
+
+    /**
+     * Grid tombol persegi (Soundboard 4 kolom). Ukuran sel dihitung dari lebar panel
+     * agar tetap persegi tanpa membuat panel melebar.
+     */
+    @Nullable
+    private View buildGrid(JSONObject grid) {
+        JSONArray items = grid.optJSONArray("items");
+        if (items == null || items.length() == 0) {
+            return null;
+        }
+
+        int columns = Math.max(1, Math.min(4, grid.optInt("columns", 4)));
+        int innerWidth = dp(PANEL_WIDTH_DP) - dp(PANEL_PADDING_DP) * 2;
+        int gap = dp(4);
+        int cellPx = Math.max(dp(30), (innerWidth - gap * (columns - 1)) / columns);
+
+        LinearLayout wrap = new LinearLayout(mContext);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wrapParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        wrapParams.bottomMargin = dp(4);
+        wrap.setLayoutParams(wrapParams);
+
+        LinearLayout row = null;
+        for (int i = 0; i < items.length(); i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(mContext);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                rowParams.bottomMargin = dp(4);
+                wrap.addView(row, rowParams);
+            }
+
+            JSONObject item = items.optJSONObject(i);
+            if (item == null || row == null) {
+                continue;
+            }
+
+            final String action = item.optString("action", "");
+            final String id = item.optString("id", "");
+            boolean active = item.optBoolean("active", false);
+            String label = item.optString("label", "");
+
+            TextView cell = text(label, 9f, C_TEXT, false);
+            cell.setGravity(Gravity.CENTER);
+            cell.setMaxLines(2);
+            cell.setEllipsize(TextUtils.TruncateAt.END);
+            cell.setContentDescription(label);
+            cell.setBackground(rounded(dp(8),
+                    active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+
+            LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(cellPx, cellPx);
+            if (i % columns != 0) {
+                cellParams.setMarginStart(gap);
+            }
+            if (!action.isEmpty() && !"noop".equals(action)) {
+                cell.setClickable(true);
+                cell.setFocusable(true);
+                cell.setOnClickListener(v -> emitCommand(action, id, 0));
+            }
+            row.addView(cell, cellParams);
+        }
+        return wrap;
+    }
+
     private View buildSlider(JSONObject slider) {
         LinearLayout wrap = new LinearLayout(mContext);
         wrap.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams wrapParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        wrapParams.topMargin = dp(4);
+        wrapParams.topMargin = dp(3);
         wrap.setLayoutParams(wrapParams);
 
         final String action = slider.optString("action", "");
@@ -723,12 +924,12 @@ public class FloatingHudManager {
         labelRow.setOrientation(LinearLayout.HORIZONTAL);
         labelRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView label = text(slider.optString("label", ""), 10.5f, C_TEXT_DIM, false);
+        TextView label = text(slider.optString("label", ""), 9.5f, C_TEXT_DIM, false);
         label.setSingleLine(true);
         labelRow.addView(label, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView valueView = text(value + "%", 10f, C_ACCENT, true);
+        TextView valueView = text(value + "%", 9f, C_ACCENT, true);
         labelRow.addView(valueView);
         wrap.addView(labelRow);
 

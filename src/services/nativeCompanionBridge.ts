@@ -74,12 +74,28 @@ export interface HudMeterModel {
   available: boolean;
 }
 
+/** Tombol aksi ringkas di panel (mis. Play/Pause, Next). Teks saja, tanpa emoji. */
+export interface HudButtonModel {
+  label: string;
+  action: string;
+  id?: string;
+  active?: boolean;
+}
+
+/** Grid tombol persegi (mis. Soundboard 4 kolom). */
+export interface HudGridModel {
+  columns: number;
+  items: HudButtonModel[];
+}
+
 export interface HudStateModel {
   panel: HudPanelId;
   title: string;
   status: { text: string; tone: HudStatusTone };
   tabs?: HudTabModel[];
   activeTab?: string;
+  buttons?: HudButtonModel[];
+  grid?: HudGridModel;
   sliders?: HudSliderModel[];
   meter?: HudMeterModel;
   rows?: HudRowModel[];
@@ -96,6 +112,13 @@ export interface HudCommandPayload {
 
 export interface HudPanelChangedPayload {
   panel?: HudPanelId;
+}
+
+/** Dikirim native saat aplikasi kembali ke foreground agar panel menyegarkan status. */
+export interface HudResyncPayload {
+  panel?: HudPanelId | null;
+  isVisible?: boolean;
+  timestamp?: number;
 }
 
 export interface FloatingCompanionPluginInterface {
@@ -137,6 +160,10 @@ export interface FloatingCompanionPluginInterface {
   addListener(
     eventName: 'hudPanelChanged',
     listenerFunc: (data: HudPanelChangedPayload) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'hudResync',
+    listenerFunc: (data: HudResyncPayload) => void
   ): Promise<PluginListenerHandle>;
 }
 
@@ -493,10 +520,21 @@ export async function onFloatingHudClick(
 }
 
 /**
- * Kirim model panel HUD ke overlay native.
+ * Snapshot semua panel untuk overlay native (lihat buildHudSnapshot di hudController).
+ * Native menyimpan tiap panel agar tetap dapat digambar saat WebView ditangguhkan.
+ */
+export interface HudSnapshotPayload {
+  panels: Partial<Record<HudPanelId, HudStateModel>>;
+  generatedAt: number;
+}
+
+/**
+ * Kirim model panel (atau snapshot semua panel) HUD ke overlay native.
  * Native hanya menggambar; semua nilai berasal dari state aplikasi.
  */
-export async function pushHudState(model: HudStateModel): Promise<{ accepted: boolean }> {
+export async function pushHudState(
+  model: HudStateModel | HudSnapshotPayload
+): Promise<{ accepted: boolean }> {
   if (!isNativeAndroid()) {
     return { accepted: false };
   }
@@ -575,6 +613,25 @@ export async function onHudPanelChanged(
   }
 }
 
+/**
+ * Aplikasi kembali ke foreground. Dipakai untuk menyegarkan model panel HUD agar status
+ * tidak tertinggal setelah proses dibekukan sistem selama aplikasi di background.
+ */
+export async function onHudResync(
+  callback: (data: HudResyncPayload) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('hudResync', callback);
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener hudResync:', error);
+    return null;
+  }
+}
+
 export const nativeCompanionBridge = {
   isNativeAndroid,
   checkOverlayPermission,
@@ -596,6 +653,7 @@ export const nativeCompanionBridge = {
   getHudState,
   onHudCommand,
   onHudPanelChanged,
+  onHudResync,
 };
 
 export default nativeCompanionBridge;
