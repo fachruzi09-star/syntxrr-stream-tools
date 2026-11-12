@@ -468,6 +468,12 @@ public class FloatingCompanionPlugin extends Plugin {
         // Setelah proses dibekukan sistem selama aplikasi di background, state JS bisa
         // tertinggal dari kondisi layanan sebenarnya. Minta aplikasi mengirim ulang model
         // panel aktif; tidak ada status yang dipalsukan di sisi native.
+        CompanionService.updateStatusDetail("Aplikasi aktif \u00b7 Status HUD disegarkan");
+        if (mHudManager != null) {
+            // Tampilkan data terakhir lebih dulu, ditandai "Status terakhir", sampai model
+            // baru dari WebView tiba dan menggantikannya.
+            mHudManager.renderLastKnownModel(true);
+        }
         JSObject data = new JSObject();
         data.put("timestamp", System.currentTimeMillis());
         data.put("isVisible", mHudManager != null && mHudManager.isHudVisible());
@@ -478,6 +484,18 @@ public class FloatingCompanionPlugin extends Plugin {
             }
         }
         emitToJs("hudResync", data);
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        // WebView dijeda sistem saat aplikasi masuk background: hentikan klaim kesegaran
+        // data, pertahankan model terakhir yang valid, dan perbarui notifikasi secara jujur.
+        CompanionService.updateStatusDetail(
+                "Aplikasi di latar belakang \u00b7 Status terakhir dipertahankan");
+        if (mHudManager != null) {
+            mHudManager.renderLastKnownModel(true);
+        }
     }
 
     @Override

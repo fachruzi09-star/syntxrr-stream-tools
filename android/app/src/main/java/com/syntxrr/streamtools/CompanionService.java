@@ -41,14 +41,33 @@ public class CompanionService extends Service {
     public static final int NOTIFICATION_ID = 9021;
 
     private static volatile boolean sIsRunning = false;
+    private static volatile CompanionService sInstance = null;
+    /** Teks status yang benar-benar diketahui native; tidak pernah mengarang status LIVE. */
+    private static volatile String sStatusDetail = "Floating HUD aktif";
 
     public static boolean isRunning() {
         return sIsRunning;
     }
 
+    /**
+     * Perbarui teks notifikasi foreground sesuai keadaan nyata (aplikasi aktif atau di
+     * latar belakang). Notifikasi tidak lagi menampilkan teks statis yang terlihat "memuat".
+     */
+    public static void updateStatusDetail(String detail) {
+        if (detail == null || detail.isEmpty()) {
+            return;
+        }
+        sStatusDetail = detail;
+        CompanionService instance = sInstance;
+        if (instance != null) {
+            instance.refreshNotification();
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        sInstance = this;
         createNotificationChannel();
         Log.i(TAG, "CompanionService created");
     }
@@ -135,7 +154,7 @@ public class CompanionService extends Service {
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("SYNTXRR Companion Aktif")
-                .setContentText("Mode A TikTok LIVE Companion sedang berjalan di latar belakang")
+                .setContentText(sStatusDetail)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setOngoing(true)
                 .setContentIntent(pendingIntent)
@@ -146,6 +165,26 @@ public class CompanionService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "Gagal membangun notifikasi companion: " + e.getMessage());
             return null;
+        }
+    }
+
+    /** Kirim ulang notifikasi foreground dengan status terbaru (id sama, tanpa duplikat). */
+    private void refreshNotification() {
+        if (!sIsRunning) {
+            return;
+        }
+        Notification notification = buildStatusNotification();
+        if (notification == null) {
+            return;
+        }
+        try {
+            NotificationManager notificationManager =
+                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager != null) {
+                notificationManager.notify(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Gagal memperbarui notifikasi status: " + e.getMessage());
         }
     }
 
@@ -182,6 +221,9 @@ public class CompanionService extends Service {
     @Override
     public void onDestroy() {
         sIsRunning = false;
+        if (sInstance == this) {
+            sInstance = null;
+        }
         try {
             NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (notificationManager != null) {

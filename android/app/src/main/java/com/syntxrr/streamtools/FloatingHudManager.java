@@ -352,7 +352,7 @@ public class FloatingHudManager {
                 if (panel.isEmpty() || mActivePanel == null || !mActivePanel.equals(panel)) {
                     return; // model usang dari panel lain
                 }
-                renderModel(model);
+                renderModel(model, false);
                 layoutWindow(true);
                 if (mRoot != null) {
                     mRoot.post(this::clampAfterContentChange);
@@ -454,17 +454,9 @@ public class FloatingHudManager {
         notifyPanelChanged(panelId);
         layoutWindow(true);
 
-        // Jika model panel ini sudah pernah dikirim, tampilkan langsung tanpa menunggu.
-        if (mLastModelJson != null) {
-            try {
-                JSONObject cached = new JSONObject(mLastModelJson);
-                if (panelId.equals(cached.optString("panel"))) {
-                    renderModel(cached);
-                }
-            } catch (JSONException ignored) {
-                // model usang diabaikan
-            }
-        }
+        // Jika model panel ini sudah pernah dikirim, tampilkan langsung tanpa menunggu,
+        // ditandai sebagai status terakhir agar tidak terlihat seperti data yang baru.
+        renderLastKnownModel(true);
         if (mRoot != null) {
             mRoot.post(this::clampAfterContentChange);
         }
@@ -510,11 +502,40 @@ public class FloatingHudManager {
             return;
         }
         mPanelContainer.removeAllViews();
-        mPanelContainer.addView(buildHeader(panelTitle(panelId), "Memuat\u2026", "warn"));
-        mPanelContainer.addView(buildEmpty("Menunggu data dari aplikasi\u2026"));
+        // Placeholder jujur: tanpa status palsu dan tanpa keadaan "memuat" tanpa akhir.
+        // Bila model terakhir masih tersedia, renderLastKnownModel() langsung menggantikannya.
+        mPanelContainer.addView(buildHeader(panelTitle(panelId), "Menunggu aplikasi", "warn"));
+        mPanelContainer.addView(buildEmpty("Data panel dimuat saat aplikasi aktif."));
     }
 
-    private void renderModel(@NonNull JSONObject model) {
+    /**
+     * Gambar ulang model terakhir yang valid untuk panel aktif.
+     *
+     * Dipakai ketika WebView dijeda sistem (aplikasi di background) dan saat resume sebelum
+     * model baru dikirim, agar panel mempertahankan data terakhir alih-alih placeholder
+     * kosong. Saat markStale = true header ditandai "Status terakhir" supaya data lama tidak
+     * tampil seolah-olah masih segar atau masih terhubung ke sumber LIVE.
+     */
+    public synchronized void renderLastKnownModel(boolean markStale) {
+        if (mActivePanel == null || mLastModelJson == null) {
+            return;
+        }
+        if (!mIsAttached || mPanelContainer == null) {
+            return;
+        }
+        try {
+            JSONObject cached = new JSONObject(mLastModelJson);
+            if (!mActivePanel.equals(cached.optString("panel"))) {
+                return; // cache milik panel lain
+            }
+            renderModel(cached, markStale);
+            layoutWindow(true);
+        } catch (JSONException ignored) {
+            // model usang diabaikan
+        }
+    }
+
+    private void renderModel(@NonNull JSONObject model, boolean stale) {
         if (mPanelContainer == null) {
             return;
         }
@@ -527,6 +548,12 @@ public class FloatingHudManager {
             JSONObject status = model.optJSONObject("status");
             String statusText = status != null ? status.optString("text", "") : "";
             String tone = status != null ? status.optString("tone", "off") : "off";
+            if (stale) {
+                // Data dari cache saat WebView dijeda: jangan mengklaim "Terhubung" atau
+                // nilai yang mungkin sudah kedaluwarsa.
+                statusText = "Status terakhir";
+                tone = "warn";
+            }
             mPanelContainer.addView(buildHeader(title, statusText, tone));
 
             JSONArray tabs = model.optJSONArray("tabs");
