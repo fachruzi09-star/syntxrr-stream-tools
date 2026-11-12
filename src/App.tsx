@@ -60,12 +60,27 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import {
   hideFloatingHud,
   onFloatingHudClick,
+  onHudCommand,
+  onHudPanelChanged,
+  pushHudState,
   startCompanion,
   stopCompanion,
   isCompanionRunning,
 } from './services/nativeCompanionBridge';
+import type { HudChatTab, HudPanelId, HudStateModel } from './services/nativeCompanionBridge';
 import { FloatingHudPanel } from './components/FloatingHudPanel';
-import type { HudMixerKey, HudPanelId } from './components/FloatingHudPanel';
+import type { HudMixerKey } from './components/FloatingHudPanel';
+import {
+  HUD_EVENT_BUFFER_LIMIT,
+  buildChatModel,
+  buildMixerModel,
+  buildMusicModel,
+  buildSoundboardModel,
+  hudEventSourceStatus,
+} from './services/hudController';
+import type { HudChatEntry } from './services/hudController';
+import { micMonitor } from './services/micMonitor';
+import type { MicMonitorState } from './services/micMonitor';
 import { applyTheme } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 
@@ -600,6 +615,64 @@ export default function App() {
     await StorageService.saveUnifiedQueue(updatedQueue);
   };
 
+  // Handler terbaru untuk listener yang dipasang sekali (menghindari closure basi).
+  const addSongRequestRef = useRef(handleAddSongRequest);
+  useEffect(() => {
+    addSongRequestRef.current = handleAddSongRequest;
+  });
+
+  /**
+   * Buffer event LIVE untuk panel Chat HUD.
+   * - terbatas di memori (HUD_EVENT_BUFFER_LIMIT), terbaru lebih dulu
+   * - identitas event unik agar tidak duplikat saat reconnect
+   * - perintah viewer "!play <judul>" menambah antrean lagu yang sama dengan Music
+   *   ("!next" sengaja TIDAK didukung: Next hanya untuk streamer)
+   */
+  useEffect(() => {
+    type BusEvent = ReturnType<typeof streamEventBus.getHistory>[number];
+
+    const pushEvent = (streamEvent: BusEvent) => {
+      setHudEvents((prev) => {
+        if (prev.some((item) => item.id === streamEvent.id)) return prev;
+        const next: HudChatEntry[] = [
+          {
+            id: streamEvent.id,
+            type: streamEvent.type,
+            username: streamEvent.username,
+            detail: streamEvent.detail,
+            timestamp: streamEvent.timestamp,
+            isSimulation: streamEvent.isSimulation,
+          },
+          ...prev,
+        ];
+        return next.length > HUD_EVENT_BUFFER_LIMIT ? next.slice(0, HUD_EVENT_BUFFER_LIMIT) : next;
+      });
+      if (hudPausedRef.current) setHudUnread((count) => count + 1);
+    };
+
+    streamEventBus.getHistory().forEach((item) => pushEvent(item));
+
+    return streamEventBus.subscribe((streamEvent) => {
+      pushEvent(streamEvent);
+
+      if (streamEvent.type !== 'chat') return;
+      const match = /^!play\s+(.+)$/i.exec(streamEvent.detail.trim());
+      if (!match) return;
+      const title = match[1].trim().slice(0, 120);
+      if (!title) return;
+
+      void addSongRequestRef.current({
+        title,
+        artist: 'Song Request',
+        duration: 180,
+        requesterName: streamEvent.username || 'Viewer',
+        platform: 'TikTok',
+        status: 'queued',
+        source: 'viewer_request',
+      });
+    });
+  }, []);
+
   const handleDeleteSongRequest = async (id: string) => {
     const updated = songRequests.filter((s) => s.id !== id);
     setSongRequests(updated);
@@ -777,6 +850,17 @@ export default function App() {
   const [companionRunning, setCompanionRunning] = useState(false);
   const isNativeAndroidPlatform = Capacitor.getPlatform() === 'android';
 
+  // State panel HUD native. Sumber kebenaran tetap state aplikasi di bawah ini.
+  const [hudPanel, setHudPanel] = useState<HudPanelId | null>(null);
+  const [hudChatTab, setHudChatTab] = useState<HudChatTab>('chat');
+  const [hudChatPaused, setHudChatPaused] = useState(false);
+  const [hudPausedSnapshot, setHudPausedSnapshot] = useState<HudChatEntry[] | null>(null);
+  const [hudEvents, setHudEvents] = useState<HudChatEntry[]>([]);
+  const [hudUnread, setHudUnread] = useState(0);
+  const [hudPlayingSoundId, setHudPlayingSoundId] = useState<string | null>(null);
+  const [musicMuted, setMusicMuted] = useState(false);
+  const [micState, setMicState] = useState<MicMonitorState>(micMonitor.getState());
+
   /**
    * Bubble native mengirim event "floatingHudClick" lewat bridge. Listener didaftarkan
    * sekali dan dilepas saat unmount agar tidak ada listener ganda.
@@ -826,8 +910,7 @@ export default function App() {
   if (settings.hudPanelSoundboard !== false) hudPanels.push('soundboard');
   if (settings.hudPanelMusic !== false) hudPanels.push('music');
   if (settings.hudPanelMixer !== false) hudPanels.push('mixer');
-  if (settings.hudPanelLiveControl !== false) hudPanels.push('live');
-  if (settings.hudPanelSettings !== false) hudPanels.push('settings');
+  // Live Control dan Settings sengaja tidak lagi menjadi ikon HUD.
 
   /**
    * Mixer HUD memakai handleUpdateSettings yang sudah men-debounce penulisan storage
