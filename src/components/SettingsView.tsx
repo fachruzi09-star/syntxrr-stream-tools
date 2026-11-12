@@ -1302,8 +1302,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 { key: 'hudPanelSoundboard', label: 'Soundboard' },
                 { key: 'hudPanelMusic', label: 'Music' },
                 { key: 'hudPanelMixer', label: 'Audio Mixer' },
-                { key: 'hudPanelLiveControl', label: 'Live Control' },
-                { key: 'hudPanelSettings', label: 'Settings' },
               ] as const
             ).map((panel) => (
               <div
