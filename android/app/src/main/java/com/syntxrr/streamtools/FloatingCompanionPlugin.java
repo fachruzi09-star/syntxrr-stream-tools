@@ -237,6 +237,35 @@ public class FloatingCompanionPlugin extends Plugin {
 
     @Nullable
     private FloatingHudManager mHudManager;
+    @Nullable
+    private NativeSoundPoolManager mSoundPoolManager;
+
+    private synchronized NativeSoundPoolManager getSoundPoolManager() {
+        if (mSoundPoolManager == null) {
+            Context appContext = getContext().getApplicationContext();
+            mSoundPoolManager = new NativeSoundPoolManager(appContext);
+            mSoundPoolManager.setPlaybackListener(new NativeSoundPoolManager.OnSoundPlaybackListener() {
+                @Override
+                public void onSoundStarted(final String soundId) {
+                    runOnUi(() -> {
+                        if (mHudManager != null) {
+                            mHudManager.setSoundboardPlayingState(soundId, true);
+                        }
+                    });
+                }
+
+                @Override
+                public void onSoundCompleted(final String soundId) {
+                    runOnUi(() -> {
+                        if (mHudManager != null) {
+                            mHudManager.setSoundboardPlayingState(soundId, false);
+                        }
+                    });
+                }
+            });
+        }
+        return mSoundPoolManager;
+    }
 
     private synchronized FloatingHudManager getHudManager() {
         if (mHudManager == null) {
@@ -253,10 +282,37 @@ public class FloatingCompanionPlugin extends Plugin {
                 }
             });
 
-            // Kanal perintah HUD -> aplikasi (satu sumber kebenaran di JS).
+            // Kanal perintah HUD -> aplikasi.
+            // Aksi audio & tampilan HUD dijalankan langsung di native agar tetap berfungsi
+            // saat aplikasi di-background (WebView di-pause oleh Android saat buka TikTok LIVE).
             mHudManager.setOnHudActionListener(new FloatingHudManager.OnHudActionListener() {
                 @Override
                 public void onHudCommand(@NonNull String action, @Nullable String id, int value) {
+                    // Direct native execution for background responsiveness
+                    if ("soundboard.play".equals(action)) {
+                        String soundId = (id != null && !id.isEmpty()) ? id : "horn";
+                        getSoundPoolManager().playSynthSound(soundId, 1.0f);
+                    } else if ("music.toggle".equals(action)) {
+                        if (mHudManager != null) {
+                            mHudManager.toggleMusicState();
+                        }
+                    } else if ("music.next".equals(action)) {
+                        if (mHudManager != null) {
+                            mHudManager.advanceMusicQueue();
+                        }
+                    } else if ("music.mute".equals(action)) {
+                        if (mHudManager != null) {
+                            mHudManager.toggleMusicMute();
+                        }
+                    } else if ("music.volume".equals(action)) {
+                        if (mHudManager != null) {
+                            mHudManager.setMusicVolume(value);
+                        }
+                    } else if ("mixer.sfx".equals(action)) {
+                        getSoundPoolManager().setMasterVolume(value / 100.0f);
+                    }
+
+                    // Forward to JS so application state stays synchronized
                     JSObject data = new JSObject();
                     data.put("action", action);
                     if (id != null) {
@@ -309,6 +365,18 @@ public class FloatingCompanionPlugin extends Plugin {
         if (getActivity() == null) {
             call.reject("Activity tidak tersedia untuk menampilkan Floating HUD.");
             return;
+        }
+
+        // Pastikan CompanionService berjalan sebagai foreground service agar proses tidak
+        // dibekukan sistem (Android cached app freezer) saat pengguna membuka TikTok LIVE.
+        if (!CompanionService.isRunning()) {
+            try {
+                Intent serviceIntent = new Intent(context, CompanionService.class);
+                serviceIntent.setAction(CompanionService.ACTION_START);
+                startCompanionService(context, serviceIntent);
+            } catch (Exception e) {
+                android.util.Log.w("FloatingCompanion", "Gagal auto-start CompanionService saat showHud: " + e.getMessage());
+            }
         }
 
         getActivity().runOnUiThread(new Runnable() {
@@ -503,6 +571,10 @@ public class FloatingCompanionPlugin extends Plugin {
         if (mHudManager != null) {
             mHudManager.destroy();
             mHudManager = null;
+        }
+        if (mSoundPoolManager != null) {
+            mSoundPoolManager.release();
+            mSoundPoolManager = null;
         }
         super.handleOnDestroy();
     }

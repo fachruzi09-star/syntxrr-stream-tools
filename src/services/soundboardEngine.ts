@@ -1,5 +1,6 @@
 // Mesin Audio Soundboard — SYNTXRR STREAM
 // Memutar efek suara sintetis prosedural dan file audio lokal pengguna
+import { isNativeAndroid, playSfx } from './nativeAudioBridge';
 
 type SynthType = 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell';
 
@@ -82,10 +83,23 @@ class SoundboardEngine {
       return { ok: false, reason: 'invalid_audio' };
     }
 
+    const playbackVolume = volume === undefined ? this.volume : this.normalizeVolume(volume);
+
+    // On native Android, route to NativeAudioPlugin so playback succeeds even in background
+    if (isNativeAndroid()) {
+      try {
+        const res = await playSfx({ soundId: type, volume: playbackVolume });
+        if (res.success) {
+          return { ok: true };
+        }
+      } catch (err) {
+        console.warn('NativeAudio SFX fallback to Web Audio:', err);
+      }
+    }
+
     const contextResult = await this.ensureContext();
     if (!contextResult.ok) return contextResult;
 
-    const playbackVolume = volume === undefined ? this.volume : this.normalizeVolume(volume);
     const context = contextResult.context;
 
     try {

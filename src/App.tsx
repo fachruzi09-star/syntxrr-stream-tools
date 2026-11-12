@@ -245,6 +245,20 @@ export default function App() {
     previousSoundboardUrls.current.clear();
   }, []);
 
+  // Synchronize music player playback state and automatic track progression
+  useEffect(() => {
+    const unsub = audioEngine.subscribe((audioState) => {
+      setIsPlayingMusic(audioState.isPlaying);
+    });
+    audioEngine.setOnEnded(() => {
+      void handleNextTrack();
+    });
+    return () => {
+      unsub();
+      audioEngine.setOnEnded(null);
+    };
+  }, [unifiedQueue]);
+
   // Subscribe to Stream Event Bus to display floating overlay alerts
   useEffect(() => {
     const unsubscribe = streamEventBus.subscribe((streamEvent) => {
@@ -532,7 +546,23 @@ export default function App() {
 
   // Music Player Controls (HTML5 Audio & Hybrid Queue)
   const handleTogglePlayMusic = () => {
-    setIsPlayingMusic((prev) => !prev);
+    const audioState = audioEngine.getState();
+    if (audioState.isPlaying) {
+      audioEngine.pause();
+      setIsPlayingMusic(false);
+    } else {
+      if (audioState.currentTrackId) {
+        void audioEngine.play();
+        setIsPlayingMusic(true);
+      } else {
+        const activeSong = unifiedQueue.find((s) => s.status === 'playing') || unifiedQueue[0];
+        if (activeSong && activeSong.externalUrl) {
+          void audioEngine.loadAndPlayUrl(activeSong.id, activeSong.title, activeSong.artist, activeSong.externalUrl);
+        } else {
+          setIsPlayingMusic((prev) => !prev);
+        }
+      }
+    }
   };
 
   const handleNextTrack = async () => {
@@ -558,8 +588,12 @@ export default function App() {
         requestedAt: nextItem.addedAt,
       };
       setNowPlayingSong(legacyItem);
+      if (nextItem.externalUrl) {
+        await audioEngine.loadAndPlayUrl(nextItem.id, nextItem.title, nextItem.artist, nextItem.externalUrl);
+      }
       setIsPlayingMusic(true);
     } else {
+      audioEngine.pause();
       setIsPlayingMusic(false);
     }
   };
@@ -587,6 +621,9 @@ export default function App() {
         requestedAt: prevItem.addedAt,
       };
       setNowPlayingSong(legacyItem);
+      if (prevItem.externalUrl) {
+        await audioEngine.loadAndPlayUrl(prevItem.id, prevItem.title, prevItem.artist, prevItem.externalUrl);
+      }
       setIsPlayingMusic(true);
     }
   };

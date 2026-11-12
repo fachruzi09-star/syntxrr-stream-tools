@@ -105,11 +105,21 @@ public class NativeAudioPlugin extends Plugin {
             ret.put("message", "Audio sedang dimuat ke memori, coba sesaat lagi.");
             call.resolve(ret);
         } else if (streamId == 0) {
-            ret.put("success", false);
-            ret.put("streamId", 0);
-            ret.put("soundId", soundId);
-            ret.put("message", "Sound ID tidak terdaftar atau belum dimuat. Gunakan Web Audio fallback.");
-            call.resolve(ret);
+            // Check if it is a synthetic procedural sound (default presets horn, tada, cheer, bell, etc.)
+            boolean synthPlayed = spManager.playSynthSound(soundId, volume);
+            if (synthPlayed) {
+                ret.put("success", true);
+                ret.put("streamId", 1);
+                ret.put("soundId", soundId);
+                ret.put("message", "SFX sintetis diputar via native AudioTrack.");
+                call.resolve(ret);
+            } else {
+                ret.put("success", false);
+                ret.put("streamId", 0);
+                ret.put("soundId", soundId);
+                ret.put("message", "Sound ID tidak terdaftar atau belum dimuat. Gunakan Web Audio fallback.");
+                call.resolve(ret);
+            }
         } else {
             ret.put("success", false);
             ret.put("streamId", 0);
