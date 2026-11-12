@@ -5,7 +5,7 @@ Status keseluruhan: **INCOMPLETE / BELUM LENGKAP.**
 Dokumen ini mencatat apa yang benar-benar diperiksa, apa yang belum tercakup, dan prasyarat untuk
 melengkapinya. Jangan pernah menyebut hasil ini sebagai "scan bersih" atau "dependency aman".
 
-Diperbarui pada branch `appjet` setelah commit `1befd9f`.
+Diperbarui pada branch `appjet` pada commit `7cf6378` (setelah pekerjaan Floating HUD redesign).
 
 ## 1. Yang sudah diperiksa (npm / JavaScript)
 
@@ -16,10 +16,15 @@ Diperbarui pada branch `appjet` setelah commit `1befd9f`.
 | Paket diperiksa | 353 |
 | Temuan | 0 (0 blocking) |
 | Status | `incomplete` |
+| Job bukti terakhir | `94b90748f76eea277cdb64db7ebff5a2` (revisi 11, commit `7cf6378`) |
 
 `package.json` dan `bun.lock` terakhir berubah pada commit `acf61c3` dan tidak berubah sampai
-`73ee907`, sehingga bukti npm di atas masih berlaku untuk kode saat ini. Scan tidak diulang karena
-file dependency tidak berubah.
+`7cf6378`, sehingga bukti npm di atas masih berlaku untuk kode saat ini.
+
+Catatan penting: pemindaian terakhir dijalankan ulang sekali setelah pekerjaan Floating HUD dan
+menghasilkan cakupan yang identik (353 paket npm, 0 temuan, tetap `incomplete`). Karena file
+dependency tidak berubah, scan berikutnya tidak boleh diulang tanpa perubahan `package.json` atau
+`bun.lock`; mengulang perintah yang sama tidak akan mengubah status menjadi lengkap.
 
 ## 2. Yang belum tercakup — dan penyebabnya
 
@@ -33,6 +38,15 @@ plugin AGP) tidak dapat di-resolve oleh scanner yang tersedia di sandbox ini:
 
 Karena itu status `incomplete` adalah hasil yang benar, bukan kegagalan sementara yang bisa
 diselesaikan dengan mengulang perintah yang sama.
+
+Kemampuan yang tidak tersedia di lingkungan ini, dinyatakan eksplisit:
+
+1. **Tidak ada Android SDK** (`ANDROID_HOME` / `ANDROID_SDK_ROOT` kosong) sehingga graph Gradle/Maven
+   tidak dapat di-resolve dari workspace.
+2. **Tidak ada akses API/token GitHub** di workspace, sehingga hasil Dependency Graph dan Dependabot
+   alerts (ekosistem Maven) tidak dapat dibaca dari sini. Pencarian kredensial tidak diizinkan.
+
+Keduanya prasyarat eksternal di luar repository, bukan cacat kode aplikasi.
 
 ## 3. Audit classpath build (manual, sebelumnya)
 
