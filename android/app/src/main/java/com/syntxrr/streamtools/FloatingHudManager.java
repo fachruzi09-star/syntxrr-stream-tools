@@ -168,6 +168,145 @@ public class FloatingHudManager {
     public FloatingHudManager(@NonNull Context context) {
         this.mContext = context.getApplicationContext();
         this.mWindowManager = (WindowManager) mContext.getSystemService(Context.WINDOW_SERVICE);
+        initDefaultPanelModels();
+    }
+
+    private void initDefaultPanelModels() {
+        try {
+            // Default Soundboard (Immediate native offline capability)
+            JSONObject sb = new JSONObject();
+            sb.put("panel", "soundboard");
+            sb.put("title", "Soundboard");
+            JSONObject sbStatus = new JSONObject();
+            sbStatus.put("text", "Siap");
+            sbStatus.put("tone", "ok");
+            sb.put("status", sbStatus);
+            JSONObject grid = new JSONObject();
+            grid.put("columns", 3);
+            JSONArray items = new JSONArray();
+            String[] ids = {"sb_1", "sb_2", "sb_3", "sb_4", "sb_5", "sb_6"};
+            String[] labels = {"Airhorn", "Level Up", "Cheer", "Tada", "Bell", "Game Over"};
+            for (int i = 0; i < ids.length; i++) {
+                JSONObject it = new JSONObject();
+                it.put("id", ids[i]);
+                it.put("label", labels[i]);
+                it.put("action", "soundboard.play");
+                it.put("active", false);
+                items.put(it);
+            }
+            grid.put("items", items);
+            sb.put("grid", grid);
+            mPanelModels.put("soundboard", sb.toString());
+
+            // Default Music Player
+            JSONObject music = new JSONObject();
+            music.put("panel", "music");
+            music.put("title", "Music Player");
+            JSONObject mStatus = new JSONObject();
+            mStatus.put("text", "Jeda");
+            mStatus.put("tone", "off");
+            music.put("status", mStatus);
+            JSONArray buttons = new JSONArray();
+            JSONObject bPlay = new JSONObject();
+            bPlay.put("id", "play");
+            bPlay.put("label", "Putar");
+            bPlay.put("action", "music.toggle");
+            bPlay.put("active", false);
+            buttons.put(bPlay);
+            JSONObject bNext = new JSONObject();
+            bNext.put("id", "next");
+            bNext.put("label", "Berikutnya");
+            bNext.put("action", "music.next");
+            bNext.put("active", false);
+            buttons.put(bNext);
+            JSONObject bMute = new JSONObject();
+            bMute.put("id", "mute");
+            bMute.put("label", "Mute");
+            bMute.put("action", "music.mute");
+            bMute.put("active", false);
+            buttons.put(bMute);
+            music.put("buttons", buttons);
+            JSONArray sliders = new JSONArray();
+            JSONObject sVol = new JSONObject();
+            sVol.put("id", "music_vol");
+            sVol.put("label", "Volume Musik");
+            sVol.put("value", 85);
+            sVol.put("max", 100);
+            sVol.put("action", "music.volume");
+            sliders.put(sVol);
+            music.put("sliders", sliders);
+            JSONArray rows = new JSONArray();
+            JSONObject r1 = new JSONObject();
+            r1.put("label", "Antrean Musik");
+            r1.put("sub", "Belum ada trek lokal yang dimainkan");
+            r1.put("trailing", "");
+            rows.put(r1);
+            music.put("rows", rows);
+            mPanelModels.put("music", music.toString());
+
+            // Default Mixer
+            JSONObject mixer = new JSONObject();
+            mixer.put("panel", "mixer");
+            mixer.put("title", "Audio Mixer");
+            JSONObject mixStatus = new JSONObject();
+            mixStatus.put("text", "Aktif");
+            mixStatus.put("tone", "ok");
+            mixer.put("status", mixStatus);
+            JSONObject meter = new JSONObject();
+            meter.put("label", "Level mic");
+            meter.put("value", 70);
+            meter.put("muted", false);
+            meter.put("available", true);
+            mixer.put("meter", meter);
+            JSONArray mixSliders = new JSONArray();
+            JSONObject sl1 = new JSONObject();
+            sl1.put("id", "music");
+            sl1.put("label", "Musik");
+            sl1.put("value", 85);
+            sl1.put("max", 100);
+            sl1.put("action", "mixer.music");
+            mixSliders.put(sl1);
+            JSONObject sl2 = new JSONObject();
+            sl2.put("id", "sfx");
+            sl2.put("label", "Soundboard");
+            sl2.put("value", 90);
+            sl2.put("max", 100);
+            sl2.put("action", "mixer.sfx");
+            mixSliders.put(sl2);
+            JSONObject sl3 = new JSONObject();
+            sl3.put("id", "tts");
+            sl3.put("label", "TTS Donasi");
+            sl3.put("value", 85);
+            sl3.put("max", 100);
+            sl3.put("action", "mixer.tts");
+            mixSliders.put(sl3);
+            mixer.put("sliders", mixSliders);
+            mPanelModels.put("mixer", mixer.toString());
+
+            // Default Live Chat
+            JSONObject chat = new JSONObject();
+            chat.put("panel", "chat");
+            chat.put("title", "Live Chat");
+            JSONObject chatStatus = new JSONObject();
+            chatStatus.put("text", "Menunggu koneksi");
+            chatStatus.put("tone", "warn");
+            chat.put("status", chatStatus);
+            JSONArray tabs = new JSONArray();
+            String[] tIds = {"chat", "gift", "like", "follow"};
+            String[] tLabels = {"Chat", "Gift", "Like", "Follow"};
+            for (int i = 0; i < tIds.length; i++) {
+                JSONObject tab = new JSONObject();
+                tab.put("id", tIds[i]);
+                tab.put("label", tLabels[i]);
+                tabs.put(tab);
+            }
+            chat.put("tabs", tabs);
+            chat.put("activeTab", "chat");
+            chat.put("emptyText", "Belum ada pesan chat masuk.");
+            mPanelModels.put("chat", chat.toString());
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal menginisialisasi default model: " + e.getMessage());
+        }
     }
 
     public void setOnHudClickListener(@Nullable OnHudClickListener listener) {
@@ -399,6 +538,173 @@ public class FloatingHudManager {
         return true;
     }
 
+    /**
+     * Update active soundboard play state and synchronize button indicator in real-time.
+     */
+    public synchronized void setSoundboardPlayingState(@Nullable final String soundId, final boolean isPlaying) {
+        String sbJson = mPanelModels.get("soundboard");
+        if (sbJson == null) return;
+        try {
+            JSONObject model = new JSONObject(sbJson);
+            JSONObject status = model.optJSONObject("status");
+            if (status == null) {
+                status = new JSONObject();
+                model.put("status", status);
+            }
+            status.put("text", isPlaying ? "Memutar..." : "Siap");
+            status.put("tone", isPlaying ? "ok" : "ok");
+
+            JSONObject grid = model.optJSONObject("grid");
+            if (grid != null) {
+                JSONArray items = grid.optJSONArray("items");
+                if (items != null) {
+                    for (int i = 0; i < items.length(); i++) {
+                        JSONObject item = items.optJSONObject(i);
+                        if (item != null) {
+                            String id = item.optString("id", "");
+                            if (isPlaying && soundId != null && (id.equalsIgnoreCase(soundId) || soundId.toLowerCase().contains(id.toLowerCase()))) {
+                                item.put("active", true);
+                            } else {
+                                item.put("active", false);
+                            }
+                        }
+                    }
+                }
+            }
+
+            mPanelModels.put("soundboard", model.toString());
+
+            if ("soundboard".equals(mActivePanel) && mRoot != null) {
+                final JSONObject updatedModel = model;
+                mRoot.post(() -> {
+                    if ("soundboard".equals(mActivePanel) && mPanelContainer != null) {
+                        renderModel(updatedModel, false);
+                        layoutWindow(true);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal memperbarui status Soundboard: " + e.getMessage());
+        }
+    }
+
+    public synchronized void toggleMusicState() {
+        String musicJson = mPanelModels.get("music");
+        if (musicJson == null) return;
+        try {
+            JSONObject model = new JSONObject(musicJson);
+            JSONObject status = model.optJSONObject("status");
+            if (status == null) {
+                status = new JSONObject();
+                model.put("status", status);
+            }
+            boolean currentlyPlaying = "Memutar".equalsIgnoreCase(status.optString("text"));
+            boolean nextPlaying = !currentlyPlaying;
+            status.put("text", nextPlaying ? "Memutar" : "Jeda");
+            status.put("tone", nextPlaying ? "ok" : "off");
+
+            JSONArray buttons = model.optJSONArray("buttons");
+            if (buttons != null) {
+                for (int i = 0; i < buttons.length(); i++) {
+                    JSONObject b = buttons.optJSONObject(i);
+                    if (b != null && "play".equals(b.optString("id"))) {
+                        b.put("label", nextPlaying ? "Jeda" : "Putar");
+                        b.put("active", nextPlaying);
+                    }
+                }
+            }
+            mPanelModels.put("music", model.toString());
+            if ("music".equals(mActivePanel) && mRoot != null) {
+                final JSONObject updatedModel = model;
+                mRoot.post(() -> {
+                    if ("music".equals(mActivePanel) && mPanelContainer != null) {
+                        renderModel(updatedModel, false);
+                        layoutWindow(true);
+                    }
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public synchronized void advanceMusicQueue() {
+        String musicJson = mPanelModels.get("music");
+        if (musicJson == null) return;
+        try {
+            JSONObject model = new JSONObject(musicJson);
+            JSONObject status = model.optJSONObject("status");
+            if (status != null) {
+                status.put("text", "Memutar");
+                status.put("tone", "ok");
+            }
+            JSONArray buttons = model.optJSONArray("buttons");
+            if (buttons != null) {
+                for (int i = 0; i < buttons.length(); i++) {
+                    JSONObject b = buttons.optJSONObject(i);
+                    if (b != null && "play".equals(b.optString("id"))) {
+                        b.put("label", "Jeda");
+                        b.put("active", true);
+                    }
+                }
+            }
+            mPanelModels.put("music", model.toString());
+            if ("music".equals(mActivePanel) && mRoot != null) {
+                final JSONObject updatedModel = model;
+                mRoot.post(() -> {
+                    if ("music".equals(mActivePanel) && mPanelContainer != null) {
+                        renderModel(updatedModel, false);
+                        layoutWindow(true);
+                    }
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public synchronized void toggleMusicMute() {
+        String musicJson = mPanelModels.get("music");
+        if (musicJson == null) return;
+        try {
+            JSONObject model = new JSONObject(musicJson);
+            JSONArray buttons = model.optJSONArray("buttons");
+            if (buttons != null) {
+                for (int i = 0; i < buttons.length(); i++) {
+                    JSONObject b = buttons.optJSONObject(i);
+                    if (b != null && "mute".equals(b.optString("id"))) {
+                        boolean active = b.optBoolean("active", false);
+                        b.put("active", !active);
+                    }
+                }
+            }
+            mPanelModels.put("music", model.toString());
+            if ("music".equals(mActivePanel) && mRoot != null) {
+                final JSONObject updatedModel = model;
+                mRoot.post(() -> {
+                    if ("music".equals(mActivePanel) && mPanelContainer != null) {
+                        renderModel(updatedModel, false);
+                        layoutWindow(true);
+                    }
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public synchronized void setMusicVolume(int volumePercent) {
+        String musicJson = mPanelModels.get("music");
+        if (musicJson == null) return;
+        try {
+            JSONObject model = new JSONObject(musicJson);
+            JSONArray sliders = model.optJSONArray("sliders");
+            if (sliders != null) {
+                for (int i = 0; i < sliders.length(); i++) {
+                    JSONObject s = sliders.optJSONObject(i);
+                    if (s != null && "music_vol".equals(s.optString("id"))) {
+                        s.put("value", Math.max(0, Math.min(100, volumePercent)));
+                    }
+                }
+            }
+            mPanelModels.put("music", model.toString());
+        } catch (Exception ignored) {}
+    }
+
     /** Tutup toolbar/panel tanpa menyembunyikan bubble. */
     public synchronized void collapseContent() {
         if (mContent == null) {
@@ -479,7 +785,9 @@ public class FloatingHudManager {
         }
         if (mPanelContainer != null) {
             mPanelContainer.setVisibility(View.VISIBLE);
-            showPanelPlaceholder(panelId);
+            if (!mPanelModels.containsKey(panelId)) {
+                showPanelPlaceholder(panelId);
+            }
         }
         if (mContent != null) {
             mContent.setVisibility(View.VISIBLE);
@@ -489,9 +797,8 @@ public class FloatingHudManager {
         notifyPanelChanged(panelId);
         layoutWindow(true);
 
-        // Jika model panel ini sudah pernah dikirim, tampilkan langsung tanpa menunggu,
-        // ditandai sebagai status terakhir agar tidak terlihat seperti data yang baru.
-        renderLastKnownModel(true);
+        // Jika model panel ini sudah pernah dibuat atau didorong, tampilkan langsung
+        renderLastKnownModel(false);
         if (mRoot != null) {
             mRoot.post(this::clampAfterContentChange);
         }
@@ -591,9 +898,9 @@ public class FloatingHudManager {
             JSONObject status = model.optJSONObject("status");
             String statusText = status != null ? status.optString("text", "") : "";
             String tone = status != null ? status.optString("tone", "off") : "off";
-            if (stale) {
+            if (stale && "chat".equals(model.optString("panel"))) {
                 // Data dari cache saat WebView dijeda: jangan mengklaim "Terhubung" atau
-                // nilai yang mungkin sudah kedaluwarsa.
+                // nilai yang mungkin sudah kedaluwarsa khusus untuk stream LIVE TikTok.
                 statusText = "Status terakhir";
                 tone = "warn";
             }
