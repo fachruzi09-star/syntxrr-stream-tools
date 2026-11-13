@@ -19,8 +19,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -311,80 +315,130 @@ public class NativeSoundPoolManager {
      * Guaranteed to work even when WebView is paused/suspended by Android cached app freezer.
      */
     public boolean playSynthSound(@NonNull final String soundId, final float volumeMultiplier) {
+        if (mSynthExecutor.isShutdown()) {
+            Log.w(TAG, "Cannot play synth sound; executor is shut down: " + soundId);
+            return false;
+        }
+
         final String resolvedType = resolveSynthType(soundId);
         final float effectiveVol = Math.max(0.0f, Math.min(1.0f, mMasterVolume * volumeMultiplier));
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final AtomicBoolean playbackStartedFlag = new AtomicBoolean(false);
 
-        mSynthExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                AudioTrack track = null;
-                boolean playbackStarted = false;
-                mActiveSynthCount.incrementAndGet();
+        try {
+            mSynthExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    AudioTrack track = null;
+                    boolean playbackStarted = false;
+                    mActiveSynthCount.incrementAndGet();
 
-                try {
-                    short[] pcm = generateSynthPcm(resolvedType, SAMPLE_RATE);
-                    int bufferSizeBytes = pcm.length * 2;
+                    try {
+                        short[] pcm = generateSynthPcm(resolvedType, SAMPLE_RATE);
+                        if (pcm.length == 0) {
+                            Log.w(TAG, "Generated empty PCM buffer for synth sound: " + resolvedType);
+                            return;
+                        }
 
-                    AudioAttributes audioAttributes = createSoundboardAudioAttributes();
+                        int bufferSizeBytes = pcm.length * 2;
+                        AudioAttributes audioAttributes = createSoundboardAudioAttributes();
 
-                    AudioFormat audioFormat = new AudioFormat.Builder()
-                            .setSampleRate(SAMPLE_RATE)
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .build();
+                        AudioFormat audioFormat = new AudioFormat.Builder()
+                                .setSampleRate(SAMPLE_RATE)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                .build();
 
-                    track = new AudioTrack(
-                            audioAttributes,
-                            audioFormat,
-                            bufferSizeBytes,
-                            AudioTrack.MODE_STATIC,
-                            AudioManager.AUDIO_SESSION_ID_GENERATE
-                    );
+                        track = new AudioTrack(
+                                audioAttributes,
+                                audioFormat,
+                                bufferSizeBytes,
+                                AudioTrack.MODE_STATIC,
+                                AudioManager.AUDIO_SESSION_ID_GENERATE
+                        );
 
-                    if (track.getState() != AudioTrack.STATE_INITIALIZED) {
-                        Log.w(TAG, "AudioTrack failed to initialize for synth sound: " + resolvedType);
-                        return;
-                    }
+                        // For MODE_STATIC, newly constructed tracks start in STATE_NO_STATIC_DATA
+                        // and only transition to STATE_INITIALIZED after PCM data is written.
+                        if (track.getState() == AudioTrack.STATE_UNINITIALIZED) {
+                            Log.w(TAG, "AudioTrack failed to construct (STATE_UNINITIALIZED) for synth sound: " + resolvedType);
+                            return;
+                        }
 
-                    int written = track.write(pcm, 0, pcm.length);
-                    if (written < 0) {
-                        Log.w(TAG, "AudioTrack.write failed with code " + written + " for synth sound: " + resolvedType);
-                        return;
-                    }
+                        int written = track.write(pcm, 0, pcm.length);
+                        if (written != pcm.length) {
+                            Log.w(TAG, "AudioTrack.write incomplete/failed (" + written + "/" + pcm.length + ") for synth sound: " + resolvedType);
+                            return;
+                        }
 
-                    track.setVolume(effectiveVol);
-                    playbackStarted = true;
-                    if (mPlaybackListener != null) {
-                        try {
-                            mPlaybackListener.onSoundStarted(soundId);
-                        } catch (Exception ignored) {}
-                    }
+                        if (track.getState() != AudioTrack.STATE_INITIALIZED) {
+                            Log.w(TAG, "AudioTrack not initialized after write (state=" + track.getState() + ") for synth sound: " + resolvedType);
+                            return;
+                        }
 
-                    track.play();
+                        int volumeResult = track.setVolume(effectiveVol);
+                        if (volumeResult != AudioTrack.SUCCESS) {
+                            Log.w(TAG, "AudioTrack.setVolume failed with code " + volumeResult + " for synth sound: " + resolvedType);
+                        }
 
-                    long durationMs = (long) ((pcm.length / (float) SAMPLE_RATE) * 1000L);
-                    SystemClock.sleep(Math.max(100L, durationMs + 50L));
+                        track.play();
+                        if (track.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) {
+                            Log.w(TAG, "AudioTrack failed to enter PLAYSTATE_PLAYING for synth sound: " + resolvedType);
+                            return;
+                        }
 
-                    track.stop();
-                } catch (Exception e) {
-                    Log.e(TAG, "Error playing synth sound " + resolvedType + ": " + e.getMessage(), e);
-                } finally {
-                    if (track != null) {
-                        try {
-                            track.release();
-                        } catch (Exception ignored) {}
-                    }
-                    mActiveSynthCount.decrementAndGet();
-                    if (playbackStarted && mPlaybackListener != null) {
-                        try {
-                            mPlaybackListener.onSoundCompleted(soundId);
-                        } catch (Exception ignored) {}
+                        playbackStarted = true;
+                        playbackStartedFlag.set(true);
+                        if (mPlaybackListener != null) {
+                            try {
+                                mPlaybackListener.onSoundStarted(soundId);
+                            } catch (Exception ignored) {}
+                        }
+                        startLatch.countDown();
+
+                        long durationMs = (long) ((pcm.length / (float) SAMPLE_RATE) * 1000L);
+                        SystemClock.sleep(Math.max(100L, durationMs + 50L));
+
+                        if (track.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
+                            track.stop();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error playing synth sound " + resolvedType + ": " + e.getMessage(), e);
+                    } finally {
+                        startLatch.countDown();
+                        if (track != null) {
+                            try {
+                                if (track.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
+                                    track.stop();
+                                }
+                            } catch (Exception ignored) {}
+                            try {
+                                track.release();
+                            } catch (Exception ignored) {}
+                        }
+                        mActiveSynthCount.decrementAndGet();
+                        if (playbackStarted && mPlaybackListener != null) {
+                            try {
+                                mPlaybackListener.onSoundCompleted(soundId);
+                            } catch (Exception ignored) {}
+                        }
                     }
                 }
-            }
-        });
+            });
+        } catch (RejectedExecutionException e) {
+            Log.w(TAG, "Synth playback task rejected for sound: " + resolvedType, e);
+            return false;
+        }
 
-        return true;
+        try {
+            if (!startLatch.await(1500, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "Timed out waiting for AudioTrack start for synth sound: " + resolvedType);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "Interrupted while waiting for AudioTrack start for synth sound: " + resolvedType);
+        }
+
+        return playbackStartedFlag.get();
     }
 
     @NonNull
