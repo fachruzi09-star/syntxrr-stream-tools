@@ -49,7 +49,7 @@
             android:name=".CompanionService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback"
+            android:foregroundServiceType="mediaPlayback|microphone"
             android:stopWithTask="false" />
     </application>
 
@@ -72,6 +72,7 @@
     <!-- Foreground service: mencegah proses dibekukan saat Floating HUD dipakai di atas TikTok (Android 12+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- Camera & Microphone Permissions (Studio camera element, WebView getUserMedia) -->
     <uses-permission android:name="android.permission.CAMERA" />

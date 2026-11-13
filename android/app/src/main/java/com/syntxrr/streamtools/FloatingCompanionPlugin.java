@@ -38,10 +38,31 @@ import com.getcapacitor.annotation.PermissionCallback;
         @Permission(
             alias = "notifications",
             strings = { Manifest.permission.POST_NOTIFICATIONS }
+        ),
+        @Permission(
+            alias = "microphone",
+            strings = { Manifest.permission.RECORD_AUDIO }
         )
     }
 )
 public class FloatingCompanionPlugin extends Plugin {
+
+    private static final long[] MIXER_PROMO_RETRY_DELAYS_MS = { 120L, 250L, 500L };
+
+    private final Object mMicLock = new Object();
+    private final CompanionService.OnCompanionLifecycleListener mServiceLifecycleListener =
+            new CompanionService.OnCompanionLifecycleListener() {
+                @Override
+                public void onCompanionStopped() {
+                    handleCompanionServiceStopped();
+                }
+            };
+
+    @Override
+    public void load() {
+        super.load();
+        CompanionService.setLifecycleListener(mServiceLifecycleListener);
+    }
 
     @PluginMethod
     public void checkOverlayPermission(PluginCall call) {
@@ -138,6 +159,82 @@ public class FloatingCompanionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    private boolean hasRecordAudioPermission() {
+        return ContextCompat.checkSelfPermission(
+            getContext(),
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @PluginMethod
+    public void checkMicPermission(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", hasRecordAudioPermission());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestMicPermission(PluginCall call) {
+        if (hasRecordAudioPermission()) {
+            boolean upgraded = refreshCompanionMicrophoneTypeIfForeground();
+            FloatingHudManager hud = mHudManager;
+            if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+                if (upgraded) {
+                    scheduleMixerMicStartCheck();
+                } else {
+                    startNativeMicMonitorIfEligible();
+                }
+            }
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        if (getActivity() == null) {
+            call.reject("Permintaan izin mikrofon hanya dapat dilakukan saat aplikasi berada di foreground.");
+            return;
+        }
+        requestPermissionForAlias("microphone", call, "micPermCallback");
+    }
+
+    @PermissionCallback
+    private void micPermCallback(PluginCall call) {
+        boolean granted = getPermissionState("microphone") == PermissionState.GRANTED
+                || hasRecordAudioPermission();
+        if (granted) {
+            boolean upgraded = refreshCompanionMicrophoneTypeIfForeground();
+            FloatingHudManager hud = mHudManager;
+            if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+                if (upgraded) {
+                    scheduleMixerMicStartCheck();
+                } else {
+                    startNativeMicMonitorIfEligible();
+                }
+            }
+        }
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        call.resolve(ret);
+    }
+
+    private boolean refreshCompanionMicrophoneTypeIfForeground() {
+        if (getActivity() == null || !CompanionService.isRunning()
+                || !hasRecordAudioPermission() || CompanionService.hasMicrophoneForegroundType()) {
+            return false;
+        }
+        try {
+            Context context = getContext();
+            Intent intent = new Intent(context, CompanionService.class);
+            intent.setAction(CompanionService.ACTION_START);
+            startCompanionService(context, intent);
+            return true;
+        } catch (Exception e) {
+            android.util.Log.w("FloatingCompanion",
+                    "Gagal menyegarkan tipe microphone CompanionService: " + e.getMessage());
+            return false;
+        }
+    }
+
     /**
      * Menjalankan CompanionService sebagai foreground service. Ini yang mencegah proses
      * dibekukan Android (cached app freezer) saat pengguna berada di aplikasi TikTok,
@@ -207,6 +304,7 @@ public class FloatingCompanionPlugin extends Plugin {
     @PluginMethod
     public void stopCompanion(PluginCall call) {
         Context context = getContext();
+        stopMonitorOnCompanionShutdown("Companion Service dihentikan.");
 
         try {
             Intent intent = new Intent(context, CompanionService.class);
@@ -236,9 +334,71 @@ public class FloatingCompanionPlugin extends Plugin {
     // =========================================================================
 
     @Nullable
-    private FloatingHudManager mHudManager;
+    private volatile FloatingHudManager mHudManager;
     @Nullable
     private NativeSoundPoolManager mSoundPoolManager;
+    @Nullable
+    private NativeMicMonitor mMicMonitor;
+    private boolean mMicMuted = false;
+    private int mMixerPromoRetryIndex = 0;
+    private final android.os.Handler mMainHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable mDeferredMixerStartTask = new Runnable() {
+        @Override
+        public void run() {
+            FloatingHudManager hud = mHudManager;
+            if (hud == null || !hud.isHudVisible() || !"mixer".equals(hud.getActivePanel())) {
+                cancelMixerPromoRetry();
+                return;
+            }
+            boolean muted;
+            synchronized (mMicLock) {
+                muted = mMicMuted;
+            }
+            if (muted || !hasRecordAudioPermission()) {
+                cancelMixerPromoRetry();
+                startNativeMicMonitorIfEligible();
+                return;
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R
+                    || (CompanionService.isRunning() && CompanionService.hasMicrophoneForegroundType())) {
+                cancelMixerPromoRetry();
+                startNativeMicMonitorIfEligible();
+                return;
+            }
+
+            final long nextDelayMs;
+            synchronized (mMicLock) {
+                mMixerPromoRetryIndex++;
+                if (mMixerPromoRetryIndex < MIXER_PROMO_RETRY_DELAYS_MS.length) {
+                    nextDelayMs = MIXER_PROMO_RETRY_DELAYS_MS[mMixerPromoRetryIndex];
+                } else {
+                    mMixerPromoRetryIndex = 0;
+                    nextDelayMs = -1L;
+                }
+            }
+            if (nextDelayMs >= 0L) {
+                mMainHandler.postDelayed(this, nextDelayMs);
+            } else {
+                startNativeMicMonitorIfEligible();
+            }
+        }
+    };
+
+    private void scheduleMixerMicStartCheck() {
+        synchronized (mMicLock) {
+            mMixerPromoRetryIndex = 0;
+        }
+        mMainHandler.removeCallbacks(mDeferredMixerStartTask);
+        mMainHandler.postDelayed(mDeferredMixerStartTask, MIXER_PROMO_RETRY_DELAYS_MS[0]);
+    }
+
+    private void cancelMixerPromoRetry() {
+        synchronized (mMicLock) {
+            mMixerPromoRetryIndex = 0;
+        }
+        mMainHandler.removeCallbacks(mDeferredMixerStartTask);
+    }
 
     private synchronized NativeSoundPoolManager getSoundPoolManager() {
         if (mSoundPoolManager == null) {
@@ -314,6 +474,32 @@ public class FloatingCompanionPlugin extends Plugin {
                         if (mHudManager == null || !mHudManager.selectChatTab(id)) {
                             return;
                         }
+                    } else if ("mic.mute".equals(action)) {
+                        final boolean mutedNow;
+                        synchronized (mMicLock) {
+                            mMicMuted = !mMicMuted;
+                            mutedNow = mMicMuted;
+                            if (mutedNow) {
+                                mMixerPromoRetryIndex = 0;
+                            }
+                        }
+                        if (mutedNow) {
+                            cancelMixerPromoRetry();
+                            stopNativeMicMonitor();
+                            FloatingHudManager hud = mHudManager;
+                            if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+                                hud.updateMixerMicState(
+                                        false,
+                                        true,
+                                        0,
+                                        "Monitor dijeda",
+                                        "warn",
+                                        "Monitor mic SYNTXRR dimute (tidak memengaruhi aplikasi lain)."
+                                );
+                            }
+                        } else {
+                            startNativeMicMonitorIfEligible();
+                        }
                     }
 
                     // Forward to JS so application state stays synchronized
@@ -328,6 +514,13 @@ public class FloatingCompanionPlugin extends Plugin {
 
                 @Override
                 public void onHudPanelChanged(@Nullable String panel) {
+                    if ("mixer".equals(panel)) {
+                        startNativeMicMonitorIfEligible();
+                    } else {
+                        cancelMixerPromoRetry();
+                        stopNativeMicMonitor();
+                    }
+
                     JSObject data = new JSObject();
                     if (panel != null) {
                         data.put("panel", panel);
@@ -337,6 +530,207 @@ public class FloatingCompanionPlugin extends Plugin {
             });
         }
         return mHudManager;
+    }
+
+    private NativeMicMonitor getMicMonitor() {
+        synchronized (mMicLock) {
+            if (mMicMonitor == null) {
+                Context appContext = getContext().getApplicationContext();
+                CompanionService.setLifecycleListener(mServiceLifecycleListener);
+                mMicMonitor = new NativeMicMonitor(appContext);
+                mMicMonitor.setListener(new NativeMicMonitor.OnMicLevelListener() {
+                    @Override
+                    public void onMicStateChanged(
+                            @NonNull NativeMicMonitor.Status status,
+                            int level,
+                            @Nullable String reason) {
+                        handleNativeMicStateChanged(status, level, reason);
+                    }
+                });
+            }
+            return mMicMonitor;
+        }
+    }
+
+    private void startNativeMicMonitorIfEligible() {
+        FloatingHudManager hud = mHudManager;
+        if (hud == null || !hud.isHudVisible() || !"mixer".equals(hud.getActivePanel())) {
+            cancelMixerPromoRetry();
+            stopNativeMicMonitor();
+            return;
+        }
+        final boolean muted;
+        synchronized (mMicLock) {
+            muted = mMicMuted;
+        }
+        if (muted) {
+            cancelMixerPromoRetry();
+            stopNativeMicMonitor();
+            hud.updateMixerMicState(
+                    false,
+                    true,
+                    0,
+                    "Monitor dijeda",
+                    "warn",
+                    "Monitor mic SYNTXRR dimute (tidak memengaruhi aplikasi lain)."
+            );
+            return;
+        }
+        if (!hasRecordAudioPermission()) {
+            cancelMixerPromoRetry();
+            stopNativeMicMonitor();
+            hud.updateMixerMicState(
+                    false,
+                    false,
+                    0,
+                    "Izin diperlukan",
+                    "off",
+                    "Berikan izin mikrofon (RECORD_AUDIO) di aplikasi SYNTXRR."
+            );
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && (!CompanionService.isRunning() || !CompanionService.hasMicrophoneForegroundType())) {
+            stopNativeMicMonitor();
+            hud.updateMixerMicState(
+                    false,
+                    false,
+                    0,
+                    "Tidak tersedia",
+                    "off",
+                    "Aktifkan atau segarkan Mode A dari aplikasi utama agar monitor mikrofon latar belakang siap."
+            );
+            return;
+        }
+
+        NativeMicMonitor monitor = getMicMonitor();
+        boolean started = monitor.start();
+        if (!started && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+            String failReason = monitor.getStatusReason();
+            hud.updateMixerMicState(
+                    false,
+                    false,
+                    0,
+                    hasRecordAudioPermission() ? "Tidak tersedia" : "Izin diperlukan",
+                    "off",
+                    failReason != null ? failReason : "Mikrofon tidak tersedia."
+            );
+        }
+    }
+
+    private void stopNativeMicMonitor() {
+        final NativeMicMonitor monitor;
+        synchronized (mMicLock) {
+            monitor = mMicMonitor;
+        }
+        if (monitor != null) {
+            monitor.stop();
+        }
+    }
+
+    private void stopMonitorOnCompanionShutdown(@Nullable String reason) {
+        synchronized (mMicLock) {
+            mMicMuted = false;
+            mMixerPromoRetryIndex = 0;
+        }
+        mMainHandler.removeCallbacks(mDeferredMixerStartTask);
+        stopNativeMicMonitor();
+        FloatingHudManager hud = mHudManager;
+        if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+            hud.updateMixerMicState(
+                    false,
+                    false,
+                    0,
+                    "Monitor dijeda",
+                    "off",
+                    reason
+            );
+        }
+    }
+
+    private void handleCompanionServiceStopped() {
+        mMainHandler.post(() -> {
+            if (!CompanionService.isRunning()) {
+                stopMonitorOnCompanionShutdown("Companion Service dihentikan.");
+            }
+        });
+    }
+
+    private void handleNativeMicStateChanged(
+            @NonNull NativeMicMonitor.Status status,
+            int level,
+            @Nullable String reason) {
+        FloatingHudManager hud = mHudManager;
+        if (hud == null || !hud.isHudVisible() || !"mixer".equals(hud.getActivePanel())) {
+            return;
+        }
+        final boolean muted;
+        final NativeMicMonitor monitor;
+        synchronized (mMicLock) {
+            muted = mMicMuted;
+            monitor = mMicMonitor;
+        }
+        if (monitor == null) {
+            return;
+        }
+        if (muted) {
+            if (status == NativeMicMonitor.Status.STOPPED) {
+                hud.updateMixerMicState(
+                        false,
+                        true,
+                        0,
+                        "Monitor dijeda",
+                        "warn",
+                        "Monitor mic SYNTXRR dimute (tidak memengaruhi aplikasi lain)."
+                );
+            }
+            return;
+        }
+        if (status != NativeMicMonitor.Status.STOPPED
+                && status != NativeMicMonitor.Status.UNAVAILABLE
+                && !monitor.isRunning()) {
+            return;
+        }
+
+        switch (status) {
+            case ACTIVE:
+                hud.updateMixerMicState(true, false, level, "Aktif", "ok", null);
+                break;
+            case NO_SIGNAL:
+                hud.updateMixerMicState(
+                        true,
+                        false,
+                        0,
+                        "Tidak ada sinyal",
+                        "warn",
+                        reason != null ? reason : "Belum ada sinyal suara masuk."
+                );
+                break;
+            case SILENCED:
+                hud.updateMixerMicState(
+                        false,
+                        false,
+                        0,
+                        "Mikrofon di-silence oleh Android",
+                        "warn",
+                        reason != null ? reason : "Capture mikrofon dibisukan oleh sistem Android."
+                );
+                break;
+            case UNAVAILABLE:
+                hud.updateMixerMicState(
+                        false,
+                        false,
+                        0,
+                        hasRecordAudioPermission() ? "Tidak tersedia" : "Izin diperlukan",
+                        "off",
+                        reason != null ? reason : "Mikrofon tidak tersedia."
+                );
+                break;
+            case STOPPED:
+            default:
+                hud.updateMixerMicState(false, false, 0, "Monitor dijeda", "off", reason);
+                break;
+        }
     }
 
     private void runOnUi(Runnable task) {
@@ -373,7 +767,8 @@ public class FloatingCompanionPlugin extends Plugin {
 
         // Pastikan CompanionService berjalan sebagai foreground service agar proses tidak
         // dibekukan sistem (Android cached app freezer) saat pengguna membuka TikTok LIVE.
-        if (!CompanionService.isRunning()) {
+        if (!CompanionService.isRunning()
+                || (hasRecordAudioPermission() && !CompanionService.hasMicrophoneForegroundType())) {
             try {
                 Intent serviceIntent = new Intent(context, CompanionService.class);
                 serviceIntent.setAction(CompanionService.ACTION_START);
@@ -452,6 +847,8 @@ public class FloatingCompanionPlugin extends Plugin {
             @Override
             public void run() {
                 try {
+                    cancelMixerPromoRetry();
+                    stopNativeMicMonitor();
                     boolean hidden = getHudManager().hideHud();
                     JSObject ret = new JSObject();
                     ret.put("success", hidden);
@@ -523,10 +920,11 @@ public class FloatingCompanionPlugin extends Plugin {
     @PluginMethod
     public void getHudState(PluginCall call) {
         JSObject ret = new JSObject();
-        boolean visible = mHudManager != null && mHudManager.isHudVisible();
+        FloatingHudManager hud = mHudManager;
+        boolean visible = hud != null && hud.isHudVisible();
         ret.put("isVisible", visible);
-        if (mHudManager != null) {
-            String panel = mHudManager.getActivePanel();
+        if (hud != null) {
+            String panel = hud.getActivePanel();
             if (panel != null) {
                 ret.put("activePanel", panel);
             }
@@ -537,20 +935,29 @@ public class FloatingCompanionPlugin extends Plugin {
     @Override
     protected void handleOnResume() {
         super.handleOnResume();
+        boolean upgradedMicType = refreshCompanionMicrophoneTypeIfForeground();
         // Setelah proses dibekukan sistem selama aplikasi di background, state JS bisa
         // tertinggal dari kondisi layanan sebenarnya. Minta aplikasi mengirim ulang model
         // panel aktif; tidak ada status yang dipalsukan di sisi native.
         CompanionService.updateStatusDetail("Aplikasi aktif \u00b7 Status HUD disegarkan");
-        if (mHudManager != null) {
+        FloatingHudManager hud = mHudManager;
+        if (hud != null) {
             // Tampilkan data terakhir lebih dulu, ditandai "Status terakhir", sampai model
             // baru dari WebView tiba dan menggantikannya.
-            mHudManager.renderLastKnownModel(true);
+            hud.renderLastKnownModel(true);
+            if (hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+                if (upgradedMicType) {
+                    scheduleMixerMicStartCheck();
+                } else {
+                    startNativeMicMonitorIfEligible();
+                }
+            }
         }
         JSObject data = new JSObject();
         data.put("timestamp", System.currentTimeMillis());
-        data.put("isVisible", mHudManager != null && mHudManager.isHudVisible());
-        if (mHudManager != null) {
-            String panel = mHudManager.getActivePanel();
+        data.put("isVisible", hud != null && hud.isHudVisible());
+        if (hud != null) {
+            String panel = hud.getActivePanel();
             if (panel != null) {
                 data.put("panel", panel);
             }
@@ -565,13 +972,26 @@ public class FloatingCompanionPlugin extends Plugin {
         // data, pertahankan model terakhir yang valid, dan perbarui notifikasi secara jujur.
         CompanionService.updateStatusDetail(
                 "Aplikasi di latar belakang \u00b7 Status terakhir dipertahankan");
-        if (mHudManager != null) {
-            mHudManager.renderLastKnownModel(true);
+        FloatingHudManager hud = mHudManager;
+        if (hud != null) {
+            hud.renderLastKnownModel(true);
         }
     }
 
     @Override
     protected void handleOnDestroy() {
+        CompanionService.clearLifecycleListener(mServiceLifecycleListener);
+        mMainHandler.removeCallbacksAndMessages(null);
+        final NativeMicMonitor monitor;
+        synchronized (mMicLock) {
+            mMicMuted = false;
+            mMixerPromoRetryIndex = 0;
+            monitor = mMicMonitor;
+            mMicMonitor = null;
+        }
+        if (monitor != null) {
+            monitor.release();
+        }
         if (mHudManager != null) {
             mHudManager.destroy();
             mHudManager = null;

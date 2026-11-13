@@ -132,6 +132,33 @@ public class FloatingHudManager {
     private String mLastRenderedModelJson = null;
     private boolean mLastRenderedStale = false;
 
+    // In-place references for active Mixer panel (never reused across panels)
+    @Nullable
+    private GradientDrawable mMixerStatusDotDrawable = null;
+    @Nullable
+    private TextView mMixerStatusText = null;
+    @Nullable
+    private TextView mMixerMeterValueView = null;
+    @Nullable
+    private ProgressBar mMixerMeterBar = null;
+    @Nullable
+    private TextView mMixerMuteButton = null;
+    @Nullable
+    private TextView mMixerReasonView = null;
+    private int mMixerLastBarColor = 0;
+
+    // Authoritative native mic monitor state for Mixer panel when active
+    private boolean mNativeMicHasState = false;
+    private boolean mNativeMicAvailable = false;
+    private boolean mNativeMicMuted = false;
+    private int mNativeMicLevel = 0;
+    @NonNull
+    private String mNativeMicStatusText = "Monitor dijeda";
+    @NonNull
+    private String mNativeMicStatusTone = "off";
+    @Nullable
+    private String mNativeMicReason = null;
+
     /** Posisi absolut bubble di layar (bukan posisi window). */
     private int mBubbleScreenX = -1;
     private int mBubbleScreenY = -1;
@@ -258,19 +285,27 @@ public class FloatingHudManager {
             music.put("rows", rows);
             mPanelModels.put("music", music.toString());
 
-            // Default Mixer
+            // Default Mixer (jujur: tidak terlihat aktif sebelum NativeMicMonitor benar-benar aktif)
             JSONObject mixer = new JSONObject();
             mixer.put("panel", "mixer");
             mixer.put("title", "Audio Mixer");
             JSONObject mixStatus = new JSONObject();
-            mixStatus.put("text", "Aktif");
-            mixStatus.put("tone", "ok");
+            mixStatus.put("text", "Monitor dijeda");
+            mixStatus.put("tone", "off");
             mixer.put("status", mixStatus);
+            JSONArray mixButtons = new JSONArray();
+            JSONObject mixMuteBtn = new JSONObject();
+            mixMuteBtn.put("id", "mic_mute");
+            mixMuteBtn.put("label", "Mute mic");
+            mixMuteBtn.put("action", "mic.mute");
+            mixMuteBtn.put("active", false);
+            mixButtons.put(mixMuteBtn);
+            mixer.put("buttons", mixButtons);
             JSONObject meter = new JSONObject();
             meter.put("label", "Level mic");
-            meter.put("value", 70);
+            meter.put("value", 0);
             meter.put("muted", false);
-            meter.put("available", true);
+            meter.put("available", false);
             mixer.put("meter", meter);
             JSONArray mixSliders = new JSONArray();
             JSONObject sl1 = new JSONObject();
@@ -339,7 +374,7 @@ public class FloatingHudManager {
     }
 
     @Nullable
-    public String getActivePanel() {
+    public synchronized String getActivePanel() {
         return mActivePanel;
     }
 
@@ -397,6 +432,8 @@ public class FloatingHudManager {
 
             mActivePanel = null;
             mToolbarVisible = false;
+            clearMixerViewRefs();
+            mNativeMicHasState = false;
             buildContent();
 
             mAppliedLeftOrder = !mAlignLeft; // paksa applySideOrder() benar-benar menata ulang
@@ -515,6 +552,8 @@ public class FloatingHudManager {
                     if (model != null) {
                         if ("chat".equals(key)) {
                             applyPendingChatTabIfNeeded(model);
+                        } else if ("mixer".equals(key) && mNativeMicHasState) {
+                            canonicalizeMixerModelForNative(model);
                         }
                         mPanelModels.put(key, model.toString());
                     }
@@ -528,6 +567,8 @@ public class FloatingHudManager {
             singlePanel = root.optString("panel", "");
             if ("chat".equals(singlePanel)) {
                 applyPendingChatTabIfNeeded(root);
+            } else if ("mixer".equals(singlePanel) && mNativeMicHasState) {
+                canonicalizeMixerModelForNative(root);
             }
             String storedJson = root.toString();
             if (!singlePanel.isEmpty()) {
@@ -701,6 +742,8 @@ public class FloatingHudManager {
     /** Tutup toolbar/panel tanpa menyembunyikan bubble. */
     public synchronized void collapseContent() {
         resetRenderedCache();
+        clearMixerViewRefs();
+        mNativeMicHasState = false;
         if (mContent == null) {
             mActivePanel = null;
             mToolbarVisible = false;
@@ -770,10 +813,14 @@ public class FloatingHudManager {
         mContent.addView(mPanelContainer, panelParams);
     }
 
-    private void openPanel(@NonNull String panelId) {
+    private synchronized void openPanel(@NonNull String panelId) {
         mActivePanel = panelId;
         mToolbarVisible = false;
         resetRenderedCache();
+        clearMixerViewRefs();
+        if (!"mixer".equals(panelId)) {
+            mNativeMicHasState = false;
+        }
 
         if (mToolbar != null) {
             mToolbar.setVisibility(View.GONE);
@@ -799,10 +846,12 @@ public class FloatingHudManager {
         }
     }
 
-    private void showToolbar() {
+    private synchronized void showToolbar() {
         mActivePanel = null;
         mToolbarVisible = true;
         resetRenderedCache();
+        clearMixerViewRefs();
+        mNativeMicHasState = false;
 
         if (mPanelContainer != null) {
             mPanelContainer.setVisibility(View.GONE);
@@ -925,6 +974,130 @@ public class FloatingHudManager {
         mLastRenderedStale = false;
     }
 
+    private void clearMixerViewRefs() {
+        mMixerStatusDotDrawable = null;
+        mMixerStatusText = null;
+        mMixerMeterValueView = null;
+        mMixerMeterBar = null;
+        mMixerMuteButton = null;
+        mMixerReasonView = null;
+        mMixerLastBarColor = 0;
+    }
+
+    private void canonicalizeMixerModelForNative(@NonNull JSONObject mixerModel) {
+        try {
+            JSONObject status = new JSONObject();
+            status.put("text", "__native__");
+            status.put("tone", "off");
+            mixerModel.put("status", status);
+
+            JSONObject existingMeter = mixerModel.optJSONObject("meter");
+            String meterLabel = existingMeter != null ? existingMeter.optString("label", "Level mic") : "Level mic";
+            JSONObject meter = new JSONObject();
+            meter.put("label", meterLabel);
+            meter.put("value", 0);
+            meter.put("muted", false);
+            meter.put("available", false);
+            mixerModel.put("meter", meter);
+
+            JSONArray buttons = mixerModel.optJSONArray("buttons");
+            if (buttons != null) {
+                for (int i = 0; i < buttons.length(); i++) {
+                    JSONObject b = buttons.optJSONObject(i);
+                    if (b != null && "mic.mute".equals(b.optString("action"))) {
+                        b.put("label", "Mute mic");
+                        b.put("active", false);
+                    }
+                }
+            }
+            mixerModel.put("rows", new JSONArray());
+        } catch (JSONException ignored) {
+        }
+    }
+
+    /**
+     * Perbarui tampilan meter dan status Audio Mixer secara in-place di UI thread
+     * tanpa memanggil removeAllViews() atau mengganggu slider/tombol.
+     */
+    public void updateMixerMicState(
+            final boolean available,
+            final boolean muted,
+            final int level,
+            @NonNull final String statusText,
+            @NonNull final String statusTone,
+            @Nullable final String reason) {
+        final int clampedLevel = Math.max(0, Math.min(100, level));
+        runOnUiThreadSafe(() -> {
+            synchronized (FloatingHudManager.this) {
+                if (!"mixer".equals(mActivePanel) || !mIsAttached || mPanelContainer == null) {
+                    return;
+                }
+                mNativeMicHasState = true;
+                mNativeMicAvailable = available;
+                mNativeMicMuted = muted;
+                mNativeMicLevel = clampedLevel;
+                mNativeMicStatusText = statusText;
+                mNativeMicStatusTone = statusTone;
+                mNativeMicReason = reason;
+
+                if (mMixerStatusText == null
+                        && mMixerMeterBar == null
+                        && mMixerMeterValueView == null
+                        && mMixerMuteButton == null
+                        && mMixerReasonView == null) {
+                    return;
+                }
+                applyNativeMicStateToViewsLocked();
+            }
+        });
+    }
+
+    private void applyNativeMicStateToViewsLocked() {
+        if (mMixerStatusDotDrawable != null) {
+            mMixerStatusDotDrawable.setColor(toneColor(mNativeMicStatusTone));
+        }
+        if (mMixerStatusText != null) {
+            mMixerStatusText.setText(mNativeMicStatusText);
+        }
+        if (mMixerMuteButton != null) {
+            mMixerMuteButton.setText(mNativeMicMuted ? "Unmute mic" : "Mute mic");
+            mMixerMuteButton.setTextColor(mNativeMicMuted ? C_TEXT : C_TEXT_DIM);
+            mMixerMuteButton.setBackground(rounded(
+                    dp(9),
+                    mNativeMicMuted ? 0xFF2563EB : C_SURFACE_SOFT,
+                    0,
+                    Color.TRANSPARENT));
+        }
+        if (mMixerMeterValueView != null) {
+            String stateText = !mNativeMicAvailable
+                    ? "Tidak tersedia"
+                    : (mNativeMicMuted ? "Mute" : mNativeMicLevel + "%");
+            int stateColor = !mNativeMicAvailable ? C_OFF : (mNativeMicMuted ? C_WARN : C_ACCENT);
+            mMixerMeterValueView.setText(stateText);
+            mMixerMeterValueView.setTextColor(stateColor);
+        }
+        if (mMixerMeterBar != null) {
+            mMixerMeterBar.setProgress(mNativeMicMuted || !mNativeMicAvailable ? 0 : mNativeMicLevel);
+            int barColor = (mNativeMicMuted || !mNativeMicAvailable) ? C_OFF : 0xFF3B82F6;
+            if (mMixerLastBarColor != barColor && mMixerMeterBar.getProgressDrawable() != null) {
+                mMixerMeterBar.getProgressDrawable().setColorFilter(barColor, PorterDuff.Mode.SRC_IN);
+                mMixerLastBarColor = barColor;
+            }
+        }
+        if (mMixerReasonView != null) {
+            boolean wasVisible = mMixerReasonView.getVisibility() == View.VISIBLE;
+            boolean hasReason = !TextUtils.isEmpty(mNativeMicReason);
+            mMixerReasonView.setText(hasReason ? mNativeMicReason : "");
+            mMixerReasonView.setVisibility(hasReason ? View.VISIBLE : View.GONE);
+            if (wasVisible != hasReason) {
+                layoutWindow(true);
+                if (mRoot != null) {
+                    mRoot.post(this::clampAfterContentChange);
+                }
+            }
+        }
+    }
+
     private void runOnUiThreadSafe(@NonNull Runnable task) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             task.run();
@@ -938,6 +1111,7 @@ public class FloatingHudManager {
             return;
         }
         resetRenderedCache();
+        clearMixerViewRefs();
         mPanelContainer.removeAllViews();
         // Placeholder jujur: tanpa status palsu dan tanpa keadaan "memuat" tanpa akhir.
         // Bila model terakhir masih tersedia, renderLastKnownModel() langsung menggantikannya.
@@ -1001,19 +1175,26 @@ public class FloatingHudManager {
 
         mBindingModel = true;
         try {
+            clearMixerViewRefs();
             mPanelContainer.removeAllViews();
+
+            final String panelId = model.optString("panel", "");
+            final boolean isMixerPanel = "mixer".equals(panelId);
 
             String title = model.optString("title", "SYNTXRR");
             JSONObject status = model.optJSONObject("status");
             String statusText = status != null ? status.optString("text", "") : "";
             String tone = status != null ? status.optString("tone", "off") : "off";
-            if (stale && "chat".equals(model.optString("panel"))) {
+            if (isMixerPanel && mNativeMicHasState) {
+                statusText = mNativeMicStatusText;
+                tone = mNativeMicStatusTone;
+            } else if (stale && "chat".equals(panelId)) {
                 // Data dari cache saat WebView dijeda: jangan mengklaim "Terhubung" atau
                 // nilai yang mungkin sudah kedaluwarsa khusus untuk stream LIVE TikTok.
                 statusText = "Status terakhir";
                 tone = "warn";
             }
-            mPanelContainer.addView(buildHeader(title, statusText, tone));
+            mPanelContainer.addView(buildHeader(title, statusText, tone, isMixerPanel));
 
             JSONArray tabs = model.optJSONArray("tabs");
             if (tabs != null && tabs.length() > 0) {
@@ -1024,7 +1205,7 @@ public class FloatingHudManager {
 
             JSONArray buttons = model.optJSONArray("buttons");
             if (buttons != null && buttons.length() > 0) {
-                mPanelContainer.addView(buildButtons(buttons));
+                mPanelContainer.addView(buildButtons(buttons, isMixerPanel));
                 hasBody = true;
             }
 
@@ -1050,11 +1231,11 @@ public class FloatingHudManager {
 
             JSONObject meter = model.optJSONObject("meter");
             if (meter != null) {
-                mPanelContainer.addView(buildMeter(meter));
+                mPanelContainer.addView(buildMeter(meter, isMixerPanel));
                 hasBody = true;
             }
 
-            JSONArray rows = model.optJSONArray("rows");
+            JSONArray rows = (isMixerPanel && mNativeMicHasState) ? null : model.optJSONArray("rows");
             int rowCount = rows != null ? rows.length() : 0;
             if (rowCount > 0) {
                 LinearLayout list = new LinearLayout(mContext);
@@ -1082,6 +1263,26 @@ public class FloatingHudManager {
                 hasBody = true;
             }
 
+            if (isMixerPanel) {
+                TextView reasonView = text(
+                        mNativeMicHasState && !TextUtils.isEmpty(mNativeMicReason) ? mNativeMicReason : "",
+                        9f, C_TEXT_DIM, false);
+                reasonView.setPadding(dp(8), dp(5), dp(8), dp(5));
+                reasonView.setMaxLines(3);
+                reasonView.setEllipsize(TextUtils.TruncateAt.END);
+                reasonView.setBackground(rounded(dp(8), C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+                LinearLayout.LayoutParams reasonParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                reasonParams.topMargin = dp(5);
+                reasonView.setLayoutParams(reasonParams);
+                reasonView.setVisibility(
+                        mNativeMicHasState && !TextUtils.isEmpty(mNativeMicReason)
+                                ? View.VISIBLE
+                                : View.GONE);
+                mMixerReasonView = reasonView;
+                mPanelContainer.addView(reasonView);
+            }
+
             if (!hasBody) {
                 mPanelContainer.addView(buildEmpty(model.optString("emptyText", "Belum ada data.")));
             }
@@ -1091,6 +1292,10 @@ public class FloatingHudManager {
     }
 
     private View buildHeader(String title, String statusText, String tone) {
+        return buildHeader(title, statusText, tone, false);
+    }
+
+    private View buildHeader(String title, String statusText, String tone, boolean captureMixerRefs) {
         LinearLayout header = new LinearLayout(mContext);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -1111,7 +1316,11 @@ public class FloatingHudManager {
         dotParams.setMarginStart(dp(6));
         header.addView(dot, dotParams);
 
-        if (!statusText.isEmpty()) {
+        if (captureMixerRefs) {
+            mMixerStatusDotDrawable = dotDrawable;
+        }
+
+        if (!statusText.isEmpty() || captureMixerRefs) {
             TextView statusView = text(statusText, 9.5f, C_TEXT_DIM, false);
             statusView.setSingleLine(true);
             statusView.setEllipsize(TextUtils.TruncateAt.END);
@@ -1120,6 +1329,9 @@ public class FloatingHudManager {
                             LinearLayout.LayoutParams.WRAP_CONTENT);
             statusParams.setMarginStart(dp(5));
             header.addView(statusView, statusParams);
+            if (captureMixerRefs) {
+                mMixerStatusText = statusView;
+            }
         }
         return header;
     }
@@ -1237,7 +1449,7 @@ public class FloatingHudManager {
      * Deretan tombol aksi ringkas (Play/Pause, Next, Mute). Teks saja, tanpa emoji,
      * dan setiap tombol mengirim aksi yang sama seperti sebelumnya.
      */
-    private View buildButtons(JSONArray buttons) {
+    private View buildButtons(JSONArray buttons, boolean captureMixerRefs) {
         LinearLayout row = new LinearLayout(mContext);
         row.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
@@ -1255,6 +1467,10 @@ public class FloatingHudManager {
             final String id = button.optString("id", "");
             boolean active = button.optBoolean("active", false);
             String label = button.optString("label", "");
+            if (captureMixerRefs && "mic.mute".equals(action) && mNativeMicHasState) {
+                active = mNativeMicMuted;
+                label = mNativeMicMuted ? "Unmute mic" : "Mute mic";
+            }
 
             TextView view = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, true);
             view.setGravity(Gravity.CENTER);
@@ -1272,6 +1488,9 @@ public class FloatingHudManager {
                 view.setClickable(true);
                 view.setFocusable(true);
                 view.setOnClickListener(v -> emitCommand(action, id, 0));
+            }
+            if (captureMixerRefs && "mic.mute".equals(action)) {
+                mMixerMuteButton = view;
             }
             row.addView(view, params);
         }
@@ -1404,7 +1623,7 @@ public class FloatingHudManager {
         return wrap;
     }
 
-    private View buildMeter(JSONObject meter) {
+    private View buildMeter(JSONObject meter, boolean captureMixerRefs) {
         LinearLayout wrap = new LinearLayout(mContext);
         wrap.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams wrapParams = new LinearLayout.LayoutParams(
@@ -1416,6 +1635,11 @@ public class FloatingHudManager {
         boolean muted = meter.optBoolean("muted", false);
         boolean available = meter.optBoolean("available", true);
         int value = Math.max(0, Math.min(100, meter.optInt("value", 0)));
+        if (captureMixerRefs && mNativeMicHasState) {
+            muted = mNativeMicMuted;
+            available = mNativeMicAvailable;
+            value = mNativeMicLevel;
+        }
 
         LinearLayout labelRow = new LinearLayout(mContext);
         labelRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1428,18 +1652,25 @@ public class FloatingHudManager {
 
         String stateText = !available ? "Tidak tersedia" : (muted ? "Mute" : value + "%");
         int stateColor = !available ? C_OFF : (muted ? C_WARN : C_ACCENT);
-        labelRow.addView(text(stateText, 9.5f, stateColor, true));
+        TextView stateView = text(stateText, 9.5f, stateColor, true);
+        labelRow.addView(stateView);
         wrap.addView(labelRow);
 
         ProgressBar bar = new ProgressBar(mContext, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
         bar.setProgress(muted || !available ? 0 : value);
+        int barColor = muted || !available ? C_OFF : 0xFF3B82F6;
         if (bar.getProgressDrawable() != null) {
-            bar.getProgressDrawable().setColorFilter(
-                    muted || !available ? C_OFF : 0xFF3B82F6, PorterDuff.Mode.SRC_IN);
+            bar.getProgressDrawable().setColorFilter(barColor, PorterDuff.Mode.SRC_IN);
         }
         wrap.addView(bar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(6)));
+
+        if (captureMixerRefs) {
+            mMixerMeterValueView = stateView;
+            mMixerMeterBar = bar;
+            mMixerLastBarColor = barColor;
+        }
         return wrap;
     }
 
@@ -1895,6 +2126,8 @@ public class FloatingHudManager {
         mPendingChatTab = null;
         mPendingChatTabAtMs = 0L;
         resetRenderedCache();
+        clearMixerViewRefs();
+        mNativeMicHasState = false;
         unregisterScreenReceiver();
         hideHud();
         mClickListener = null;

@@ -1,5 +1,6 @@
 package com.syntxrr.streamtools;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -7,12 +8,17 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
+
+import java.lang.ref.WeakReference;
 
 /**
  * CompanionService
@@ -40,13 +46,57 @@ public class CompanionService extends Service {
     public static final String CHANNEL_ID = "syntxrr_companion_channel";
     public static final int NOTIFICATION_ID = 9021;
 
+    public interface OnCompanionLifecycleListener {
+        void onCompanionStopped();
+    }
+
     private static volatile boolean sIsRunning = false;
+    private static volatile boolean sHasMicrophoneType = false;
     private static volatile CompanionService sInstance = null;
+    @Nullable
+    private static WeakReference<OnCompanionLifecycleListener> sLifecycleListenerRef = null;
+    private static final Object sListenerLock = new Object();
     /** Teks status yang benar-benar diketahui native; tidak pernah mengarang status LIVE. */
     private static volatile String sStatusDetail = "Floating HUD aktif";
 
+    public static void setLifecycleListener(@Nullable OnCompanionLifecycleListener listener) {
+        synchronized (sListenerLock) {
+            sLifecycleListenerRef = listener != null ? new WeakReference<>(listener) : null;
+        }
+    }
+
+    public static void clearLifecycleListener(@Nullable OnCompanionLifecycleListener listener) {
+        synchronized (sListenerLock) {
+            if (sLifecycleListenerRef == null) {
+                return;
+            }
+            OnCompanionLifecycleListener current = sLifecycleListenerRef.get();
+            if (current == null || current == listener) {
+                sLifecycleListenerRef = null;
+            }
+        }
+    }
+
+    private static void notifyLifecycleStopped() {
+        final OnCompanionLifecycleListener listener;
+        synchronized (sListenerLock) {
+            listener = sLifecycleListenerRef != null ? sLifecycleListenerRef.get() : null;
+        }
+        if (listener != null) {
+            try {
+                listener.onCompanionStopped();
+            } catch (Exception e) {
+                Log.w(TAG, "Gagal meneruskan callback penghentian CompanionService: " + e.getMessage());
+            }
+        }
+    }
+
     public static boolean isRunning() {
         return sIsRunning;
+    }
+
+    public static boolean hasMicrophoneForegroundType() {
+        return sIsRunning && sHasMicrophoneType;
     }
 
     /**
@@ -78,6 +128,8 @@ public class CompanionService extends Service {
         if (intent == null) {
             Log.w(TAG, "onStartCommand received null intent. Stopping service safely.");
             sIsRunning = false;
+            sHasMicrophoneType = false;
+            notifyLifecycleStopped();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -107,29 +159,64 @@ public class CompanionService extends Service {
 
         // Unknown action fallback
         Log.w(TAG, "Received unknown action: " + action + ". Stopping service.");
+        sIsRunning = false;
+        sHasMicrophoneType = false;
+        notifyLifecycleStopped();
         stopSelf();
         return START_NOT_STICKY;
+    }
+
+    private boolean hasRecordAudioPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     /**
      * Menahan proses tetap hidup selama Floating HUD aktif. Dipanggil pada setiap START
      * agar status foreground tetap segar walau service sempat di-restart sistem.
+     *
+     * Tipe MICROPHONE hanya disertakan ketika izin RECORD_AUDIO sudah granted agar
+     * Android 11+/14+ tidak melempar SecurityException. Jika izin belum ada atau aktivasi
+     * tipe microphone ditolak sistem, service tetap berjalan dengan MEDIA_PLAYBACK saja.
      */
     private void promoteToForeground() {
         Notification notification = buildStatusNotification();
         if (notification == null) {
+            sHasMicrophoneType = false;
             Log.e(TAG, "Notifikasi companion gagal dibangun; service berjalan tanpa foreground.");
             return;
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                boolean micGranted = hasRecordAudioPermission();
+                int foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
+                if (micGranted) {
+                    foregroundTypes |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+                }
+                try {
+                    startForeground(NOTIFICATION_ID, notification, foregroundTypes);
+                    sHasMicrophoneType = micGranted;
+                } catch (SecurityException | IllegalStateException e) {
+                    sHasMicrophoneType = false;
+                    if (micGranted) {
+                        Log.w(TAG, "Gagal mengaktifkan tipe foreground microphone; fallback ke mediaPlayback: " + e.getMessage());
+                        startForeground(NOTIFICATION_ID, notification,
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                    } else {
+                        throw e;
+                    }
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                sHasMicrophoneType = false;
                 startForeground(NOTIFICATION_ID, notification,
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             } else {
+                sHasMicrophoneType = false;
                 startForeground(NOTIFICATION_ID, notification);
             }
-            Log.i(TAG, "CompanionService berjalan sebagai foreground service.");
+            Log.i(TAG, "CompanionService berjalan sebagai foreground service (microphoneType=" + sHasMicrophoneType + ").");
         } catch (Exception e) {
+            sHasMicrophoneType = false;
             Log.e(TAG, "Gagal masuk foreground: " + e.getMessage());
         }
     }
@@ -190,6 +277,8 @@ public class CompanionService extends Service {
 
     private void stopCompanionService() {
         sIsRunning = false;
+        sHasMicrophoneType = false;
+        notifyLifecycleStopped();
         try {
             NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (notificationManager != null) {
@@ -221,9 +310,11 @@ public class CompanionService extends Service {
     @Override
     public void onDestroy() {
         sIsRunning = false;
+        sHasMicrophoneType = false;
         if (sInstance == this) {
             sInstance = null;
         }
+        notifyLifecycleStopped();
         try {
             NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (notificationManager != null) {
