@@ -19,6 +19,11 @@ export interface NotificationPermissionResult {
   message?: string;
 }
 
+export interface MicPermissionResult {
+  granted: boolean;
+  message?: string;
+}
+
 export interface StartCompanionOptions {
   requireOverlay?: boolean;
 }
@@ -130,6 +135,8 @@ export interface FloatingCompanionPluginInterface {
   requestOverlayPermission(): Promise<{ granted: boolean; openedSettings: boolean }>;
   checkNotificationPermission(): Promise<{ granted: boolean }>;
   requestNotificationPermission(): Promise<{ granted: boolean }>;
+  checkMicPermission(): Promise<{ granted: boolean }>;
+  requestMicPermission(): Promise<{ granted: boolean }>;
   startCompanion(options?: { requireOverlay?: boolean }): Promise<{
     success: boolean;
     isRunning: boolean;
@@ -280,6 +287,55 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     return {
       granted: false,
       message: error?.message || 'Gagal meminta izin notifikasi Android.',
+    };
+  }
+}
+
+/**
+ * Check whether RECORD_AUDIO permission is granted for native mic monitoring.
+ */
+export async function checkMicPermission(): Promise<MicPermissionResult> {
+  if (!isNativeAndroid()) {
+    return {
+      granted: false,
+      message: 'Izin mikrofon native Android hanya dapat diperiksa pada runtime APK.',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.checkMicPermission();
+    return {
+      granted: !!res?.granted,
+    };
+  } catch (error: any) {
+    return {
+      granted: false,
+      message: error?.message || 'Gagal memeriksa izin mikrofon Android.',
+    };
+  }
+}
+
+/**
+ * Request RECORD_AUDIO permission from the foreground Activity and refresh
+ * CompanionService microphone foreground type when granted.
+ */
+export async function requestMicPermission(): Promise<MicPermissionResult> {
+  if (!isNativeAndroid()) {
+    return {
+      granted: false,
+      message: 'Izin mikrofon native Android tidak dapat diminta di browser web.',
+    };
+  }
+
+  try {
+    const res = await FloatingCompanion.requestMicPermission();
+    return {
+      granted: !!res?.granted,
+    };
+  } catch (error: any) {
+    return {
+      granted: false,
+      message: error?.message || 'Gagal meminta izin mikrofon Android.',
     };
   }
 }
@@ -642,6 +698,8 @@ export const nativeCompanionBridge = {
   requestOverlayPermission,
   checkNotificationPermission,
   requestNotificationPermission,
+  checkMicPermission,
+  requestMicPermission,
   startCompanion,
   stopCompanion,
   isCompanionRunning,

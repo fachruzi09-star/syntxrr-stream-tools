@@ -53,6 +53,8 @@ import {
 } from 'lucide-react';
 import {
   isNativeAndroid,
+  checkMicPermission,
+  requestMicPermission,
   checkOverlayPermission,
   requestOverlayPermission,
   showFloatingHud,
@@ -557,6 +559,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const next: Record<string, string> = {};
     const names: Array<'camera' | 'microphone'> = ['camera', 'microphone'];
     for (const name of names) {
+      if (name === 'microphone' && isNativeAndroid()) {
+        const micPerm = await checkMicPermission();
+        next.microphone = micPerm.granted ? 'granted' : 'prompt';
+        continue;
+      }
       try {
         if (navigator.permissions?.query) {
           const status = await navigator.permissions.query({ name: name as PermissionName });
@@ -581,6 +588,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const requestMediaPermission = async (kind: 'camera' | 'microphone') => {
     setPermissionBusy(kind);
     try {
+      if (kind === 'microphone' && isNativeAndroid()) {
+        const result = await requestMicPermission();
+        setPermissionState((prev) => ({
+          ...prev,
+          microphone: result.granted
+            ? 'granted'
+            : (isEnglish
+                ? (result.message ? `denied — ${result.message}` : 'denied')
+                : (result.message ? `ditolak — ${result.message}` : 'ditolak')),
+        }));
+        if (result.granted) {
+          void refreshMicDevices();
+        }
+        return;
+      }
       if (!navigator.mediaDevices?.getUserMedia) {
         setPermissionState((prev) => ({ ...prev, [kind]: isEnglish ? 'unavailable' : 'tidak tersedia' }));
         return;

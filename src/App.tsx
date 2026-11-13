@@ -81,8 +81,6 @@ import {
   hudEventSourceStatus,
 } from './services/hudController';
 import type { HudChatEntry } from './services/hudController';
-import { micMonitor } from './services/micMonitor';
-import type { MicMonitorState } from './services/micMonitor';
 import { applyTheme } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 
@@ -898,7 +896,6 @@ export default function App() {
   const [hudUnread, setHudUnread] = useState(0);
   const [hudPlayingSoundId, setHudPlayingSoundId] = useState<string | null>(null);
   const [musicMuted, setMusicMuted] = useState(false);
-  const [micState, setMicState] = useState<MicMonitorState>(micMonitor.getState());
 
   /**
    * Bubble native mengirim event "floatingHudClick" lewat bridge. Listener didaftarkan
@@ -1158,10 +1155,6 @@ export default function App() {
     void handleUpdateTTSConfig({ ...ttsConfig, volume: raw <= 1 ? clamped / 100 : clamped });
   };
 
-  const handleHudToggleMicMute = () => {
-    micMonitor.setMuted(!micState.muted);
-  };
-
   const hudCommandHandlersRef = useRef({
     playSound: handleHudPlaySound,
     toggleMusic: handleTogglePlayMusic,
@@ -1170,7 +1163,6 @@ export default function App() {
     musicVolume: handleHudMusicVolume,
     soundboardVolume: handleHudSoundboardVolume,
     ttsVolume: handleHudTtsVolume,
-    micMute: handleHudToggleMicMute,
   });
 
   useEffect(() => {
@@ -1182,7 +1174,6 @@ export default function App() {
       musicVolume: handleHudMusicVolume,
       soundboardVolume: handleHudSoundboardVolume,
       ttsVolume: handleHudTtsVolume,
-      micMute: handleHudToggleMicMute,
     };
   });
 
@@ -1194,22 +1185,7 @@ export default function App() {
     hudEventsRef.current = hudEvents;
   }, [hudEvents]);
 
-  // Level mikrofon hanya diukur selama panel Audio Mixer terbuka.
-  useEffect(() => {
-    if (!isNativeAndroidPlatform) return;
-    return micMonitor.subscribe(setMicState);
-  }, [isNativeAndroidPlatform]);
-
-  useEffect(() => {
-    if (!isNativeAndroidPlatform) return;
-    if (hudPanel !== 'mixer') {
-      micMonitor.stop();
-      return;
-    }
-
-    void micMonitor.start();
-    return () => micMonitor.stop();
-  }, [hudPanel, isNativeAndroidPlatform]);
+  // Pemantauan level mikrofon dan mute/unmute Audio Mixer dijalankan langsung oleh NativeMicMonitor di Android.
 
   // Event native: panel yang dibuka/ditutup + perintah dari panel.
   useEffect(() => {
@@ -1272,7 +1248,7 @@ export default function App() {
           handlers.musicVolume(Number(value) || 0);
           return;
         case 'mic.mute':
-          handlers.micMute();
+          // Dieksekusi langsung oleh FloatingCompanionPlugin + NativeMicMonitor di sisi native.
           return;
         default:
           return;
@@ -1344,11 +1320,10 @@ export default function App() {
         });
       }
       return buildMixerModel({
-        available: micState.available,
-        metering: micState.metering,
-        muted: micState.muted,
-        level: micState.level,
-        reason: micState.reason,
+        available: false,
+        metering: false,
+        muted: false,
+        level: 0,
       });
     },
     [
@@ -1366,7 +1341,6 @@ export default function App() {
       musicMuted,
       musicVolumeUnit,
       unifiedQueue,
-      micState,
     ]
   );
 
