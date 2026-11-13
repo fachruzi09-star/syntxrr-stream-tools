@@ -310,6 +310,10 @@ public class FloatingCompanionPlugin extends Plugin {
                         }
                     } else if ("mixer.sfx".equals(action)) {
                         getSoundPoolManager().setMasterVolume(value / 100.0f);
+                    } else if ("chat.tab".equals(action)) {
+                        if (mHudManager == null || !mHudManager.selectChatTab(id)) {
+                            return;
+                        }
                     }
 
                     // Forward to JS so application state stays synchronized

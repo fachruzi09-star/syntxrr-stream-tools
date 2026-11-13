@@ -99,6 +99,10 @@ export interface HudStateModel {
   sliders?: HudSliderModel[];
   meter?: HudMeterModel;
   rows?: HudRowModel[];
+  /** Cache baris untuk tiap tab chat agar native HUD dapat berpindah tab instan tanpa menunggu JS. */
+  rowsByTab?: Partial<Record<HudChatTab, HudRowModel[]>>;
+  /** Teks kosong per tab chat untuk fallback cache native. */
+  emptyTextByTab?: Partial<Record<HudChatTab, string>>;
   /** Tinggi area daftar (dp) agar panel tidak berubah ukuran saat event baru masuk. */
   listHeightDp?: number;
   emptyText?: string;

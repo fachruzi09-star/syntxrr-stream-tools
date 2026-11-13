@@ -1374,15 +1374,16 @@ export default function App() {
   // panel mana pun tetap dapat digambar ketika WebView ditangguhkan Android di background.
   const sendHudSnapshot = useCallback(() => {
     if (!isNativeAndroidPlatform) return;
-    const snapshot = buildHudSnapshot({
+    const panels = {
       chat: buildHudModelFor('chat'),
       soundboard: buildHudModelFor('soundboard'),
       music: buildHudModelFor('music'),
       mixer: buildHudModelFor('mixer'),
-    });
-    const serialized = JSON.stringify(snapshot);
-    if (serialized === hudLastModelRef.current) return;
-    hudLastModelRef.current = serialized;
+    };
+    const serializedPanels = JSON.stringify(panels);
+    if (serializedPanels === hudLastModelRef.current) return;
+    hudLastModelRef.current = serializedPanels;
+    const snapshot = buildHudSnapshot(panels);
     void pushHudState(snapshot);
   }, [buildHudModelFor, isNativeAndroidPlatform]);
 

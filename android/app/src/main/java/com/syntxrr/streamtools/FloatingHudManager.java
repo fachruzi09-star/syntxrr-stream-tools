@@ -11,6 +11,9 @@ import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
@@ -65,6 +68,7 @@ public class FloatingHudManager {
 
     /** Jarak gerak (px) sebelum sentuhan dianggap drag, bukan tap. */
     private static final int CLICK_THRESHOLD_PX = 14;
+    private static final long PENDING_CHAT_TAB_TTL_MS = 4000L;
 
     private static final int PANEL_WIDTH_DP = 224;
     private static final int TOOLBAR_WIDTH_DP = 48;
@@ -113,10 +117,20 @@ public class FloatingHudManager {
     private boolean mAppliedLeftOrder = true;
     private boolean mToolbarVisible = false;
 
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+
     @Nullable
     private String mActivePanel = null;
     @Nullable
     private String mLastModelJson = null;
+    @Nullable
+    private String mPendingChatTab = null;
+    private long mPendingChatTabAtMs = 0L;
+    @Nullable
+    private String mLastRenderedPanelId = null;
+    @Nullable
+    private String mLastRenderedModelJson = null;
+    private boolean mLastRenderedStale = false;
 
     /** Posisi absolut bubble di layar (bukan posisi window). */
     private int mBubbleScreenX = -1;
@@ -294,15 +308,22 @@ public class FloatingHudManager {
             JSONArray tabs = new JSONArray();
             String[] tIds = {"chat", "gift", "like", "follow"};
             String[] tLabels = {"Chat", "Gift", "Like", "Follow"};
+            JSONObject rowsByTab = new JSONObject();
+            JSONObject emptyTextByTab = new JSONObject();
             for (int i = 0; i < tIds.length; i++) {
                 JSONObject tab = new JSONObject();
                 tab.put("id", tIds[i]);
                 tab.put("label", tLabels[i]);
                 tabs.put(tab);
+                rowsByTab.put(tIds[i], new JSONArray());
+                emptyTextByTab.put(tIds[i], defaultEmptyTextForTab(tIds[i]));
             }
             chat.put("tabs", tabs);
             chat.put("activeTab", "chat");
-            chat.put("emptyText", "Belum ada pesan chat masuk.");
+            chat.put("rows", new JSONArray());
+            chat.put("rowsByTab", rowsByTab);
+            chat.put("emptyTextByTab", emptyTextByTab);
+            chat.put("emptyText", defaultEmptyTextForTab("chat"));
             mPanelModels.put("chat", chat.toString());
         } catch (Exception e) {
             Log.w(TAG, "Gagal menginisialisasi default model: " + e.getMessage());
@@ -482,6 +503,7 @@ public class FloatingHudManager {
             return false;
         }
 
+        String singlePanel = "";
         try {
             JSONObject root = new JSONObject(json);
             JSONObject panels = root.optJSONObject("panels");
@@ -491,6 +513,9 @@ public class FloatingHudManager {
                     String key = keys.next();
                     JSONObject model = panels.optJSONObject(key);
                     if (model != null) {
+                        if ("chat".equals(key)) {
+                            applyPendingChatTabIfNeeded(model);
+                        }
                         mPanelModels.put(key, model.toString());
                     }
                 }
@@ -500,41 +525,29 @@ public class FloatingHudManager {
                 renderLastKnownModel(false);
                 return true;
             }
-            String panel = root.optString("panel", "");
-            if (!panel.isEmpty()) {
-                mPanelModels.put(panel, json);
+            singlePanel = root.optString("panel", "");
+            if ("chat".equals(singlePanel)) {
+                applyPendingChatTabIfNeeded(root);
+            }
+            String storedJson = root.toString();
+            if (!singlePanel.isEmpty()) {
+                mPanelModels.put(singlePanel, storedJson);
+            }
+            if (mActivePanel != null && mActivePanel.equals(singlePanel)) {
+                mLastModelJson = storedJson;
             }
         } catch (JSONException e) {
             Log.w(TAG, "Model HUD tidak valid: " + e.getMessage());
             return false;
         }
 
-        mLastModelJson = json;
-
         if (!mIsAttached || mRoot == null || mPanelContainer == null) {
             return false;
         }
 
-        final String payload = json;
-        mRoot.post(() -> {
-            if (!mIsAttached || mPanelContainer == null) {
-                return;
-            }
-            try {
-                JSONObject model = new JSONObject(payload);
-                String panel = model.optString("panel", "");
-                if (panel.isEmpty() || mActivePanel == null || !mActivePanel.equals(panel)) {
-                    return; // model usang dari panel lain
-                }
-                renderModel(model, false);
-                layoutWindow(true);
-                if (mRoot != null) {
-                    mRoot.post(this::clampAfterContentChange);
-                }
-            } catch (JSONException e) {
-                Log.w(TAG, "Model HUD tidak valid: " + e.getMessage());
-            }
-        });
+        if (mActivePanel != null && mActivePanel.equals(singlePanel)) {
+            renderLastKnownModel(false);
+        }
         return true;
     }
 
@@ -552,7 +565,7 @@ public class FloatingHudManager {
                 model.put("status", status);
             }
             status.put("text", isPlaying ? "Memutar..." : "Siap");
-            status.put("tone", isPlaying ? "ok" : "ok");
+            status.put("tone", "ok");
 
             JSONObject grid = model.optJSONObject("grid");
             if (grid != null) {
@@ -574,14 +587,9 @@ public class FloatingHudManager {
 
             mPanelModels.put("soundboard", model.toString());
 
-            if ("soundboard".equals(mActivePanel) && mRoot != null) {
-                final JSONObject updatedModel = model;
-                mRoot.post(() -> {
-                    if ("soundboard".equals(mActivePanel) && mPanelContainer != null) {
-                        renderModel(updatedModel, false);
-                        layoutWindow(true);
-                    }
-                });
+            if ("soundboard".equals(mActivePanel)) {
+                mLastModelJson = mPanelModels.get("soundboard");
+                renderLastKnownModel(false);
             }
         } catch (Exception e) {
             Log.w(TAG, "Gagal memperbarui status Soundboard: " + e.getMessage());
@@ -614,14 +622,9 @@ public class FloatingHudManager {
                 }
             }
             mPanelModels.put("music", model.toString());
-            if ("music".equals(mActivePanel) && mRoot != null) {
-                final JSONObject updatedModel = model;
-                mRoot.post(() -> {
-                    if ("music".equals(mActivePanel) && mPanelContainer != null) {
-                        renderModel(updatedModel, false);
-                        layoutWindow(true);
-                    }
-                });
+            if ("music".equals(mActivePanel)) {
+                mLastModelJson = mPanelModels.get("music");
+                renderLastKnownModel(false);
             }
         } catch (Exception ignored) {}
     }
@@ -647,14 +650,9 @@ public class FloatingHudManager {
                 }
             }
             mPanelModels.put("music", model.toString());
-            if ("music".equals(mActivePanel) && mRoot != null) {
-                final JSONObject updatedModel = model;
-                mRoot.post(() -> {
-                    if ("music".equals(mActivePanel) && mPanelContainer != null) {
-                        renderModel(updatedModel, false);
-                        layoutWindow(true);
-                    }
-                });
+            if ("music".equals(mActivePanel)) {
+                mLastModelJson = mPanelModels.get("music");
+                renderLastKnownModel(false);
             }
         } catch (Exception ignored) {}
     }
@@ -675,14 +673,9 @@ public class FloatingHudManager {
                 }
             }
             mPanelModels.put("music", model.toString());
-            if ("music".equals(mActivePanel) && mRoot != null) {
-                final JSONObject updatedModel = model;
-                mRoot.post(() -> {
-                    if ("music".equals(mActivePanel) && mPanelContainer != null) {
-                        renderModel(updatedModel, false);
-                        layoutWindow(true);
-                    }
-                });
+            if ("music".equals(mActivePanel)) {
+                mLastModelJson = mPanelModels.get("music");
+                renderLastKnownModel(false);
             }
         } catch (Exception ignored) {}
     }
@@ -707,6 +700,7 @@ public class FloatingHudManager {
 
     /** Tutup toolbar/panel tanpa menyembunyikan bubble. */
     public synchronized void collapseContent() {
+        resetRenderedCache();
         if (mContent == null) {
             mActivePanel = null;
             mToolbarVisible = false;
@@ -779,6 +773,7 @@ public class FloatingHudManager {
     private void openPanel(@NonNull String panelId) {
         mActivePanel = panelId;
         mToolbarVisible = false;
+        resetRenderedCache();
 
         if (mToolbar != null) {
             mToolbar.setVisibility(View.GONE);
@@ -807,6 +802,7 @@ public class FloatingHudManager {
     private void showToolbar() {
         mActivePanel = null;
         mToolbarVisible = true;
+        resetRenderedCache();
 
         if (mPanelContainer != null) {
             mPanelContainer.setVisibility(View.GONE);
@@ -836,13 +832,112 @@ public class FloatingHudManager {
     }
 
     // =========================================================================
-    // MODEL RENDERING
+    // MODEL RENDERING & NATIVE CHAT TAB SWITCHING
     // =========================================================================
+
+    private boolean isValidChatTab(@Nullable String tabId) {
+        return "chat".equals(tabId)
+                || "gift".equals(tabId)
+                || "like".equals(tabId)
+                || "follow".equals(tabId);
+    }
+
+    @NonNull
+    private String defaultEmptyTextForTab(@NonNull String tabId) {
+        if ("chat".equals(tabId)) {
+            return "Belum ada pesan chat masuk.";
+        }
+        return "Belum ada event " + tabId + ".";
+    }
+
+    private void applyTabSelectionToChatModel(@NonNull JSONObject chatModel, @NonNull String tabId) {
+        try {
+            String previousTab = chatModel.optString("activeTab", "");
+            chatModel.put("activeTab", tabId);
+
+            JSONObject rowsByTab = chatModel.optJSONObject("rowsByTab");
+            if (rowsByTab != null) {
+                JSONArray tabRows = rowsByTab.optJSONArray(tabId);
+                chatModel.put("rows", tabRows != null ? tabRows : new JSONArray());
+            } else if (!tabId.equals(previousTab)) {
+                chatModel.put("rows", new JSONArray());
+            }
+
+            JSONObject emptyTextByTab = chatModel.optJSONObject("emptyTextByTab");
+            if (emptyTextByTab != null && emptyTextByTab.has(tabId)) {
+                chatModel.put("emptyText", emptyTextByTab.optString(tabId, defaultEmptyTextForTab(tabId)));
+            } else {
+                chatModel.put("emptyText", defaultEmptyTextForTab(tabId));
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Gagal menerapkan tab chat " + tabId + ": " + e.getMessage());
+        }
+    }
+
+    private void applyPendingChatTabIfNeeded(@NonNull JSONObject chatModel) {
+        if (mPendingChatTab == null) {
+            return;
+        }
+        String incomingTab = chatModel.optString("activeTab", "");
+        long elapsed = SystemClock.uptimeMillis() - mPendingChatTabAtMs;
+        if (mPendingChatTab.equals(incomingTab) || elapsed > PENDING_CHAT_TAB_TTL_MS) {
+            mPendingChatTab = null;
+            mPendingChatTabAtMs = 0L;
+            return;
+        }
+        applyTabSelectionToChatModel(chatModel, mPendingChatTab);
+    }
+
+    public synchronized boolean selectChatTab(@Nullable String rawTabId) {
+        String tabId = rawTabId != null ? rawTabId.trim() : null;
+        if (!isValidChatTab(tabId)) {
+            Log.w(TAG, "Tab chat tidak valid diabaikan: " + rawTabId);
+            return false;
+        }
+
+        mPendingChatTab = tabId;
+        mPendingChatTabAtMs = SystemClock.uptimeMillis();
+
+        String chatJson = mPanelModels.get("chat");
+        if (chatJson != null) {
+            try {
+                JSONObject model = new JSONObject(chatJson);
+                applyTabSelectionToChatModel(model, tabId);
+                String updated = model.toString();
+                mPanelModels.put("chat", updated);
+                if ("chat".equals(mActivePanel)) {
+                    mLastModelJson = updated;
+                }
+            } catch (JSONException e) {
+                Log.w(TAG, "Gagal memperbarui cache tab chat: " + e.getMessage());
+            }
+        }
+
+        if ("chat".equals(mActivePanel)) {
+            renderLastKnownModel(mLastRenderedStale);
+        }
+        return true;
+    }
+
+    private void resetRenderedCache() {
+        mLastRenderedPanelId = null;
+        mLastRenderedModelJson = null;
+        mLastRenderedStale = false;
+    }
+
+    private void runOnUiThreadSafe(@NonNull Runnable task) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            task.run();
+        } else {
+            mMainHandler.post(task);
+        }
+    }
 
     private void showPanelPlaceholder(@NonNull String panelId) {
         if (mPanelContainer == null) {
             return;
         }
+        resetRenderedCache();
         mPanelContainer.removeAllViews();
         // Placeholder jujur: tanpa status palsu dan tanpa keadaan "memuat" tanpa akhir.
         // Bila model terakhir masih tersedia, renderLastKnownModel() langsung menggantikannya.
@@ -858,31 +953,45 @@ public class FloatingHudManager {
      * kosong. Saat markStale = true header ditandai "Status terakhir" supaya data lama tidak
      * tampil seolah-olah masih segar atau masih terhubung ke sumber LIVE.
      */
-    public synchronized void renderLastKnownModel(boolean markStale) {
-        if (mActivePanel == null) {
-            return;
-        }
-        if (!mIsAttached || mPanelContainer == null) {
-            return;
-        }
-        // Utamakan cache khusus panel aktif; mLastModelJson hanya cadangan.
-        String cachedJson = mPanelModels.get(mActivePanel);
-        if (cachedJson == null) {
-            cachedJson = mLastModelJson;
-        }
-        if (cachedJson == null) {
-            return;
-        }
-        try {
-            JSONObject cached = new JSONObject(cachedJson);
-            if (!mActivePanel.equals(cached.optString("panel"))) {
-                return; // cache milik panel lain
+    public void renderLastKnownModel(final boolean markStale) {
+        runOnUiThreadSafe(() -> {
+            synchronized (FloatingHudManager.this) {
+                if (mActivePanel == null || !mIsAttached || mPanelContainer == null) {
+                    return;
+                }
+                final String activePanel = mActivePanel;
+                // Utamakan cache khusus panel aktif; mLastModelJson hanya cadangan.
+                String cachedJson = mPanelModels.get(activePanel);
+                if (cachedJson == null) {
+                    cachedJson = mLastModelJson;
+                }
+                if (cachedJson == null) {
+                    return;
+                }
+                if (activePanel.equals(mLastRenderedPanelId)
+                        && markStale == mLastRenderedStale
+                        && cachedJson.equals(mLastRenderedModelJson)
+                        && mPanelContainer.getChildCount() > 0) {
+                    return;
+                }
+                try {
+                    JSONObject cached = new JSONObject(cachedJson);
+                    if (!activePanel.equals(cached.optString("panel"))) {
+                        return; // cache milik panel lain
+                    }
+                    renderModel(cached, markStale);
+                    mLastRenderedPanelId = activePanel;
+                    mLastRenderedModelJson = cachedJson;
+                    mLastRenderedStale = markStale;
+                    layoutWindow(true);
+                    if (mRoot != null) {
+                        mRoot.post(this::clampAfterContentChange);
+                    }
+                } catch (JSONException ignored) {
+                    // model usang diabaikan
+                }
             }
-            renderModel(cached, markStale);
-            layoutWindow(true);
-        } catch (JSONException ignored) {
-            // model usang diabaikan
-        }
+        });
     }
 
     private void renderModel(@NonNull JSONObject model, boolean stale) {
@@ -1016,15 +1125,13 @@ public class FloatingHudManager {
     }
 
     private View buildTabs(JSONArray tabs, String activeTab) {
-        HorizontalScrollView scroll = new HorizontalScrollView(mContext);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setClipToPadding(false);
-
+        int count = tabs.length();
         LinearLayout row = new LinearLayout(mContext);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setPadding(0, 0, 0, dp(4));
 
-        for (int i = 0; i < tabs.length(); i++) {
+        boolean fitEqually = count > 0 && count <= 4;
+        for (int i = 0; i < count; i++) {
             JSONObject tab = tabs.optJSONObject(i);
             if (tab == null) {
                 continue;
@@ -1035,17 +1142,41 @@ public class FloatingHudManager {
 
             TextView chip = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, active);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(8), dp(4), dp(8), dp(4));
-            chip.setBackground(rounded(dp(12), active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
+            chip.setSingleLine(true);
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setMinHeight(dp(48));
+            chip.setPadding(dp(4), 0, dp(4), 0);
+            chip.setBackground(rounded(dp(10), active ? 0xFF2563EB : C_SURFACE_SOFT, 0, Color.TRANSPARENT));
             chip.setContentDescription(label);
+            chip.setClickable(true);
+            chip.setFocusable(true);
             chip.setOnClickListener(v -> emitCommand("chat.tab", id, 0));
 
-            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            chipParams.setMarginEnd(dp(4));
+            LinearLayout.LayoutParams chipParams;
+            if (fitEqually) {
+                chipParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            } else {
+                chip.setMinWidth(dp(48));
+                chip.setPadding(dp(10), 0, dp(10), 0);
+                chipParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
+            }
+            if (row.getChildCount() > 0) {
+                chipParams.setMarginStart(dp(4));
+            }
             row.addView(chip, chipParams);
         }
 
+        if (fitEqually) {
+            row.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            return row;
+        }
+
+        HorizontalScrollView scroll = new HorizontalScrollView(mContext);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
         scroll.addView(row, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
@@ -1760,6 +1891,10 @@ public class FloatingHudManager {
 
     public synchronized void destroy() {
         mWantedVisible = false;
+        mMainHandler.removeCallbacksAndMessages(null);
+        mPendingChatTab = null;
+        mPendingChatTabAtMs = 0L;
+        resetRenderedCache();
         unregisterScreenReceiver();
         hideHud();
         mClickListener = null;

@@ -96,20 +96,43 @@ export function hudEventSourceStatus(
   return status('Terhubung', 'ok');
 }
 
+function mapEventsToRows(events: HudChatEntry[], tab: HudChatTab): HudRowModel[] {
+  return filterHudEvents(events, tab).map((event) => ({
+    label: event.username,
+    sub: event.detail,
+    trailing: formatClock(event.timestamp),
+  }));
+}
+
+function chatEmptyTextForTab(tab: HudChatTab): string {
+  return tab === 'chat'
+    ? 'Belum ada chat. Panel tetap mengumpulkan event selama sumber aktif.'
+    : `Belum ada event ${tab}.`;
+}
+
 export function buildChatModel(
   events: HudChatEntry[],
   tab: HudChatTab,
   paused: boolean,
   unreadCount: number
 ): HudStateModel {
-  const filtered = filterHudEvents(events, tab);
   const sourceStatus = hudEventSourceStatus(events);
 
-  const rows: HudRowModel[] = filtered.map((event) => ({
-    label: event.username,
-    sub: event.detail,
-    trailing: formatClock(event.timestamp),
-  }));
+  const rowsByTab: Record<HudChatTab, HudRowModel[]> = {
+    chat: mapEventsToRows(events, 'chat'),
+    gift: mapEventsToRows(events, 'gift'),
+    like: mapEventsToRows(events, 'like'),
+    follow: mapEventsToRows(events, 'follow'),
+  };
+
+  const emptyTextByTab: Record<HudChatTab, string> = {
+    chat: chatEmptyTextForTab('chat'),
+    gift: chatEmptyTextForTab('gift'),
+    like: chatEmptyTextForTab('like'),
+    follow: chatEmptyTextForTab('follow'),
+  };
+
+  const rows = rowsByTab[tab] ?? [];
 
   return {
     panel: 'chat',
@@ -120,11 +143,10 @@ export function buildChatModel(
     tabs: TAB_DEFS,
     activeTab: tab,
     rows,
+    rowsByTab,
+    emptyTextByTab,
     listHeightDp: 164,
-    emptyText:
-      tab === 'chat'
-        ? 'Belum ada chat. Panel tetap mengumpulkan event selama sumber aktif.'
-        : `Belum ada event ${tab}.`,
+    emptyText: emptyTextByTab[tab] ?? chatEmptyTextForTab(tab),
   };
 }
 
