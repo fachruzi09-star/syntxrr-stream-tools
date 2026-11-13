@@ -74,18 +74,20 @@ public class NativeSoundPoolManager {
         initializeSoundPool();
     }
 
+    @NonNull
+    private static AudioAttributes createSoundboardAudioAttributes() {
+        return new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
+    }
+
     private void initializeSoundPool() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
-                        .build();
-
                 mSoundPool = new SoundPool.Builder()
                         .setMaxStreams(MAX_SIMULTANEOUS_STREAMS)
-                        .setAudioAttributes(audioAttributes)
+                        .setAudioAttributes(createSoundboardAudioAttributes())
                         .build();
             } else {
                 // Legacy fallback for API < 21
@@ -316,22 +318,14 @@ public class NativeSoundPoolManager {
             @Override
             public void run() {
                 AudioTrack track = null;
+                boolean playbackStarted = false;
                 mActiveSynthCount.incrementAndGet();
-                if (mPlaybackListener != null) {
-                    try {
-                        mPlaybackListener.onSoundStarted(soundId);
-                    } catch (Exception ignored) {}
-                }
 
                 try {
                     short[] pcm = generateSynthPcm(resolvedType, SAMPLE_RATE);
                     int bufferSizeBytes = pcm.length * 2;
 
-                    AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
-                            .build();
+                    AudioAttributes audioAttributes = createSoundboardAudioAttributes();
 
                     AudioFormat audioFormat = new AudioFormat.Builder()
                             .setSampleRate(SAMPLE_RATE)
@@ -347,8 +341,25 @@ public class NativeSoundPoolManager {
                             AudioManager.AUDIO_SESSION_ID_GENERATE
                     );
 
-                    track.write(pcm, 0, pcm.length);
+                    if (track.getState() != AudioTrack.STATE_INITIALIZED) {
+                        Log.w(TAG, "AudioTrack failed to initialize for synth sound: " + resolvedType);
+                        return;
+                    }
+
+                    int written = track.write(pcm, 0, pcm.length);
+                    if (written < 0) {
+                        Log.w(TAG, "AudioTrack.write failed with code " + written + " for synth sound: " + resolvedType);
+                        return;
+                    }
+
                     track.setVolume(effectiveVol);
+                    playbackStarted = true;
+                    if (mPlaybackListener != null) {
+                        try {
+                            mPlaybackListener.onSoundStarted(soundId);
+                        } catch (Exception ignored) {}
+                    }
+
                     track.play();
 
                     long durationMs = (long) ((pcm.length / (float) SAMPLE_RATE) * 1000L);
@@ -364,7 +375,7 @@ public class NativeSoundPoolManager {
                         } catch (Exception ignored) {}
                     }
                     mActiveSynthCount.decrementAndGet();
-                    if (mPlaybackListener != null) {
+                    if (playbackStarted && mPlaybackListener != null) {
                         try {
                             mPlaybackListener.onSoundCompleted(soundId);
                         } catch (Exception ignored) {}
