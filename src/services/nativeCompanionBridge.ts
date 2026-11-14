@@ -7,7 +7,12 @@
  */
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
-import type { TikTokConnectionState, TikTokTransportMode } from '../types';
+import type {
+  TikTokConnectionMethod,
+  TikTokConnectionState,
+  TikTokRoomStatus,
+  TikTokTransportMode,
+} from '../types';
 
 export interface OverlayPermissionResult {
   granted: boolean;
@@ -134,6 +139,8 @@ export interface HudResyncPayload {
 export interface NativeTikTokStatePayload {
   state: TikTokConnectionState;
   transport: TikTokTransportMode;
+  connectionMethod?: TikTokConnectionMethod;
+  roomStatus?: TikTokRoomStatus;
   username: string;
   roomId: string;
   viewerCount: number;
@@ -204,6 +211,7 @@ export interface FloatingCompanionPluginInterface {
     username: string;
     eulerApiKey?: string;
     allowEulerFallback?: boolean;
+    connectionMethod?: TikTokConnectionMethod;
   }): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload }>;
   disconnectTikTokLive(): Promise<{ success: boolean; status?: NativeTikTokStatePayload }>;
   getTikTokLiveStatus(): Promise<NativeTikTokStatePayload>;
@@ -751,6 +759,7 @@ export async function connectTikTokLiveNative(options: {
   username: string;
   eulerApiKey?: string;
   allowEulerFallback?: boolean;
+  connectionMethod?: TikTokConnectionMethod;
 }): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload; message?: string }> {
   if (!isNativeAndroid()) {
     return {

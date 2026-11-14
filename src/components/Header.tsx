@@ -13,6 +13,8 @@ interface HeaderProps {
   activeNav: NavigationTab;
   operatingMode: OperatingMode;
   activePreset: StudioPreset | null;
+  honestStatusLabel?: string;
+  honestStatusTone?: 'ok' | 'warn' | 'error' | 'off';
   onNavigate: (nav: NavigationTab) => void;
   onOpenModeModal: () => void;
   onOpenDrawer?: () => void;
@@ -22,6 +24,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeNav,
   operatingMode,
   activePreset,
+  honestStatusLabel,
+  honestStatusTone = 'off',
   onNavigate,
   onOpenModeModal,
 }) => {
@@ -80,9 +84,35 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Zone 3: Connection status, Active Preset, Mode Switcher */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border border-amber-900/60 text-[11px]">
-          <div className="w-2 h-2 rounded-full bg-amber-400" />
-          <span className="font-semibold text-amber-300">{t('header.idle', 'Belum Siaran')}</span>
+        <div
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border text-[11px] ${
+            honestStatusTone === 'ok'
+              ? 'border-emerald-700/60'
+              : honestStatusTone === 'error'
+              ? 'border-rose-800/60'
+              : 'border-amber-900/60'
+          }`}
+        >
+          <div
+            className={`w-2 h-2 rounded-full ${
+              honestStatusTone === 'ok'
+                ? 'bg-emerald-400'
+                : honestStatusTone === 'error'
+                ? 'bg-rose-400'
+                : 'bg-amber-400'
+            }`}
+          />
+          <span
+            className={`font-semibold ${
+              honestStatusTone === 'ok'
+                ? 'text-emerald-300'
+                : honestStatusTone === 'error'
+                ? 'text-rose-300'
+                : 'text-amber-300'
+            }`}
+          >
+            {honestStatusLabel || t('header.idle', 'Belum Siaran')}
+          </span>
         </div>
 
         {activePreset && (

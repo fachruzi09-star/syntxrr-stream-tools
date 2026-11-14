@@ -43,6 +43,8 @@ public final class TikTokLiveConnector {
     private static final String TAG = "TikTokLiveConnector";
     private static final int MAX_RECONNECT_ATTEMPTS = 3;
     private static final long[] RECONNECT_DELAYS_MS = {2_000L, 5_000L, 10_000L};
+    private static final int MAX_WAITING_LIVE_ATTEMPTS = 10;
+    private static final long WAITING_LIVE_INTERVAL_MS = 15_000L;
 
     public interface Listener {
         void onStateChanged(@NonNull JSONObject stateJson);
@@ -90,6 +92,10 @@ public final class TikTokLiveConnector {
     @NonNull
     private String mTransportMode = "none"; // none | direct_ws | euler
     @NonNull
+    private String mConnectionMethod = "direct"; // direct | euler
+    @NonNull
+    private String mRoomStatus = "unknown"; // unknown | not_live | live | not_found | unreadable
+    @NonNull
     private String mUsername = "";
     @NonNull
     private String mRoomId = "";
@@ -109,6 +115,7 @@ public final class TikTokLiveConnector {
     @NonNull
     private String mErrorCode = "";
     private int mReconnectAttempt = 0;
+    private int mWaitingLiveAttempt = 0;
 
     private TikTokLiveConnector(@NonNull Context appContext) {
         this.mAppContext = appContext;
@@ -128,6 +135,8 @@ public final class TikTokLiveConnector {
             try {
                 obj.put("state", mState);
                 obj.put("transport", mTransportMode);
+                obj.put("connectionMethod", mConnectionMethod);
+                obj.put("roomStatus", mRoomStatus);
                 obj.put("username", mUsername);
                 obj.put("roomId", mRoomId);
                 obj.put("viewerCount", mViewerCount);
@@ -143,6 +152,9 @@ public final class TikTokLiveConnector {
 
     public boolean isSessionActive() {
         synchronized (mLock) {
+            if ("waiting_for_live".equals(mState) && mPendingTask != null && !mPendingTask.isDone()) {
+                return true;
+            }
             return !"disconnected".equals(mState)
                     && !"error".equals(mState)
                     && !"waiting_for_live".equals(mState);
@@ -154,8 +166,21 @@ public final class TikTokLiveConnector {
             @Nullable String eulerApiKey,
             boolean allowEulerFallback
     ) {
+        connect(rawUsername, eulerApiKey, allowEulerFallback, "direct");
+    }
+
+    public void connect(
+            @Nullable String rawUsername,
+            @Nullable String eulerApiKey,
+            boolean allowEulerFallback,
+            @Nullable String rawConnectionMethod
+    ) {
         String normalized = TikTokRoomResolver.normalizeUsername(rawUsername);
+        String method = "euler".equalsIgnoreCase(rawConnectionMethod != null ? rawConnectionMethod.trim() : "")
+                ? "euler"
+                : "direct";
         if (normalized.isEmpty()) {
+            mRoomStatus = "not_found";
             stopInternal("error", "INVALID_INPUT", "Username TikTok tidak valid atau kosong.");
             return;
         }
@@ -164,6 +189,7 @@ public final class TikTokLiveConnector {
         synchronized (mLock) {
             boolean alreadySameSession = isSessionActive()
                     && normalized.equalsIgnoreCase(mUsername)
+                    && method.equals(mConnectionMethod)
                     && allowEulerFallback == mAllowEulerFallback;
             if (alreadySameSession) {
                 emitCurrentState();
@@ -177,6 +203,8 @@ public final class TikTokLiveConnector {
             mUsername = normalized;
             mEulerApiKey = eulerApiKey != null ? eulerApiKey.trim() : "";
             mAllowEulerFallback = allowEulerFallback;
+            mConnectionMethod = method;
+            mRoomStatus = "unknown";
             mRoomId = "";
             mCursor = "";
             mInternalExt = "";
@@ -184,6 +212,7 @@ public final class TikTokLiveConnector {
             mViewerCount = 0L;
             mTotalLikeCount = 0L;
             mReconnectAttempt = 0;
+            mWaitingLiveAttempt = 0;
             mTransportMode = "none";
             mErrorCode = "";
             setStateLocked("resolving_room", "none", "Mencari room LIVE @" + normalized + "...");
@@ -209,6 +238,10 @@ public final class TikTokLiveConnector {
             mCursor = "";
             mInternalExt = "";
             mReconnectAttempt = 0;
+            mWaitingLiveAttempt = 0;
+            if ("disconnected".equals(terminalState)) {
+                mRoomStatus = "unknown";
+            }
             mErrorCode = errorCode;
             setStateLocked(terminalState, "none", message);
         }
@@ -226,29 +259,75 @@ public final class TikTokLiveConnector {
 
         switch (res.status) {
             case INVALID_INPUT:
+                synchronized (mLock) { mRoomStatus = "not_found"; }
                 failSessionIfCurrent(gen, "error", "INVALID_INPUT", res.message);
                 return;
             case ACCOUNT_NOT_FOUND:
+                synchronized (mLock) { mRoomStatus = "not_found"; }
                 failSessionIfCurrent(gen, "error", "ACCOUNT_NOT_FOUND", res.message);
                 return;
             case NOT_LIVE:
-                failSessionIfCurrent(gen, "waiting_for_live", "NOT_LIVE", res.message);
+                scheduleWaitingForLiveCheck(gen, username, res.message);
                 return;
             case ROOM_UNREADABLE:
+                synchronized (mLock) { mRoomStatus = "unreadable"; }
                 failSessionIfCurrent(gen, "error", "ROOM_UNREADABLE", res.message);
                 return;
             case NETWORK_ERROR:
                 scheduleReconnectOrFail(gen, "NETWORK_ERROR", res.message, false);
                 return;
             case RESOLVED_LIVE:
+                final String method;
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
                     mRoomId = res.roomId;
+                    mRoomStatus = "live";
                     mSessionCookies = new LinkedHashMap<>(res.sessionCookies);
                     mReconnectAttempt = 0;
+                    mWaitingLiveAttempt = 0;
+                    method = mConnectionMethod;
                 }
-                startDirectWebSocket(gen);
+                if ("euler".equals(method)) {
+                    startEulerFallback(gen, "Menghubungkan via EulerStream ke @" + username + "...");
+                } else {
+                    startDirectWebSocket(gen);
+                }
                 return;
+        }
+    }
+
+    private void scheduleWaitingForLiveCheck(long gen, @NonNull String username, @NonNull String baseMessage) {
+        synchronized (mLock) {
+            if (isStaleGeneration(gen)) return;
+            closeActiveWsLocked();
+            cancelPendingTaskLocked();
+            mRoomStatus = "not_live";
+            mErrorCode = "NOT_LIVE";
+
+            if (mWaitingLiveAttempt >= MAX_WAITING_LIVE_ATTEMPTS) {
+                mSessionGeneration.incrementAndGet();
+                mSessionCookies.clear();
+                setStateLocked(
+                        "waiting_for_live",
+                        "none",
+                        "@" + username + " masih belum LIVE setelah pemeriksaan berkala. Coba sambungkan lagi saat LIVE sudah dimulai."
+                );
+                return;
+            }
+
+            mWaitingLiveAttempt++;
+            int currentAttempt = mWaitingLiveAttempt;
+            setStateLocked(
+                    "waiting_for_live",
+                    "none",
+                    baseMessage + " Menunggu LIVE dan memeriksa ulang (" + currentAttempt + "/" + MAX_WAITING_LIVE_ATTEMPTS + ")..."
+            );
+
+            mPendingTask = mScheduler.schedule(
+                    () -> mWorker.execute(() -> runRoomResolution(gen, username)),
+                    WAITING_LIVE_INTERVAL_MS,
+                    TimeUnit.MILLISECONDS
+            );
         }
     }
 
@@ -607,6 +686,7 @@ public final class TikTokLiveConnector {
                     cancelPendingTaskLocked();
                     closeActiveWsLocked();
                     mSessionCookies.clear();
+                    mRoomStatus = "not_live";
                     mErrorCode = "LIVE_ENDED";
                     setStateLocked(
                             "waiting_for_live",

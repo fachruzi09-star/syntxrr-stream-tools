@@ -4,8 +4,10 @@
 
 import type { PluginListenerHandle } from '@capacitor/core';
 import type {
+  TikTokConnectionMethod,
   TikTokConnectionState,
   TikTokConnectorStatus,
+  TikTokRoomStatus,
 } from '../types';
 import { streamEventBus } from './eventBus';
 import {
@@ -24,6 +26,7 @@ export interface TikTokConnectOptions {
   username: string;
   eulerApiKey?: string;
   allowEulerFallback?: boolean;
+  connectionMethod?: TikTokConnectionMethod;
 }
 
 export interface TikTokTransportAdapter {
@@ -63,6 +66,8 @@ function initialStatus(): TikTokConnectorStatus {
   return {
     state: 'disconnected',
     transport: 'none',
+    connectionMethod: 'direct',
+    roomStatus: 'unknown',
     username: '',
     roomId: '',
     viewerCount: 0,
@@ -167,15 +172,20 @@ export class TikTokLiveConnector {
 
   async connect(options: TikTokConnectOptions): Promise<TikTokConnectorStatus> {
     const cleanUser = sanitizeUsernameInput(options.username);
+    const connectionMethod: TikTokConnectionMethod =
+      options.connectionMethod === 'euler' ? 'euler' : 'direct';
+
     if (!cleanUser || !/^[A-Za-z0-9._]{1,64}$/.test(cleanUser)) {
       this.updateStatus({
         state: 'error',
         transport: 'none',
+        connectionMethod,
+        roomStatus: 'not_found',
         username: cleanUser,
         roomId: '',
         viewerCount: 0,
         totalLikeCount: 0,
-        message: 'Masukkan username TikTok yang valid terlebih dahulu.',
+        message: 'Username TikTok yang valid belum tersedia untuk memulai koneksi room LIVE.',
         errorCode: 'INVALID_INPUT',
       });
       return this.getStatus();
@@ -187,7 +197,8 @@ export class TikTokLiveConnector {
 
     if (
       this.isActiveSession() &&
-      this.status.username.toLowerCase() === cleanUser.toLowerCase()
+      this.status.username.toLowerCase() === cleanUser.toLowerCase() &&
+      (this.status.connectionMethod ?? 'direct') === connectionMethod
     ) {
       return this.getStatus();
     }
@@ -196,6 +207,8 @@ export class TikTokLiveConnector {
       this.updateStatus({
         state: 'error',
         transport: 'none',
+        connectionMethod,
+        roomStatus: 'unknown',
         username: cleanUser,
         roomId: '',
         viewerCount: 0,
@@ -215,6 +228,8 @@ export class TikTokLiveConnector {
       this.updateStatus({
         state: 'resolving_room',
         transport: 'none',
+        connectionMethod,
+        roomStatus: 'unknown',
         username: cleanUser,
         roomId: '',
         viewerCount: 0,
@@ -227,6 +242,7 @@ export class TikTokLiveConnector {
         username: cleanUser,
         eulerApiKey: options.eulerApiKey?.trim() || undefined,
         allowEulerFallback: options.allowEulerFallback ?? true,
+        connectionMethod,
       });
 
       if (res.status) {
@@ -235,6 +251,8 @@ export class TikTokLiveConnector {
         this.updateStatus({
           state: 'error',
           transport: 'none',
+          connectionMethod,
+          roomStatus: 'unknown',
           username: cleanUser,
           roomId: '',
           viewerCount: 0,
@@ -262,6 +280,8 @@ export class TikTokLiveConnector {
     this.updateStatus({
       state: 'disconnected',
       transport: 'none',
+      connectionMethod: this.status.connectionMethod ?? 'direct',
+      roomStatus: 'unknown',
       username: this.status.username,
       roomId: '',
       viewerCount: 0,
@@ -293,6 +313,7 @@ export class TikTokLiveConnector {
         ...this.status,
         state: 'waiting_for_live',
         transport: 'none',
+        roomStatus: 'not_live',
         message: `Siaran LIVE @${this.status.username || 'streamer'} telah berakhir.`,
         errorCode: 'LIVE_ENDED',
       });
@@ -337,9 +358,19 @@ export class TikTokLiveConnector {
       ? payload.state
       : 'disconnected';
 
+    const derivedRoomStatus: TikTokRoomStatus = payload.roomStatus
+      ? payload.roomStatus
+      : nextState === 'connected_direct' || nextState === 'connected_euler'
+      ? 'live'
+      : nextState === 'waiting_for_live'
+      ? 'not_live'
+      : this.status.roomStatus ?? 'unknown';
+
     this.updateStatus({
       state: nextState,
       transport: payload.transport || 'none',
+      connectionMethod: payload.connectionMethod ?? this.status.connectionMethod ?? 'direct',
+      roomStatus: derivedRoomStatus,
       username: payload.username ?? this.status.username,
       roomId: payload.roomId ?? '',
       viewerCount: typeof payload.viewerCount === 'number' ? payload.viewerCount : this.status.viewerCount,
@@ -367,3 +398,166 @@ export class TikTokLiveConnector {
 }
 
 export const tiktokLiveConnector = new TikTokLiveConnector();
+
+export interface ModeAHonestStatusSummary {
+  accountLinked: {
+    label: string;
+    detail: string;
+    tone: 'ok' | 'warn' | 'error' | 'off';
+  };
+  modeASession: {
+    label: string;
+    detail: string;
+    tone: 'ok' | 'warn' | 'off';
+  };
+  roomStatus: {
+    label: string;
+    tone: 'ok' | 'warn' | 'error' | 'off';
+  };
+  eventTransport: {
+    label: string;
+    detail: string;
+    tone: 'ok' | 'warn' | 'error' | 'off';
+  };
+}
+
+export function buildModeAHonestStatus(params: {
+  account: import('../types').TikTokAccountState;
+  connector: TikTokConnectorStatus;
+  companionRunning: boolean;
+  sessionMode: import('../types').ModeASessionMode;
+}): ModeAHonestStatusSummary {
+  const { account, connector, companionRunning, sessionMode } = params;
+
+  const accountLinked: ModeAHonestStatusSummary['accountLinked'] =
+    account.accountLinkStatus === 'linking'
+      ? {
+          label: 'Menghubungkan',
+          detail: 'Menunggu persetujuan otorisasi TikTok...',
+          tone: 'warn',
+        }
+      : account.isLinked && account.accountLinkStatus === 'linked'
+      ? {
+          label: 'Terhubung',
+          detail: account.username
+            ? `@${account.username}`
+            : account.displayName || account.openId || 'Akun terotorisasi',
+          tone: 'ok',
+        }
+      : account.accountLinkStatus === 'failed'
+      ? {
+          label: 'Gagal',
+          detail: account.linkErrorMessage || 'Autentikasi akun TikTok gagal.',
+          tone: 'error',
+        }
+      : {
+          label: 'Belum terhubung',
+          detail: 'Akun TikTok belum ditautkan.',
+          tone: 'off',
+        };
+
+  const modeASession: ModeAHonestStatusSummary['modeASession'] = !companionRunning
+    ? {
+        label: 'Tidak aktif',
+        detail: 'Sesi Mode A belum dijalankan.',
+        tone: 'off',
+      }
+    : sessionMode === 'without_live_connection'
+    ? {
+        label: 'Aktif (tanpa koneksi LIVE)',
+        detail: 'Overlay aktif, tetapi event LIVE belum tersedia.',
+        tone: 'warn',
+      }
+    : sessionMode === 'with_live_connector'
+    ? {
+        label: 'Aktif (dengan konektor LIVE)',
+        detail: 'Companion Service berjalan dengan konektor Mode A.',
+        tone: 'ok',
+      }
+    : {
+        label: 'Aktif',
+        detail: 'Companion Service & overlay Mode A aktif.',
+        tone: 'ok',
+      };
+
+  const resolvedRoomStatus = connector.roomStatus ?? 'unknown';
+  const roomStatus: ModeAHonestStatusSummary['roomStatus'] =
+    resolvedRoomStatus === 'live'
+      ? {
+          label: connector.roomId ? `Sedang LIVE (${connector.roomId})` : 'Sedang LIVE',
+          tone: 'ok',
+        }
+      : resolvedRoomStatus === 'not_live'
+      ? { label: 'Belum LIVE', tone: 'warn' }
+      : resolvedRoomStatus === 'not_found'
+      ? { label: 'Tidak dapat ditemukan', tone: 'error' }
+      : resolvedRoomStatus === 'unreadable'
+      ? { label: 'Tidak dapat dibaca', tone: 'error' }
+      : { label: 'Belum diperiksa', tone: 'off' };
+
+  let eventTransport: ModeAHonestStatusSummary['eventTransport'];
+  switch (connector.state) {
+    case 'connected_direct':
+      eventTransport = {
+        label: 'Connected Direct',
+        detail: connector.message || 'Terhubung via WebSocket langsung TikTok.',
+        tone: 'ok',
+      };
+      break;
+    case 'connected_euler':
+      eventTransport = {
+        label: 'Connected EulerStream',
+        detail: connector.message || 'Terhubung via EulerStream.',
+        tone: 'ok',
+      };
+      break;
+    case 'resolving_room':
+    case 'connecting_direct':
+    case 'connecting_euler':
+      eventTransport = {
+        label: 'Connecting',
+        detail: connector.message || 'Menghubungkan transport event LIVE...',
+        tone: 'warn',
+      };
+      break;
+    case 'reconnecting':
+      eventTransport = {
+        label: 'Reconnecting',
+        detail: connector.message || 'Menyambung ulang ke transport LIVE...',
+        tone: 'warn',
+      };
+      break;
+    case 'waiting_for_live':
+      eventTransport = {
+        label: 'Menunggu LIVE',
+        detail: connector.message || 'Akun belum LIVE; menunggu siaran dimulai.',
+        tone: 'warn',
+      };
+      break;
+    case 'error':
+      eventTransport = {
+        label: 'Gagal',
+        detail: connector.message || 'Koneksi transport LIVE gagal.',
+        tone: 'error',
+      };
+      break;
+    default:
+      eventTransport = {
+        label: 'Disconnected',
+        detail:
+          sessionMode === 'without_live_connection'
+            ? 'Dimulai tanpa koneksi LIVE (WebSocket tidak dijalankan).'
+            : connector.message || 'Transport LIVE tidak aktif.',
+        tone: 'off',
+      };
+      break;
+  }
+
+  return {
+    accountLinked,
+    modeASession,
+    roomStatus,
+    eventTransport,
+  };
+}
+

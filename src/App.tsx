@@ -25,6 +25,9 @@ import {
   IntegrationProvider,
   TTSConfig,
   TikTokConnectorStatus,
+  ModeASessionMode,
+  TikTokAccountState,
+  TikTokConnectionMethod,
 } from './types';
 import {
   StorageService,
@@ -38,6 +41,7 @@ import {
   DEFAULT_SOUNDBOARD,
   DEFAULT_MARKETPLACE_ITEMS,
   DEFAULT_INTEGRATIONS,
+  DEFAULT_TIKTOK_ACCOUNT_STATE,
 } from './services/storage';
 import { triggerHaptic } from './services/haptics';
 import { audioEngine, type AudioEngineState } from './services/localAudioEngine';
@@ -50,7 +54,15 @@ import {
   type SongRequestItem,
   type SongRequestState,
 } from './services/songRequestEngine';
-import { tiktokLiveConnector } from './services/tiktokLiveConnector';
+import {
+  tiktokLiveConnector,
+  buildModeAHonestStatus,
+} from './services/tiktokLiveConnector';
+import {
+  applyVerifiedProfileToAccountState,
+  handleTikTokAuthCallbackUrl,
+  startTikTokOAuthLogin,
+} from './services/tiktokAuthService';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { NavigationDrawerModal } from './components/NavigationDrawerModal';
@@ -71,12 +83,14 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import {
+  checkOverlayPermission,
   hideFloatingHud,
   onFloatingHudClick,
   onHudCommand,
   onHudPanelChanged,
   onHudResync,
   pushHudState,
+  showFloatingHud,
   startCompanion,
   stopCompanion,
   isCompanionRunning,
@@ -134,6 +148,21 @@ export default function App() {
   const [tiktokStatus, setTiktokStatus] = useState<TikTokConnectorStatus>(() =>
     tiktokLiveConnector.getStatus()
   );
+  const [tiktokAccount, setTiktokAccount] = useState<TikTokAccountState>(
+    DEFAULT_TIKTOK_ACCOUNT_STATE
+  );
+  const [modeASessionMode, setModeASessionMode] = useState<ModeASessionMode>('inactive');
+  const [openTikTokSettingsNonce, setOpenTikTokSettingsNonce] = useState(0);
+  const tiktokAccountRef = useRef<TikTokAccountState>(DEFAULT_TIKTOK_ACCOUNT_STATE);
+  const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    tiktokAccountRef.current = tiktokAccount;
+  }, [tiktokAccount]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Music Center State (HTML5 local audio + Queue + Song Requests)
   const [songRequests, setSongRequests] = useState<SongRequest[]>(DEFAULT_SONG_REQUESTS);
@@ -171,6 +200,7 @@ export default function App() {
           savedActiveSceneId,
           savedAlertSettings,
           savedAlertHistory,
+          savedTikTokAccount,
         ] = await Promise.all([
           StorageService.getSettings(),
           StorageService.getPresets(),
@@ -187,6 +217,7 @@ export default function App() {
           StorageService.getActiveSceneId(),
           StorageService.getAlertSettings(),
           StorageService.getAlertHistory(),
+          StorageService.getTikTokAccount(),
         ]);
 
         setSettings(savedSettings);
@@ -202,6 +233,7 @@ export default function App() {
         );
         setSoundboardItems(hydratedSoundboard);
         setMarketplaceItems(savedMarketplace);
+        setTiktokAccount(savedTikTokAccount);
         const liveNow = tiktokLiveConnector.isConnected();
         setIntegrations(
           savedIntegrations.map((item) =>
@@ -209,6 +241,13 @@ export default function App() {
               ? {
                   ...item,
                   status: liveNow ? 'ACTIVE' : 'NOT_CONNECTED',
+                  connectedUser: liveNow
+                    ? tiktokLiveConnector.getStatus().username || savedTikTokAccount.username
+                    : savedTikTokAccount.isLinked
+                    ? savedTikTokAccount.username ||
+                      savedTikTokAccount.displayName ||
+                      savedTikTokAccount.openId
+                    : undefined,
                 }
               : item
           )
@@ -634,7 +673,12 @@ export default function App() {
         const next = prev.map((item) => {
           if (item.id !== 'tiktok') return item;
           const desiredStatus = trulyConnected ? 'ACTIVE' : 'NOT_CONNECTED';
-          const desiredUser = nextStatus.username || item.connectedUser;
+          const linkedLabel = tiktokAccountRef.current.isLinked
+            ? tiktokAccountRef.current.username ||
+              tiktokAccountRef.current.displayName ||
+              tiktokAccountRef.current.openId
+            : undefined;
+          const desiredUser = nextStatus.username || linkedLabel;
           if (item.status !== desiredStatus || item.connectedUser !== desiredUser) {
             changed = true;
             return {
@@ -656,20 +700,170 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Proses callback OAuth PKCE TikTok (deep link Android atau postMessage popup Web).
+  const processTikTokOAuthCallback = useCallback(async (callbackUrl: string) => {
+    setTiktokAccount((prev) => ({
+      ...prev,
+      accountLinkStatus: 'linking',
+      linkErrorMessage: undefined,
+    }));
+
+    const result = await handleTikTokAuthCallbackUrl(callbackUrl);
+    const current = tiktokAccountRef.current;
+
+    if (result.success) {
+      const nextAccount = await StorageService.saveTikTokAccount(
+        applyVerifiedProfileToAccountState(current, result.profile)
+      );
+      setTiktokAccount(nextAccount);
+
+      const nextSettings: AppSettings = {
+        ...settingsRef.current,
+        tiktokUsername: nextAccount.username || '',
+      };
+      setSettings(nextSettings);
+      await StorageService.saveSettings(nextSettings);
+      return;
+    }
+
+    const failedAccount = await StorageService.saveTikTokAccount({
+      ...current,
+      isLinked: false,
+      openId: undefined,
+      username: undefined,
+      displayName: undefined,
+      avatarUrl: undefined,
+      grantedScopes: undefined,
+      accountLinkStatus: 'failed',
+      linkErrorMessage: result.message,
+    });
+    setTiktokAccount(failedAccount);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const urlListenerPromise = CapApp.addListener('appUrlOpen', ({ url }) => {
+      if (disposed || !url) return;
+      if (url.includes('state=') && (url.includes('code=') || url.includes('error='))) {
+        void processTikTokOAuthCallback(url);
+      }
+    });
+
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (disposed) return;
+      const isAllowedOrigin =
+        event.origin === window.location.origin ||
+        event.origin.endsWith('.run.app') ||
+        event.origin.startsWith('http://localhost');
+      if (!isAllowedOrigin) return;
+      const payload = event.data as { type?: string; url?: string } | null;
+      if (payload?.type === 'TIKTOK_OAUTH_CALLBACK' && typeof payload.url === 'string') {
+        void processTikTokOAuthCallback(payload.url);
+      }
+    };
+    window.addEventListener('message', handleWindowMessage);
+
+    return () => {
+      disposed = true;
+      void urlListenerPromise.then((handle) => handle.remove()).catch(() => {});
+      window.removeEventListener('message', handleWindowMessage);
+    };
+  }, [processTikTokOAuthCallback]);
+
+  const handleLoginTikTok = async () => {
+    setTiktokAccount((prev) => ({
+      ...prev,
+      accountLinkStatus: 'linking',
+      linkErrorMessage: undefined,
+    }));
+
+    const startRes = await startTikTokOAuthLogin();
+    if (!startRes.started) {
+      const failedAccount = await StorageService.saveTikTokAccount({
+        ...tiktokAccountRef.current,
+        isLinked: false,
+        accountLinkStatus: 'failed',
+        linkErrorMessage: startRes.message,
+      });
+      setTiktokAccount(failedAccount);
+    }
+  };
+
+  const handleUnlinkTikTok = async () => {
+    await tiktokLiveConnector.disconnect();
+    const cleared = await StorageService.clearTikTokAccount();
+    setTiktokAccount(cleared);
+    setSettings((prev) => ({
+      ...prev,
+      tiktokUsername: '',
+      tiktokConnected: false,
+      eulerStreamApiKey: '',
+    }));
+    setIntegrations((prev) =>
+      prev.map((item) =>
+        item.id === 'tiktok'
+          ? { ...item, status: 'NOT_CONNECTED', connectedUser: undefined }
+          : item
+      )
+    );
+  };
+
+  const handleUpdateTikTokConnectionPrefs = async (prefs: {
+    connectionMethod: TikTokConnectionMethod;
+    fallbackEnabled: boolean;
+    eulerApiKey?: string;
+    clearEulerApiKey?: boolean;
+  }) => {
+    const savedAccount = await StorageService.saveTikTokAccount({
+      ...tiktokAccountRef.current,
+      connectionMethod: prefs.connectionMethod,
+      fallbackEnabled: prefs.fallbackEnabled,
+    });
+    setTiktokAccount(savedAccount);
+
+    const nextSettings: AppSettings = {
+      ...settingsRef.current,
+      tiktokConnectionMethod: prefs.connectionMethod,
+      tiktokEulerFallbackEnabled: prefs.fallbackEnabled,
+      ...(prefs.clearEulerApiKey
+        ? { eulerStreamApiKey: '' }
+        : prefs.eulerApiKey !== undefined
+        ? { eulerStreamApiKey: prefs.eulerApiKey }
+        : {}),
+    };
+    setSettings(nextSettings);
+    await StorageService.saveSettings(nextSettings);
+  };
+
   const handleConnectTikTok = async (
     username: string,
     eulerApiKey?: string,
-    allowEulerFallback?: boolean
+    allowEulerFallback?: boolean,
+    connectionMethod?: TikTokConnectionMethod
   ) => {
     await tiktokLiveConnector.connect({
       username,
       eulerApiKey: eulerApiKey ?? settings.eulerStreamApiKey,
-      allowEulerFallback: allowEulerFallback ?? settings.tiktokEulerFallbackEnabled ?? true,
+      allowEulerFallback:
+        allowEulerFallback ??
+        tiktokAccount.fallbackEnabled ??
+        settings.tiktokEulerFallbackEnabled ??
+        true,
+      connectionMethod:
+        connectionMethod ??
+        tiktokAccount.connectionMethod ??
+        settings.tiktokConnectionMethod ??
+        'direct',
     });
   };
 
   const handleDisconnectTikTok = async () => {
     await tiktokLiveConnector.disconnect();
+  };
+
+  const handleOpenTikTokConnection = () => {
+    setOpenTikTokSettingsNonce((n) => n + 1);
+    handleNavigate('integrations');
   };
 
   const mapSrItemToUnifiedQueueItem = (
@@ -1168,13 +1362,32 @@ export default function App() {
   useEffect(() => {
     if (!isNativeAndroidPlatform) return;
     let cancelled = false;
-    void isCompanionRunning()
-      .then((res) => {
-        if (!cancelled) setCompanionRunning(!!res?.isRunning);
-      })
-      .catch(() => {});
+    const syncNativeSessionState = () => {
+      void isCompanionRunning()
+        .then((res) => {
+          if (cancelled) return;
+          const running = !!res?.isRunning;
+          setCompanionRunning(running);
+          setModeASessionMode((prev) => {
+            if (!running) return 'inactive';
+            if (tiktokLiveConnector.isActiveSession()) return 'with_live_connector';
+            return prev === 'inactive' ? 'without_live_connection' : prev;
+          });
+        })
+        .catch(() => {});
+    };
+
+    syncNativeSessionState();
+
+    const appStateListener = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive || cancelled) return;
+      syncNativeSessionState();
+      void tiktokLiveConnector.syncFromNative();
+    });
+
     return () => {
       cancelled = true;
+      void appStateListener.then((handle) => handle.remove()).catch(() => {});
     };
   }, [isNativeAndroidPlatform]);
 
@@ -1208,11 +1421,81 @@ export default function App() {
     void handleUpdateSettings(next);
   };
 
+  const maybeShowNativeFloatingHud = async () => {
+    if (!isNativeAndroidPlatform || settingsRef.current.hudEnabled === false) return;
+    const perm = await checkOverlayPermission();
+    if (!perm.granted) return;
+    await showFloatingHud({
+      sizeDp: settingsRef.current.hudButtonSize ?? 48,
+      opacity: settingsRef.current.hudOpacity ?? 92,
+      position: settingsRef.current.hudPosition === 'left' ? 'left' : 'right',
+    });
+  };
+
+  // Kondisi C: Sambungkan & mulai (Mode A dengan konektor TikTok LIVE).
+  const handleStartModeAWithConnection = async () => {
+    if (isNativeAndroidPlatform) {
+      const res = await startCompanion();
+      setCompanionRunning(!!res?.isRunning);
+      if (res?.isRunning) {
+        setModeASessionMode('with_live_connector');
+        await maybeShowNativeFloatingHud();
+      }
+    } else {
+      setModeASessionMode('with_live_connector');
+    }
+
+    const acct = tiktokAccountRef.current;
+    const activeSettings = settingsRef.current;
+    await tiktokLiveConnector.connect({
+      username: acct.username || '',
+      connectionMethod: acct.connectionMethod ?? activeSettings.tiktokConnectionMethod ?? 'direct',
+      eulerApiKey: activeSettings.eulerStreamApiKey,
+      allowEulerFallback: acct.fallbackEnabled ?? activeSettings.tiktokEulerFallbackEnabled ?? true,
+    });
+  };
+
+  // Kondisi D: Mulai tanpa koneksi (overlay/companion tetap aktif tanpa memanggil konektor/WebSocket TikTok).
+  const handleStartModeAWithoutConnection = async () => {
+    if (tiktokLiveConnector.isActiveSession() || tiktokLiveConnector.isConnected()) {
+      await tiktokLiveConnector.disconnect();
+    }
+
+    if (isNativeAndroidPlatform) {
+      const res = await startCompanion();
+      setCompanionRunning(!!res?.isRunning);
+      setModeASessionMode(res?.isRunning ? 'without_live_connection' : 'inactive');
+      if (res?.isRunning) {
+        await maybeShowNativeFloatingHud();
+      }
+    } else {
+      setModeASessionMode('without_live_connection');
+    }
+  };
+
+  const handleStopModeASession = async () => {
+    await tiktokLiveConnector.disconnect();
+    await hideFloatingHud();
+    const res = await stopCompanion();
+    setCompanionRunning(!!res?.isRunning);
+    setModeASessionMode('inactive');
+  };
+
   const handleToggleCompanion = async () => {
     try {
-      const res = companionRunning ? await stopCompanion() : await startCompanion();
+      if (companionRunning) {
+        await handleStopModeASession();
+        return;
+      }
+      const res = await startCompanion();
       setCompanionRunning(!!res?.isRunning);
-      if (!res?.success && res?.message) console.warn(res.message);
+      if (res?.isRunning) {
+        setModeASessionMode(
+          tiktokLiveConnector.isActiveSession() ? 'with_live_connector' : 'without_live_connection'
+        );
+      } else if (res?.message) {
+        console.warn(res.message);
+      }
     } catch (err) {
       console.warn('Gagal mengubah status Companion Service:', err);
     }
@@ -1283,8 +1566,11 @@ export default function App() {
         if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
       });
       previousSoundboardUrls.current.clear();
+      await tiktokLiveConnector.disconnect();
       await StorageService.resetToDefaults();
       setSettings(DEFAULT_SETTINGS);
+      setTiktokAccount(DEFAULT_TIKTOK_ACCOUNT_STATE);
+      setModeASessionMode('inactive');
       setPresets(DEFAULT_PRESETS);
       setActivePresetId(DEFAULT_PRESETS[0].id);
       setStudioElements(DEFAULT_STUDIO_ELEMENTS);
@@ -1514,7 +1800,14 @@ export default function App() {
     (panel: HudPanelId): HudStateModel => {
       const chatEvents = hudChatPaused ? hudPausedSnapshot ?? hudEvents : hudEvents;
       if (panel === 'chat') {
-        return buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread, tiktokStatus.state);
+        return buildChatModel(
+          chatEvents,
+          hudChatTab,
+          hudChatPaused,
+          hudUnread,
+          tiktokStatus.state,
+          modeASessionMode
+        );
       }
       if (panel === 'soundboard') {
         return buildSoundboardModel(
@@ -1549,7 +1842,8 @@ export default function App() {
             .slice(0, 6)
             .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
           requestSourceConnected:
-            isLiveTransportConnected || hudEventSourceStatus(hudEvents, tiktokStatus.state).tone === 'ok',
+            isLiveTransportConnected ||
+            hudEventSourceStatus(hudEvents, tiktokStatus.state, modeASessionMode).tone === 'ok',
           playbackStatus: srState.currentTrack ? srState.playbackStatus : undefined,
           errorMessage: srState.lastError,
         });
@@ -1568,6 +1862,7 @@ export default function App() {
       hudChatTab,
       hudUnread,
       tiktokStatus.state,
+      modeASessionMode,
       soundboardItems,
       hudPlayingSoundId,
       soundboardVolumeUnit,
@@ -1644,6 +1939,32 @@ export default function App() {
   }
 
   const pendingRequestsCount = combinedUnifiedQueue.filter((s) => s.status === 'pending' || s.status === 'approved').length;
+  const modeAHonestStatus = buildModeAHonestStatus({
+    account: tiktokAccount,
+    connector: tiktokStatus,
+    companionRunning,
+    sessionMode: modeASessionMode,
+  });
+
+  const headerStatusLabel = isModeAOperatingMode(settings.operatingMode)
+    ? companionRunning || modeASessionMode !== 'inactive'
+      ? `${modeAHonestStatus.modeASession.label} • ${modeAHonestStatus.eventTransport.label}`
+      : modeAHonestStatus.accountLinked.tone === 'ok'
+      ? `Akun: ${modeAHonestStatus.accountLinked.label} • Sesi Nonaktif`
+      : 'Sesi Mode A Nonaktif'
+    : 'Mode B Standby';
+
+  const headerStatusTone: 'ok' | 'warn' | 'error' | 'off' = isModeAOperatingMode(
+    settings.operatingMode
+  )
+    ? modeAHonestStatus.eventTransport.tone === 'ok'
+      ? 'ok'
+      : modeAHonestStatus.eventTransport.tone === 'error'
+      ? 'error'
+      : companionRunning || modeASessionMode !== 'inactive'
+      ? 'warn'
+      : 'off'
+    : 'off';
 
   return (
     <I18nProvider language={settings.language || 'id-ID'}>
@@ -1653,6 +1974,8 @@ export default function App() {
         activeNav={activeNav}
         operatingMode={settings.operatingMode}
         activePreset={activePreset}
+        honestStatusLabel={headerStatusLabel}
+        honestStatusTone={headerStatusTone}
         onNavigate={handleNavigate}
         onOpenModeModal={() => setIsModeModalOpen(true)}
         onOpenDrawer={() => setIsDrawerOpen(true)}
@@ -1689,6 +2012,14 @@ export default function App() {
             settings={settings}
             activePreset={activePreset}
             integrations={integrations}
+            tiktokAccount={tiktokAccount}
+            tiktokStatus={tiktokStatus}
+            companionRunning={companionRunning}
+            modeASessionMode={modeASessionMode}
+            onStartModeAWithConnection={handleStartModeAWithConnection}
+            onStartModeAWithoutConnection={handleStartModeAWithoutConnection}
+            onStopModeASession={handleStopModeASession}
+            onOpenTikTokConnection={handleOpenTikTokConnection}
             onSelectMode={handleSelectMode}
             onNavigate={handleNavigate}
             onOpenModeModal={() => setIsModeModalOpen(true)}
@@ -1790,6 +2121,13 @@ export default function App() {
             settings={settings}
             onUpdateSettings={handleUpdateSettings}
             tiktokStatus={tiktokStatus}
+            tiktokAccount={tiktokAccount}
+            companionRunning={companionRunning}
+            modeASessionMode={modeASessionMode}
+            openTikTokSettingsNonce={openTikTokSettingsNonce}
+            onLoginTikTok={handleLoginTikTok}
+            onUnlinkTikTok={handleUnlinkTikTok}
+            onUpdateTikTokConnectionPrefs={handleUpdateTikTokConnectionPrefs}
             onConnectTikTok={handleConnectTikTok}
             onDisconnectTikTok={handleDisconnectTikTok}
           />

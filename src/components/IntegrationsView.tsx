@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AppSettings,
   IntegrationProvider,
   IntegrationProviderId,
+  ModeASessionMode,
+  TikTokAccountState,
+  TikTokConnectionMethod,
   TikTokConnectorStatus,
 } from '../types';
 import {
@@ -10,19 +13,29 @@ import {
   FeatureStatus,
 } from '../theme/designSystem';
 import {
-  Share2,
+  buildModeAHonestStatus,
+} from '../services/tiktokLiveConnector';
+import {
+  getTikTokAuthConfiguration,
+  isScopeGrantingUsername,
+  maskApiKeyPreview,
+} from '../services/tiktokAuthService';
+import {
   Check,
-  AlertCircle,
-  ExternalLink,
   Settings,
   X,
-  Radio,
   Lock,
   Search,
   Zap,
-  Globe,
-  DollarSign,
-  Tv,
+  ArrowLeft,
+  ShieldCheck,
+  AlertTriangle,
+  LogIn,
+  Unlink,
+  Radio,
+  UserCheck,
+  Loader2,
+  Trash2,
 } from 'lucide-react';
 
 interface IntegrationsViewProps {
@@ -31,31 +44,57 @@ interface IntegrationsViewProps {
   settings?: AppSettings;
   onUpdateSettings?: (settings: AppSettings) => Promise<boolean> | void;
   tiktokStatus?: TikTokConnectorStatus;
-  onConnectTikTok?: (username: string, eulerApiKey?: string, allowEulerFallback?: boolean) => Promise<void> | void;
+  tiktokAccount?: TikTokAccountState;
+  companionRunning?: boolean;
+  modeASessionMode?: ModeASessionMode;
+  openTikTokSettingsNonce?: number;
+  onLoginTikTok?: () => Promise<void> | void;
+  onUnlinkTikTok?: () => Promise<void> | void;
+  onUpdateTikTokConnectionPrefs?: (prefs: {
+    connectionMethod: TikTokConnectionMethod;
+    fallbackEnabled: boolean;
+    eulerApiKey?: string;
+    clearEulerApiKey?: boolean;
+  }) => Promise<void> | void;
+  onConnectTikTok?: (
+    username: string,
+    eulerApiKey?: string,
+    allowEulerFallback?: boolean,
+    connectionMethod?: TikTokConnectionMethod
+  ) => Promise<void> | void;
   onDisconnectTikTok?: () => Promise<void> | void;
 }
 
-function formatTikTokStateLabel(status?: TikTokConnectorStatus): string {
-  if (!status) return 'Terputus';
-  switch (status.state) {
-    case 'resolving_room':
-      return 'Mencari Room';
-    case 'connecting_direct':
-      return 'Koneksi Direct WS...';
-    case 'connected_direct':
-      return 'Terhubung (Direct WS)';
-    case 'connecting_euler':
-      return 'Fallback EulerStream...';
-    case 'connected_euler':
-      return 'Terhubung (EulerStream)';
-    case 'reconnecting':
-      return 'Menyambung Ulang...';
-    case 'waiting_for_live':
-      return 'Menunggu LIVE';
+const DEFAULT_ACCOUNT: TikTokAccountState = {
+  isLinked: false,
+  connectionMethod: 'direct',
+  fallbackEnabled: true,
+  accountLinkStatus: 'unlinked',
+};
+
+const DEFAULT_STATUS: TikTokConnectorStatus = {
+  state: 'disconnected',
+  transport: 'none',
+  connectionMethod: 'direct',
+  roomStatus: 'unknown',
+  username: '',
+  roomId: '',
+  viewerCount: 0,
+  totalLikeCount: 0,
+  message: 'Belum terhubung ke TikTok LIVE.',
+  updatedAt: 0,
+};
+
+function toneBadgeClasses(tone: 'ok' | 'warn' | 'error' | 'off'): string {
+  switch (tone) {
+    case 'ok':
+      return 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60';
+    case 'warn':
+      return 'bg-amber-950/70 text-amber-300 border-amber-700/60';
     case 'error':
-      return 'Koneksi Gagal';
+      return 'bg-rose-950/70 text-rose-300 border-rose-700/60';
     default:
-      return 'Terputus';
+      return 'bg-slate-900/90 text-slate-300 border-slate-700';
   }
 }
 
@@ -63,22 +102,53 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   integrations,
   onUpdateIntegrations,
   settings,
-  onUpdateSettings,
-  tiktokStatus,
+  tiktokStatus = DEFAULT_STATUS,
+  tiktokAccount = DEFAULT_ACCOUNT,
+  companionRunning = false,
+  modeASessionMode = 'inactive',
+  openTikTokSettingsNonce = 0,
+  onLoginTikTok,
+  onUnlinkTikTok,
+  onUpdateTikTokConnectionPrefs,
   onConnectTikTok,
   onDisconnectTikTok,
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'companion' | 'streaming' | 'donation'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isTikTokSettingsOpen, setIsTikTokSettingsOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<IntegrationProvider | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
-  const [eulerFallbackChecked, setEulerFallbackChecked] = useState<boolean>(true);
+  const [eulerApiKeyDraft, setEulerApiKeyDraft] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (openTikTokSettingsNonce > 0) {
+      setIsTikTokSettingsOpen(true);
+    }
+  }, [openTikTokSettingsNonce]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3200);
   };
+
+  const honestStatus = buildModeAHonestStatus({
+    account: tiktokAccount,
+    connector: tiktokStatus,
+    companionRunning,
+    sessionMode: modeASessionMode,
+  });
+
+  const authConfig = getTikTokAuthConfiguration();
+  const savedEulerKeyMask = maskApiKeyPreview(settings?.eulerStreamApiKey);
+
+  const isTransportActiveOrBusy =
+    tiktokStatus.state === 'connected_direct' ||
+    tiktokStatus.state === 'connected_euler' ||
+    tiktokStatus.state === 'resolving_room' ||
+    tiktokStatus.state === 'connecting_direct' ||
+    tiktokStatus.state === 'connecting_euler' ||
+    tiktokStatus.state === 'reconnecting';
 
   const filteredIntegrations = integrations.filter((item) => {
     if (activeTab !== 'all' && item.category !== activeTab) return false;
@@ -93,15 +163,12 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   });
 
   const handleOpenConfig = (provider: IntegrationProvider) => {
-    setEditingProvider(provider);
     if (provider.id === 'tiktok') {
-      setInputValues({
-        username: settings?.tiktokUsername || provider.connectedUser || '',
-        key: settings?.eulerStreamApiKey || '',
-      });
-      setEulerFallbackChecked(settings?.tiktokEulerFallbackEnabled ?? true);
+      setEulerApiKeyDraft('');
+      setIsTikTokSettingsOpen(true);
       return;
     }
+    setEditingProvider(provider);
     setInputValues({
       username: provider.connectedUser || '',
       key: '',
@@ -110,34 +177,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
 
   const handleToggleConnection = (providerId: IntegrationProviderId) => {
     if (providerId === 'tiktok') {
-      const isLiveConnected =
-        tiktokStatus?.state === 'connected_direct' ||
-        tiktokStatus?.state === 'connected_euler' ||
-        tiktokStatus?.state === 'resolving_room' ||
-        tiktokStatus?.state === 'connecting_direct' ||
-        tiktokStatus?.state === 'connecting_euler' ||
-        tiktokStatus?.state === 'reconnecting';
-
-      if (isLiveConnected) {
-        void onDisconnectTikTok?.();
-        showToast('Memutuskan koneksi TikTok LIVE...');
-        return;
-      }
-
-      const provider = integrations.find((i) => i.id === 'tiktok');
-      const targetUser = (settings?.tiktokUsername || provider?.connectedUser || '').trim();
-      if (!targetUser) {
-        if (provider) handleOpenConfig(provider);
-        showToast('Masukkan username TikTok terlebih dahulu.');
-        return;
-      }
-
-      void onConnectTikTok?.(
-        targetUser,
-        settings?.eulerStreamApiKey,
-        settings?.tiktokEulerFallbackEnabled ?? true
-      );
-      showToast(`Memulai koneksi TikTok LIVE @${targetUser.replace(/^@+/, '')}...`);
+      setEulerApiKeyDraft('');
+      setIsTikTokSettingsOpen(true);
       return;
     }
 
@@ -163,41 +204,6 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
     e.preventDefault();
     if (!editingProvider) return;
 
-    if (editingProvider.id === 'tiktok') {
-      const cleanUser = (inputValues.username || '').trim().replace(/^@+/, '');
-      const cleanKey = (inputValues.key || '').trim();
-      if (settings && onUpdateSettings) {
-        void onUpdateSettings({
-          ...settings,
-          tiktokUsername: cleanUser,
-          eulerStreamApiKey: cleanKey,
-          tiktokEulerFallbackEnabled: eulerFallbackChecked,
-        });
-      }
-      const updated = integrations.map((item) =>
-        item.id === 'tiktok'
-          ? {
-              ...item,
-              connectedUser: cleanUser || undefined,
-              status:
-                tiktokStatus?.state === 'connected_direct' || tiktokStatus?.state === 'connected_euler'
-                  ? ('ACTIVE' as FeatureStatus)
-                  : ('NOT_CONNECTED' as FeatureStatus),
-            }
-          : item
-      );
-      onUpdateIntegrations(updated);
-      setEditingProvider(null);
-      if (cleanUser) {
-        void onConnectTikTok?.(cleanUser, cleanKey, eulerFallbackChecked);
-        showToast(`Menyambungkan ke TikTok LIVE @${cleanUser}...`);
-      } else {
-        void onDisconnectTikTok?.();
-        showToast('Username TikTok dikosongkan.');
-      }
-      return;
-    }
-
     const username = inputValues.username?.trim();
     const updated = integrations.map((item) => {
       if (item.id === editingProvider.id) {
@@ -214,6 +220,446 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
     setEditingProvider(null);
     showToast(`Konfigurasi ${editingProvider.name} tersimpan!`);
   };
+
+  const handleSaveConnectionPrefs = async (next: {
+    connectionMethod?: TikTokConnectionMethod;
+    fallbackEnabled?: boolean;
+    saveKey?: boolean;
+    clearKey?: boolean;
+  }) => {
+    const method = next.connectionMethod ?? tiktokAccount.connectionMethod;
+    const fallback = next.fallbackEnabled ?? tiktokAccount.fallbackEnabled;
+
+    await onUpdateTikTokConnectionPrefs?.({
+      connectionMethod: method,
+      fallbackEnabled: fallback,
+      eulerApiKey: next.saveKey ? eulerApiKeyDraft.trim() : undefined,
+      clearEulerApiKey: next.clearKey,
+    });
+
+    if (next.saveKey) {
+      setEulerApiKeyDraft('');
+      showToast('EulerStream API Key disimpan secara lokal (tidak masuk backup).');
+    } else if (next.clearKey) {
+      setEulerApiKeyDraft('');
+      showToast('EulerStream API Key dihapus.');
+    } else {
+      showToast('Preferensi metode koneksi TikTok disimpan.');
+    }
+  };
+
+  if (isTikTokSettingsOpen) {
+    const hasProfileUsername =
+      tiktokAccount.isLinked &&
+      Boolean(tiktokAccount.username) &&
+      (!tiktokAccount.grantedScopes || isScopeGrantingUsername(tiktokAccount.grantedScopes));
+
+    return (
+      <div className="space-y-5 pb-20">
+        {toastMessage && (
+          <div className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-[#1E3A8A] border border-[#38BDF8] text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center space-x-2 text-sm font-medium">
+            <Check className="w-4 h-4 text-[#38BDF8]" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        {/* Breadcrumb: Koneksi -> TikTok -> Atur */}
+        <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-4 sm:p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setIsTikTokSettingsOpen(false)}
+              className="px-3 py-2 rounded-xl bg-[#080c16] border border-slate-800 hover:border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-400" />
+              <span>Kembali ke Koneksi</span>
+            </button>
+            <div className="text-[11px] font-mono text-slate-400">
+              Koneksi <span className="text-slate-600">→</span> TikTok{' '}
+              <span className="text-slate-600">→</span>{' '}
+              <span className="text-blue-400 font-bold">Atur</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                <span>🎵</span>
+                <span>Pengaturan Koneksi TikTok</span>
+              </h1>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Hubungkan akun TikTok secara sah melalui Login Kit / OAuth PKCE dan pilih metode transport event LIVE.
+              </p>
+            </div>
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-bold border self-start sm:self-auto ${toneBadgeClasses(
+                honestStatus.accountLinked.tone
+              )}`}
+            >
+              Status Akun: {honestStatus.accountLinked.label}
+            </span>
+          </div>
+        </div>
+
+        {/* Bagian 1: Autentikasi & Profil Akun TikTok */}
+        <section className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-blue-400" />
+                <span>Autentikasi Akun TikTok</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Menggunakan alur resmi TikTok OAuth 2.0 + PKCE (S256). SYNTXRR tidak pernah meminta password atau mengambil cookie sesi pribadi Anda.
+              </p>
+            </div>
+          </div>
+
+          {/* Error login terpisah dari error transport */}
+          {tiktokAccount.accountLinkStatus === 'failed' && tiktokAccount.linkErrorMessage && (
+            <div className="p-3.5 rounded-xl bg-rose-950/50 border border-rose-700/60 text-xs text-rose-200 space-y-2">
+              <div className="flex items-start gap-2 font-bold text-rose-300">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>Autentikasi / Penghubungan Akun Gagal</span>
+              </div>
+              <p className="leading-relaxed text-rose-100">{tiktokAccount.linkErrorMessage}</p>
+            </div>
+          )}
+
+          {tiktokAccount.isLinked && tiktokAccount.accountLinkStatus === 'linked' ? (
+            <div className="p-4 rounded-xl bg-[#080c16] border border-emerald-700/40 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  {tiktokAccount.avatarUrl ? (
+                    <img
+                      src={tiktokAccount.avatarUrl}
+                      alt={tiktokAccount.displayName || tiktokAccount.username || 'Avatar TikTok'}
+                      className="w-11 h-11 rounded-full object-cover border border-emerald-500/40"
+                    />
+                  ) : (
+                    <div className="w-11 h-11 rounded-full bg-emerald-950/80 border border-emerald-600/50 flex items-center justify-center text-emerald-300">
+                      <UserCheck className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div>
+                    <div className="text-sm font-bold text-white">
+                      {tiktokAccount.displayName ||
+                        (tiktokAccount.username ? `@${tiktokAccount.username}` : 'Akun TikTok Terhubung')}
+                    </div>
+                    <div className="text-xs text-slate-300 font-mono">
+                      {hasProfileUsername
+                        ? `@${tiktokAccount.username}`
+                        : 'Username belum tersedia (memerlukan scope user.info.profile)'}
+                    </div>
+                    {tiktokAccount.openId && (
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        OpenID: {tiktokAccount.openId}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onUnlinkTikTok?.();
+                    showToast('Akun TikTok dan kredensial sesi telah diputuskan.');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-rose-950/70 hover:bg-rose-900/80 border border-rose-700/70 text-rose-200 text-xs font-bold flex items-center justify-center gap-1.5 self-start sm:self-auto"
+                >
+                  <Unlink className="w-3.5 h-3.5" />
+                  <span>Putuskan akun</span>
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-400">
+                <div>
+                  Otorisasi terakhir:{' '}
+                  <span className="text-slate-200 font-mono">
+                    {tiktokAccount.lastSuccessfulAuthorization
+                      ? new Date(tiktokAccount.lastSuccessfulAuthorization).toLocaleString('id-ID')
+                      : '-'}
+                  </span>
+                </div>
+                <div>
+                  Scope disetujui:{' '}
+                  <span className="text-slate-200 font-mono">
+                    {tiktokAccount.grantedScopes && tiktokAccount.grantedScopes.length > 0
+                      ? tiktokAccount.grantedScopes.join(', ')
+                      : 'Terverifikasi'}
+                  </span>
+                </div>
+              </div>
+
+              {!hasProfileUsername && (
+                <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-200">
+                  Scope <code>user.info.basic</code> tidak otomatis memberikan <code>username</code>. Pastikan scope{' '}
+                  <code>user.info.profile</code> disetujui di aplikasi developer TikTok agar username dapat dipakai untuk resolusi room LIVE.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-4 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="text-xs font-bold text-white">Akun TikTok belum dihubungkan</div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Masuk melalui otorisasi resmi TikTok agar SYNTXRR menerima identitas akun yang terverifikasi. Pengisian username manual tidak digunakan untuk menggantikan login.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={tiktokAccount.accountLinkStatus === 'linking'}
+                  onClick={() => void onLoginTikTok?.()}
+                  className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-60 text-white text-xs font-bold flex items-center justify-center gap-2 shrink-0 shadow-lg shadow-blue-600/25"
+                >
+                  {tiktokAccount.accountLinkStatus === 'linking' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <LogIn className="w-4 h-4" />
+                  )}
+                  <span>
+                    {tiktokAccount.accountLinkStatus === 'linking'
+                      ? 'Menghubungkan...'
+                      : 'Login dengan TikTok'}
+                  </span>
+                </button>
+              </div>
+
+              {!authConfig.isWebOAuthReady && (
+                <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-800/50 text-[11px] text-amber-200 space-y-1.5">
+                  <div className="font-bold text-amber-300">Konfigurasi Developer yang Masih Diperlukan:</div>
+                  <ul className="list-disc pl-4 space-y-1 text-slate-300">
+                    {authConfig.missingRequirements.map((req, idx) => (
+                      <li key={idx}>{req}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Bagian 2: Pilihan Metode Koneksi LIVE */}
+        <section className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-4">
+          <div>
+            <h2 className="text-sm sm:text-base font-bold text-white">Metode Koneksi LIVE</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Pilih jalur transport event LIVE yang digunakan setelah akun terhubung.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Metode A: Langsung ke TikTok */}
+            <div
+              onClick={() => void handleSaveConnectionPrefs({ connectionMethod: 'direct' })}
+              className={`p-4 rounded-xl border cursor-pointer transition-all space-y-2 ${
+                tiktokAccount.connectionMethod === 'direct'
+                  ? 'bg-blue-950/35 border-blue-500 ring-1 ring-blue-500'
+                  : 'bg-[#080c16] border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">A. Langsung ke TikTok (Utama)</span>
+                <span
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                    tiktokAccount.connectionMethod === 'direct'
+                      ? 'border-blue-400 bg-blue-500'
+                      : 'border-slate-600'
+                  }`}
+                >
+                  {tiktokAccount.connectionMethod === 'direct' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                  )}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Menggunakan <code>TikTokRoomResolver</code> dan <code>TikTokWebSocketTransport</code> langsung dari perangkat Android. API Key EulerStream bersifat opsional.
+              </p>
+              <label
+                onClick={(e) => e.stopPropagation()}
+                className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px] text-slate-300 cursor-pointer"
+              >
+                <span>Fallback ke EulerStream jika koneksi langsung ditolak</span>
+                <input
+                  type="checkbox"
+                  checked={tiktokAccount.fallbackEnabled}
+                  onChange={(e) =>
+                    void handleSaveConnectionPrefs({ fallbackEnabled: e.target.checked })
+                  }
+                  className="rounded text-[#2563EB] focus:ring-0"
+                />
+              </label>
+            </div>
+
+            {/* Metode B: EulerStream */}
+            <div
+              onClick={() => void handleSaveConnectionPrefs({ connectionMethod: 'euler' })}
+              className={`p-4 rounded-xl border cursor-pointer transition-all space-y-2 ${
+                tiktokAccount.connectionMethod === 'euler'
+                  ? 'bg-blue-950/35 border-blue-500 ring-1 ring-blue-500'
+                  : 'bg-[#080c16] border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">B. EulerStream</span>
+                <span
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                    tiktokAccount.connectionMethod === 'euler'
+                      ? 'border-blue-400 bg-blue-500'
+                      : 'border-slate-600'
+                  }`}
+                >
+                  {tiktokAccount.connectionMethod === 'euler' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                  )}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Menggunakan <code>EulerStreamTransport</code> secara langsung setelah resolusi room. Memakai API Key EulerStream yang Anda isi sendiri.
+              </p>
+            </div>
+          </div>
+
+          {/* API Key EulerStream (Masked & Aman) */}
+          <div className="p-4 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-blue-400" />
+                  <span>
+                    API Key EulerStream{' '}
+                    {tiktokAccount.connectionMethod === 'direct' ? '(Opsional untuk Fallback)' : '(Untuk Metode EulerStream)'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Disimpan aman di perangkat, tidak ditampilkan utuh, tidak dicatat ke log, dan tidak disertakan dalam ekspor/cadangan.
+                </div>
+              </div>
+              <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 self-start sm:self-auto">
+                {savedEulerKeyMask ? `Tersimpan (${savedEulerKeyMask})` : 'Belum diisi'}
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="password"
+                value={eulerApiKeyDraft}
+                onChange={(e) => setEulerApiKeyDraft(e.target.value)}
+                autoComplete="off"
+                placeholder={
+                  savedEulerKeyMask
+                    ? 'Masukkan API Key baru untuk mengganti...'
+                    : 'Masukkan EulerStream API Key Anda...'
+                }
+                className="flex-1 bg-[#0e172a] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+              />
+              <button
+                type="button"
+                disabled={!eulerApiKeyDraft.trim()}
+                onClick={() => void handleSaveConnectionPrefs({ saveKey: true })}
+                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold"
+              >
+                Simpan Key
+              </button>
+              {savedEulerKeyMask && (
+                <button
+                  type="button"
+                  onClick={() => void handleSaveConnectionPrefs({ clearKey: true })}
+                  className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/60 text-rose-200 text-xs font-semibold flex items-center justify-center gap-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Bagian 3: Status 4-Lapis yang Jujur & Kontrol Transport LIVE */}
+        <section className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <Radio className="w-4 h-4 text-blue-400" />
+                <span>Status Sesi & Transport LIVE (Terpisah dari Account Linked)</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Memutus transport LIVE hanya menghentikan koneksi siaran dan tidak memutus tautan akun TikTok Anda.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">1. Account Linked</div>
+              <div className="font-bold text-white mt-1">{honestStatus.accountLinked.label}</div>
+              <div className="text-[11px] text-slate-400 truncate mt-0.5">{honestStatus.accountLinked.detail}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">2. Mode A Session</div>
+              <div className="font-bold text-white mt-1">{honestStatus.modeASession.label}</div>
+              <div className="text-[11px] text-slate-400 truncate mt-0.5">{honestStatus.modeASession.detail}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">3. Room Status</div>
+              <div className="font-bold text-white mt-1">{honestStatus.roomStatus.label}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                Metode: {tiktokAccount.connectionMethod === 'euler' ? 'EulerStream' : 'Direct TikTok'}
+              </div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">4. Event Transport</div>
+              <div className="font-bold text-white mt-1">{honestStatus.eventTransport.label}</div>
+              <div className="text-[11px] text-slate-400 truncate mt-0.5">{honestStatus.eventTransport.detail}</div>
+            </div>
+          </div>
+
+          {tiktokStatus.state === 'error' && (
+            <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-700/50 text-xs text-rose-200">
+              <span className="font-bold">Kesalahan Transport LIVE: </span>
+              <span>{tiktokStatus.message}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            {isTransportActiveOrBusy || tiktokStatus.state === 'waiting_for_live' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void onDisconnectTikTok?.();
+                  showToast('Transport LIVE diputuskan (akun tetap terhubung).');
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-600/60 text-rose-200 text-xs font-bold"
+              >
+                Putuskan Transport LIVE
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!hasProfileUsername}
+                onClick={() => {
+                  if (!tiktokAccount.username) return;
+                  void onConnectTikTok?.(
+                    tiktokAccount.username,
+                    settings?.eulerStreamApiKey,
+                    tiktokAccount.fallbackEnabled,
+                    tiktokAccount.connectionMethod
+                  );
+                  showToast(`Memulai koneksi transport LIVE @${tiktokAccount.username}...`);
+                }}
+                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold"
+              >
+                {hasProfileUsername
+                  ? 'Sambungkan Transport LIVE'
+                  : 'Login Akun dengan Username Terverifikasi Dahulu'}
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-20">
@@ -235,14 +681,14 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                 Pusat Koneksi Eksternal
               </span>
               <span className="text-xs text-slate-400">
-                12 Platform Streaming & Donasi
+                {integrations.length} Platform Streaming & Donasi
               </span>
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">
               Integrasi Platform & Layanan Siaran
             </h1>
             <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Hubungkan akun streaming dan portal donasi Indonesia (Saweria, Sociabuzz, Trakteer, TikTok LIVE, YouTube, Twitch) untuk sinkronisasi alert dan interaksi penonton.
+              Hubungkan akun TikTok secara sah untuk Mode A dan layanan portal donasi atau platform lain untuk sinkronisasi alert dan interaksi penonton.
             </p>
           </div>
 
@@ -272,7 +718,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Semua (12)
+              Semua ({integrations.length})
             </button>
             <button
               onClick={() => setActiveTab('companion')}
@@ -323,26 +769,87 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredIntegrations.map((provider) => {
           const isTikTok = provider.id === 'tiktok';
-          const isTikTokTrulyConnected =
-            isTikTok &&
-            (tiktokStatus?.state === 'connected_direct' || tiktokStatus?.state === 'connected_euler');
-          const isTikTokBusy =
-            isTikTok &&
-            (tiktokStatus?.state === 'resolving_room' ||
-              tiktokStatus?.state === 'connecting_direct' ||
-              tiktokStatus?.state === 'connecting_euler' ||
-              tiktokStatus?.state === 'reconnecting');
 
-          const effectiveStatus: FeatureStatus = isTikTok
-            ? isTikTokTrulyConnected
-              ? 'ACTIVE'
-              : 'NOT_CONNECTED'
-            : provider.status;
+          if (isTikTok) {
+            return (
+              <div
+                key={provider.id}
+                className={`bg-[#0e172a] border rounded-2xl p-5 flex flex-col justify-between transition shadow-lg ${
+                  tiktokAccount.isLinked
+                    ? 'border-emerald-500/40 shadow-emerald-950/20'
+                    : 'border-[#1e293b] hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-2xl p-2 rounded-xl bg-[#080c16] border border-[#1e293b]">
+                        {provider.logo}
+                      </span>
+                      <div>
+                        <h3 className="text-base font-bold text-white leading-snug">
+                          {provider.name}
+                        </h3>
+                        <span className="text-[11px] text-slate-400 uppercase tracking-wider font-mono">
+                          {provider.category}
+                        </span>
+                      </div>
+                    </div>
+
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold border ${toneBadgeClasses(
+                        honestStatus.accountLinked.tone
+                      )}`}
+                    >
+                      Akun: {honestStatus.accountLinked.label}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-300 leading-relaxed mt-2 mb-4">
+                    {provider.description}
+                  </p>
+
+                  <div className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] text-[11px] space-y-1.5 mb-3">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Akun Terhubung:</span>
+                      <span className="font-mono text-slate-200 truncate max-w-[150px]">
+                        {tiktokAccount.isLinked ? honestStatus.accountLinked.detail : 'Belum terhubung'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Metode Koneksi:</span>
+                      <span className="font-mono text-slate-200">
+                        {tiktokAccount.connectionMethod === 'euler' ? 'EulerStream' : 'Langsung ke TikTok'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Room Status:</span>
+                      <span className="font-mono text-slate-200">{honestStatus.roomStatus.label}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Event Transport:</span>
+                      <span className="font-mono text-slate-200">{honestStatus.eventTransport.label}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-[#1e293b] flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenConfig(provider)}
+                    className="flex-1 px-3 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold flex items-center justify-center space-x-1.5 transition shadow shadow-blue-600/25"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Atur</span>
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          const effectiveStatus: FeatureStatus = provider.status;
           const statusConfig = STATUS_DEFINITIONS[effectiveStatus];
-          const isConnected = isTikTok ? (isTikTokTrulyConnected || isTikTokBusy) : effectiveStatus === 'ACTIVE';
-          const displayUser = isTikTok
-            ? (settings?.tiktokUsername || provider.connectedUser || '').replace(/^@+/, '')
-            : provider.connectedUser;
+          const isConnected = effectiveStatus === 'ACTIVE';
 
           return (
             <div
@@ -377,9 +884,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                       color: statusConfig.color,
                     }}
                   >
-                    {isTikTok && tiktokStatus && tiktokStatus.state !== 'disconnected'
-                      ? formatTikTokStateLabel(tiktokStatus)
-                      : statusConfig.label}
+                    {statusConfig.label}
                   </span>
                 </div>
 
@@ -387,56 +892,16 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                   {provider.description}
                 </p>
 
-                {displayUser && (
+                {provider.connectedUser && (
                   <div className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] text-xs flex items-center justify-between mb-3">
-                    <span className="text-slate-400">
-                      {isTikTok ? 'Target Channel:' : 'Akun Terhubung:'}
-                    </span>
+                    <span className="text-slate-400">Akun Terhubung:</span>
                     <span
                       className={`font-semibold font-mono ${
                         effectiveStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-slate-200'
                       }`}
                     >
-                      @{displayUser}
+                      @{provider.connectedUser}
                     </span>
-                  </div>
-                )}
-
-                {isTikTok && tiktokStatus && (
-                  <div className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] text-[11px] space-y-1 mb-3">
-                    <div className="flex items-center justify-between text-slate-400">
-                      <span>Status Transport:</span>
-                      <span className="font-mono text-slate-200">
-                        {formatTikTokStateLabel(tiktokStatus)}
-                      </span>
-                    </div>
-                    {tiktokStatus.roomId && (
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Room ID:</span>
-                        <span className="font-mono text-slate-300">{tiktokStatus.roomId}</span>
-                      </div>
-                    )}
-                    {isTikTokTrulyConnected && (
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Penonton Aktif:</span>
-                        <span className="font-mono text-emerald-400">
-                          {tiktokStatus.viewerCount.toLocaleString('id-ID')}
-                        </span>
-                      </div>
-                    )}
-                    {tiktokStatus.message && (
-                      <p
-                        className={`text-[10px] leading-snug pt-0.5 ${
-                          tiktokStatus.state === 'error'
-                            ? 'text-rose-400'
-                            : tiktokStatus.state === 'waiting_for_live'
-                            ? 'text-amber-300'
-                            : 'text-slate-400'
-                        }`}
-                      >
-                        {tiktokStatus.message}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>
@@ -467,7 +932,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
         })}
       </div>
 
-      {/* Modal: Konfigurasi Provider */}
+      {/* Modal: Konfigurasi Provider Non-TikTok */}
       {editingProvider && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -489,65 +954,37 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
             <form onSubmit={handleSaveConfig} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  {editingProvider.id === 'tiktok'
-                    ? 'Username TikTok (dengan atau tanpa @)'
-                    : 'Nama Pengguna / Channel ID'}
+                  Nama Pengguna / Channel ID
                 </label>
                 <input
                   type="text"
                   value={inputValues.username || ''}
                   onChange={(e) => setInputValues({ ...inputValues, username: e.target.value })}
-                  placeholder={
-                    editingProvider.id === 'tiktok'
-                      ? 'Misal: @streamer_live'
-                      : 'Misal: username_live atau ID Channel'
-                  }
+                  placeholder="Misal: username_live atau ID Channel"
                   className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  {editingProvider.id === 'tiktok'
-                    ? 'EulerStream API Key (Opsional untuk Fallback)'
-                    : 'Stream Key / Webhook Secret Token (Opsional)'}
+                  Stream Key / Webhook Secret Token (Opsional)
                 </label>
                 <div className="relative">
                   <input
                     type="password"
                     value={inputValues.key || ''}
                     onChange={(e) => setInputValues({ ...inputValues, key: e.target.value })}
-                    placeholder={
-                      editingProvider.id === 'tiktok'
-                        ? 'Kosongkan jika hanya mencoba jalur langsung...'
-                        : 'Disimpan lokal di IndexedDB aman...'
-                    }
+                    placeholder="Disimpan lokal di IndexedDB aman..."
                     className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl pl-3 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
                   />
                   <Lock className="w-3.5 h-3.5 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
                 </div>
               </div>
 
-              {editingProvider.id === 'tiktok' && (
-                <label className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] flex items-center justify-between gap-2 cursor-pointer">
-                  <span className="text-[11px] text-slate-300">
-                    Gunakan EulerStream fallback jika koneksi langsung ditolak TikTok
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={eulerFallbackChecked}
-                    onChange={(e) => setEulerFallbackChecked(e.target.checked)}
-                    className="rounded text-[#2563EB] focus:ring-0"
-                  />
-                </label>
-              )}
-
               <div className="p-3 rounded-xl bg-blue-950/20 border border-blue-900/40 text-xs text-blue-200">
                 <span className="font-semibold block mb-0.5">Tata Cara Koneksi:</span>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  {editingProvider.id === 'tiktok'
-                    ? 'Mode A mencoba resolusi room & WebSocket langsung dari perangkat Android, lalu fallback ke EulerStream bila diizinkan. Status Terhubung hanya aktif setelah transport benar-benar tersambung.'
-                    : 'Untuk menerima notifikasi real-time, masukkan kredensial atau gunakan simulator event pada modul Live Center untuk pengujian langsung tanpa akun publik.'}
+                  Untuk menerima notifikasi real-time, masukkan kredensial atau gunakan simulator event pada modul Live Center untuk pengujian langsung tanpa akun publik.
                 </p>
               </div>
 
@@ -563,7 +1000,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold shadow-lg shadow-blue-600/30"
                 >
-                  {editingProvider.id === 'tiktok' ? 'Simpan & Hubungkan' : 'Simpan Kredensial'}
+                  Simpan Kredensial
                 </button>
               </div>
             </form>

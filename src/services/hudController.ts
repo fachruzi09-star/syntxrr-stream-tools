@@ -15,7 +15,7 @@ import type {
   HudStateModel,
   HudStatusTone,
 } from './nativeCompanionBridge';
-import type { TikTokConnectionState } from '../types';
+import type { ModeASessionMode, TikTokConnectionState } from '../types';
 
 /** Batas buffer event di memori agar HUD ringan. */
 export const HUD_EVENT_BUFFER_LIMIT = 60;
@@ -88,8 +88,12 @@ export function filterHudEvents(events: HudChatEntry[], tab: HudChatTab): HudCha
  */
 export function hudEventSourceStatus(
   events: HudChatEntry[],
-  connectionState?: TikTokConnectionState
+  connectionState?: TikTokConnectionState,
+  modeASessionMode?: ModeASessionMode
 ): { text: string; tone: HudStatusTone } {
+  if (modeASessionMode === 'without_live_connection') {
+    return status('Tanpa koneksi LIVE', 'off');
+  }
   if (connectionState === 'connected_direct') {
     return status('Terhubung (Direct)', 'ok');
   }
@@ -127,7 +131,10 @@ function mapEventsToRows(events: HudChatEntry[], tab: HudChatTab): HudRowModel[]
   }));
 }
 
-function chatEmptyTextForTab(tab: HudChatTab): string {
+function chatEmptyTextForTab(tab: HudChatTab, modeASessionMode?: ModeASessionMode): string {
+  if (modeASessionMode === 'without_live_connection') {
+    return 'Mode A aktif tanpa koneksi LIVE. Event LIVE belum tersedia.';
+  }
   return tab === 'chat'
     ? 'Belum ada chat. Panel tetap mengumpulkan event selama sumber aktif.'
     : `Belum ada event ${tab}.`;
@@ -138,9 +145,10 @@ export function buildChatModel(
   tab: HudChatTab,
   paused: boolean,
   unreadCount: number,
-  connectionState?: TikTokConnectionState
+  connectionState?: TikTokConnectionState,
+  modeASessionMode?: ModeASessionMode
 ): HudStateModel {
-  const sourceStatus = hudEventSourceStatus(events, connectionState);
+  const sourceStatus = hudEventSourceStatus(events, connectionState, modeASessionMode);
 
   const rowsByTab: Record<HudChatTab, HudRowModel[]> = {
     chat: mapEventsToRows(events, 'chat'),
@@ -150,10 +158,10 @@ export function buildChatModel(
   };
 
   const emptyTextByTab: Record<HudChatTab, string> = {
-    chat: chatEmptyTextForTab('chat'),
-    gift: chatEmptyTextForTab('gift'),
-    like: chatEmptyTextForTab('like'),
-    follow: chatEmptyTextForTab('follow'),
+    chat: chatEmptyTextForTab('chat', modeASessionMode),
+    gift: chatEmptyTextForTab('gift', modeASessionMode),
+    like: chatEmptyTextForTab('like', modeASessionMode),
+    follow: chatEmptyTextForTab('follow', modeASessionMode),
   };
 
   const rows = rowsByTab[tab] ?? [];
@@ -170,7 +178,7 @@ export function buildChatModel(
     rowsByTab,
     emptyTextByTab,
     listHeightDp: 164,
-    emptyText: emptyTextByTab[tab] ?? chatEmptyTextForTab(tab),
+    emptyText: emptyTextByTab[tab] ?? chatEmptyTextForTab(tab, modeASessionMode),
   };
 }
 

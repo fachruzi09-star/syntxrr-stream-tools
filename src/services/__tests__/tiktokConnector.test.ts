@@ -12,8 +12,26 @@ import {
 } from '../tiktokEventNormalizer';
 import {
   TikTokLiveConnector,
+  buildModeAHonestStatus,
   type TikTokTransportAdapter,
 } from '../tiktokLiveConnector';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_TIKTOK_ACCOUNT_STATE,
+  mergeBackupSettings,
+  omitCredentials,
+  sanitizeTikTokAccountState,
+} from '../storage';
+import {
+  applyVerifiedProfileToAccountState,
+  clearPendingPkce,
+  getTikTokAuthConfiguration,
+  handleTikTokAuthCallbackUrl,
+  maskApiKeyPreview,
+  savePendingPkce,
+  startTikTokOAuthLogin,
+} from '../tiktokAuthService';
+import { buildChatModel, hudEventSourceStatus } from '../hudController';
 
 function assert(condition: unknown, message: string): void {
   if (!condition) {
@@ -340,12 +358,253 @@ async function runConnectorStateAndBusTests(): Promise<void> {
   const webRes = await webOnlyConnector.connect({ username: 'streamer_test' });
   assertEqual(webRes.state, 'error', 'Unsupported browser runtime must report error');
   assertEqual(webRes.errorCode, 'ANDROID_NATIVE_REQUIRED', 'Truthful native required code');
+
+  // connectionMethod='euler' passthrough check
+  let lastMethod: string | undefined;
+  const methodConnector = new TikTokLiveConnector({
+    ...mockAdapter,
+    connect: async (opts) => {
+      lastMethod = opts.connectionMethod;
+      return {
+        accepted: true,
+        status: {
+          state: 'connecting_euler',
+          transport: 'euler',
+          connectionMethod: opts.connectionMethod,
+          roomStatus: 'live',
+          username: opts.username,
+          roomId: '888999',
+          viewerCount: 10,
+          totalLikeCount: 5,
+          message: 'Menghubungkan via EulerStream...',
+        },
+      };
+    },
+  });
+  const eulerRes = await methodConnector.connect({
+    username: 'linked_user',
+    connectionMethod: 'euler',
+    eulerApiKey: 'secret-key-sample',
+  });
+  assertEqual(lastMethod, 'euler', 'connectionMethod=euler forwarded to adapter');
+  assertEqual(eulerRes.connectionMethod, 'euler', 'status preserves connectionMethod=euler');
+  assertEqual(eulerRes.roomStatus, 'live', 'status preserves roomStatus=live');
+  await methodConnector.destroy();
+}
+
+function runStorageAndBackupSecurityTests(): void {
+  const sanitized = sanitizeTikTokAccountState({
+    isLinked: true,
+    openId: 'oid_123',
+    username: '@kreator_live',
+    displayName: 'Kreator Live',
+    connectionMethod: 'euler',
+    fallbackEnabled: false,
+    accountLinkStatus: 'linked',
+    lastSuccessfulAuthorization: 1731571200000,
+    grantedScopes: ['user.info.basic', 'user.info.profile'],
+  });
+  assertEqual(sanitized.isLinked, true, 'sanitize preserves linked');
+  assertEqual(sanitized.username, 'kreator_live', 'sanitize strips leading @ from username');
+  assertEqual(sanitized.connectionMethod, 'euler', 'sanitize keeps valid connectionMethod');
+  assertEqual(sanitized.fallbackEnabled, false, 'sanitize keeps fallbackEnabled=false');
+
+  // Linking without openId cannot pretend to be linked
+  const fakeLinked = sanitizeTikTokAccountState({
+    isLinked: true,
+    accountLinkStatus: 'linked',
+  });
+  assertEqual(fakeLinked.isLinked, false, 'account without openId must not remain linked');
+  assertEqual(fakeLinked.accountLinkStatus, 'unlinked', 'missing openId resets status to unlinked');
+
+  // Credential exclusion from backup export/import
+  const withSecret = {
+    ...DEFAULT_SETTINGS,
+    eulerStreamApiKey: 'euler_live_secret_9999',
+    tiktokConnectionMethod: 'euler' as const,
+  };
+  const exported = omitCredentials(withSecret);
+  assertEqual('eulerStreamApiKey' in exported, false, 'eulerStreamApiKey omitted from backup export');
+  const merged = mergeBackupSettings({ eulerStreamApiKey: 'attacker_key', theme: 'midnight_oled' }, withSecret);
+  assertEqual(merged.eulerStreamApiKey, 'euler_live_secret_9999', 'import never overwrites local euler key');
+  assertEqual(maskApiKeyPreview('euler_live_secret_9999'), '••••9999', 'API key masked cleanly');
+}
+
+async function runOAuthPkceAndScopeTests(): Promise<void> {
+  // 1. Missing config must fail honestly without starting fake OAuth
+  const unconfigured = getTikTokAuthConfiguration();
+  assertEqual(unconfigured.isWebOAuthReady, false, 'Unconfigured workspace reports web OAuth not ready');
+  assert(unconfigured.missingRequirements.length > 0, 'Lists missing OAuth prerequisites');
+  const startFail = await startTikTokOAuthLogin(unconfigured);
+  assertEqual(startFail.started, false, 'Cannot start OAuth without clientKey/redirectUri/backend');
+
+  // 2. Callback state mismatch rejected
+  savePendingPkce({
+    state: 'expected_state_123',
+    codeVerifier: 'verifier_abc',
+    redirectUri: 'https://syntxrr.example.com/callback',
+    requestedScopes: ['user.info.basic', 'user.info.profile'],
+    createdAt: 1000,
+  });
+  const mismatch = await handleTikTokAuthCallbackUrl(
+    'https://syntxrr.example.com/callback?code=auth123&state=wrong_state',
+    { nowMs: 2000 }
+  );
+  assertEqual(mismatch.success, false, 'Mismatched OAuth state rejected');
+  if (!mismatch.success) {
+    assertEqual(mismatch.errorCode, 'STATE_MISMATCH', 'Reports STATE_MISMATCH');
+  }
+
+  // 3. Expired PKCE rejected
+  savePendingPkce({
+    state: 'state_ttl',
+    codeVerifier: 'verifier_ttl',
+    redirectUri: 'https://syntxrr.example.com/callback',
+    requestedScopes: ['user.info.basic'],
+    createdAt: 1000,
+  });
+  const expired = await handleTikTokAuthCallbackUrl(
+    'https://syntxrr.example.com/callback?code=auth123&state=state_ttl',
+    { nowMs: 1000 + 11 * 60 * 1000 }
+  );
+  assertEqual(expired.success, false, 'Expired PKCE session rejected');
+  if (!expired.success) {
+    assertEqual(expired.errorCode, 'EXPIRED_AUTH', 'Reports EXPIRED_AUTH');
+  }
+
+  // 4. Verified exchange with user.info.basic only MUST NOT fabricate/keep username
+  savePendingPkce({
+    state: 'state_basic',
+    codeVerifier: 'verifier_basic',
+    redirectUri: 'https://syntxrr.example.com/callback',
+    requestedScopes: ['user.info.basic'],
+    createdAt: 1000,
+  });
+  const basicResult = await handleTikTokAuthCallbackUrl(
+    'https://syntxrr.example.com/callback?code=ok_code&state=state_basic',
+    {
+      nowMs: 2500,
+      exchangeFn: async () => ({
+        open_id: 'tt_open_basic',
+        display_name: 'Streamer Basic',
+        username: 'should_not_trust_without_profile_scope',
+        scope: 'user.info.basic',
+      }),
+    }
+  );
+  assertEqual(basicResult.success, true, 'Basic scope login succeeds');
+  if (basicResult.success) {
+    assertEqual(basicResult.profile.openId, 'tt_open_basic', 'openId saved');
+    assertEqual(basicResult.profile.username, undefined, 'username omitted without user.info.profile');
+    assertEqual(basicResult.profile.displayName, 'Streamer Basic', 'displayName saved');
+  }
+
+  // 5. Verified exchange with user.info.profile populates username + updates account state
+  savePendingPkce({
+    state: 'state_profile',
+    codeVerifier: 'verifier_profile',
+    redirectUri: 'https://syntxrr.example.com/callback',
+    requestedScopes: ['user.info.basic', 'user.info.profile'],
+    createdAt: 1000,
+  });
+  const profileResult = await handleTikTokAuthCallbackUrl(
+    'https://syntxrr.example.com/callback?code=ok_profile&state=state_profile',
+    {
+      nowMs: 3000,
+      exchangeFn: async () => ({
+        open_id: 'tt_open_profile',
+        display_name: 'Streamer Pro',
+        username: '@streamer_pro',
+        scope: 'user.info.basic,user.info.profile',
+      }),
+    }
+  );
+  assertEqual(profileResult.success, true, 'Profile scope login succeeds');
+  if (profileResult.success) {
+    const linked = applyVerifiedProfileToAccountState(DEFAULT_TIKTOK_ACCOUNT_STATE, profileResult.profile);
+    assertEqual(linked.isLinked, true, 'Account marked linked');
+    assertEqual(linked.username, 'streamer_pro', 'Username populated when user.info.profile granted');
+    assertEqual(linked.accountLinkStatus, 'linked', 'accountLinkStatus linked');
+    assertEqual(linked.lastSuccessfulAuthorization, 3000, 'lastSuccessfulAuthorization recorded');
+  }
+
+  clearPendingPkce();
+}
+
+function runHonestStatusAndHudTests(): void {
+  // Kondisi D: started without LIVE connection
+  const noLiveSummary = buildModeAHonestStatus({
+    account: {
+      isLinked: true,
+      openId: 'oid_1',
+      username: 'kreator_a',
+      connectionMethod: 'direct',
+      fallbackEnabled: true,
+      accountLinkStatus: 'linked',
+    },
+    connector: {
+      state: 'disconnected',
+      transport: 'none',
+      connectionMethod: 'direct',
+      roomStatus: 'unknown',
+      username: '',
+      roomId: '',
+      viewerCount: 0,
+      totalLikeCount: 0,
+      message: 'Belum terhubung',
+      updatedAt: 0,
+    },
+    companionRunning: true,
+    sessionMode: 'without_live_connection',
+  });
+  assertEqual(noLiveSummary.accountLinked.label, 'Terhubung', 'Account remains linked');
+  assertEqual(noLiveSummary.modeASession.label, 'Aktif (tanpa koneksi LIVE)', 'Session shows without LIVE connection');
+  assertEqual(noLiveSummary.eventTransport.label, 'Disconnected', 'Event transport remains Disconnected');
+
+  const hudNoLive = hudEventSourceStatus([], 'disconnected', 'without_live_connection');
+  assertEqual(hudNoLive.text, 'Tanpa koneksi LIVE', 'HUD header shows without LIVE connection');
+  const chatNoLive = buildChatModel([], 'chat', false, 0, 'disconnected', 'without_live_connection');
+  assert(
+    (chatNoLive.emptyText || '').includes('tanpa koneksi LIVE'),
+    'HUD chat empty state informs LIVE events unavailable'
+  );
+
+  // Waiting for LIVE state separation
+  const waitingSummary = buildModeAHonestStatus({
+    account: {
+      isLinked: true,
+      openId: 'oid_1',
+      username: 'kreator_a',
+      connectionMethod: 'direct',
+      fallbackEnabled: true,
+      accountLinkStatus: 'linked',
+    },
+    connector: {
+      state: 'waiting_for_live',
+      transport: 'none',
+      connectionMethod: 'direct',
+      roomStatus: 'not_live',
+      username: 'kreator_a',
+      roomId: '',
+      viewerCount: 0,
+      totalLikeCount: 0,
+      message: 'Menunggu @kreator_a memulai LIVE...',
+      updatedAt: 0,
+    },
+    companionRunning: true,
+    sessionMode: 'with_live_connector',
+  });
+  assertEqual(waitingSummary.roomStatus.label, 'Belum LIVE', 'Room status separates Belum LIVE');
+  assertEqual(waitingSummary.eventTransport.label, 'Menunggu LIVE', 'Transport separates Menunggu LIVE');
 }
 
 async function main(): Promise<void> {
   runNormalizerTests();
   runBoundedDedupTests();
   await runConnectorStateAndBusTests();
+  runStorageAndBackupSecurityTests();
+  await runOAuthPkceAndScopeTests();
+  runHonestStatusAndHudTests();
   console.log('ALL_TIKTOK_CONNECTOR_TESTS_PASSED');
 }
 

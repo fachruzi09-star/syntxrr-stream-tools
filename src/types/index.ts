@@ -88,6 +88,7 @@ export interface AppSettings {
   // Mode A TikTok Companion
   tiktokUsername?: string;
   tiktokConnected?: boolean;
+  tiktokConnectionMethod?: TikTokConnectionMethod;
   eulerStreamApiKey?: string;
   tiktokEulerFallbackEnabled?: boolean;
   // Soundboard & Audio routing
@@ -217,9 +218,33 @@ export type TikTokConnectionState =
 
 export type TikTokTransportMode = 'none' | 'direct_ws' | 'euler';
 
+export type TikTokConnectionMethod = 'direct' | 'euler';
+
+export type TikTokAccountLinkStatus = 'unlinked' | 'linking' | 'linked' | 'failed';
+
+export type TikTokRoomStatus = 'unknown' | 'not_live' | 'live' | 'not_found' | 'unreadable';
+
+export type ModeASessionMode = 'inactive' | 'with_live_connector' | 'without_live_connection';
+
+export interface TikTokAccountState {
+  isLinked: boolean;
+  openId?: string;
+  username?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  connectionMethod: TikTokConnectionMethod;
+  fallbackEnabled: boolean;
+  accountLinkStatus: TikTokAccountLinkStatus;
+  lastSuccessfulAuthorization?: number;
+  grantedScopes?: string[];
+  linkErrorMessage?: string;
+}
+
 export interface TikTokConnectorStatus {
   state: TikTokConnectionState;
   transport: TikTokTransportMode;
+  connectionMethod?: TikTokConnectionMethod;
+  roomStatus?: TikTokRoomStatus;
   username: string;
   roomId: string;
   viewerCount: number;

@@ -13,6 +13,7 @@ import {
   IntegrationProvider,
   TTSConfig,
   StreamEvent,
+  TikTokAccountState,
   normalizeOperatingMode,
   normalizeUnitVolume,
 } from '../types';
@@ -44,6 +45,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   audioAutoplayNext: true,
   tiktokUsername: '',
   tiktokConnected: false,
+  tiktokConnectionMethod: 'direct',
   eulerStreamApiKey: '',
   tiktokEulerFallbackEnabled: true,
   soundboardVolume: 0.85,
@@ -388,6 +390,64 @@ export const DEFAULT_MARKETPLACE_ITEMS: MarketplaceItem[] = [
     ],
   },
 ];
+
+export const DEFAULT_TIKTOK_ACCOUNT_STATE: TikTokAccountState = {
+  isLinked: false,
+  connectionMethod: 'direct',
+  fallbackEnabled: true,
+  accountLinkStatus: 'unlinked',
+};
+
+export function sanitizeTikTokAccountState(raw: unknown): TikTokAccountState {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ...DEFAULT_TIKTOK_ACCOUNT_STATE };
+  }
+  const obj = raw as Record<string, unknown>;
+  const openId =
+    typeof obj.openId === 'string' && obj.openId.trim() ? obj.openId.trim() : undefined;
+  const isLinked =
+    obj.isLinked === true && obj.accountLinkStatus === 'linked' && Boolean(openId);
+  const connectionMethod = obj.connectionMethod === 'euler' ? 'euler' : 'direct';
+  const fallbackEnabled = typeof obj.fallbackEnabled === 'boolean' ? obj.fallbackEnabled : true;
+  const rawStatus = obj.accountLinkStatus;
+  const accountLinkStatus: TikTokAccountState['accountLinkStatus'] = isLinked
+    ? 'linked'
+    : rawStatus === 'failed'
+    ? 'failed'
+    : 'unlinked'; // Jangan pernah memulihkan status 'linking' yang tertinggal saat startup
+
+  const grantedScopes = Array.isArray(obj.grantedScopes)
+    ? obj.grantedScopes.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    : undefined;
+  const hasProfileScope = !grantedScopes || grantedScopes.includes('user.info.profile');
+  const rawUsername = typeof obj.username === 'string' ? obj.username.trim().replace(/^@+/, '') : '';
+
+  return {
+    isLinked,
+    openId: isLinked ? openId : undefined,
+    username: isLinked && hasProfileScope && rawUsername ? rawUsername : undefined,
+    displayName:
+      isLinked && typeof obj.displayName === 'string' && obj.displayName.trim()
+        ? obj.displayName.trim()
+        : undefined,
+    avatarUrl:
+      isLinked && typeof obj.avatarUrl === 'string' && /^https?:\/\//i.test(obj.avatarUrl.trim())
+        ? obj.avatarUrl.trim()
+        : undefined,
+    connectionMethod,
+    fallbackEnabled,
+    accountLinkStatus,
+    lastSuccessfulAuthorization:
+      isLinked && typeof obj.lastSuccessfulAuthorization === 'number' && Number.isFinite(obj.lastSuccessfulAuthorization)
+        ? obj.lastSuccessfulAuthorization
+        : undefined,
+    grantedScopes: isLinked ? grantedScopes : undefined,
+    linkErrorMessage:
+      accountLinkStatus === 'failed' && typeof obj.linkErrorMessage === 'string'
+        ? obj.linkErrorMessage
+        : undefined,
+  };
+}
 
 // INITIAL INTEGRATIONS DIRECTORY
 export const DEFAULT_INTEGRATIONS: IntegrationProvider[] = [
@@ -800,6 +860,52 @@ export const StorageService = {
     await idbSet('integrations', integrations);
   },
 
+  // TIKTOK ACCOUNT LINKING STATE (disimpan lokal di perangkat, tidak ikut diekspor di backup)
+  async getTikTokAccount(): Promise<TikTokAccountState> {
+    const stored = await idbGet<unknown>('tiktok_account_state');
+    return sanitizeTikTokAccountState(stored);
+  },
+
+  async saveTikTokAccount(account: TikTokAccountState): Promise<TikTokAccountState> {
+    const sanitized = sanitizeTikTokAccountState(account);
+    await idbSet('tiktok_account_state', sanitized);
+    return sanitized;
+  },
+
+  async clearTikTokAccount(): Promise<TikTokAccountState> {
+    const current = await this.getTikTokAccount();
+    const cleared: TikTokAccountState = {
+      isLinked: false,
+      connectionMethod: current.connectionMethod,
+      fallbackEnabled: current.fallbackEnabled,
+      accountLinkStatus: 'unlinked',
+    };
+    await idbSet('tiktok_account_state', cleared);
+
+    const currentSettings = await this.getSettings();
+    await this.saveSettings({
+      ...currentSettings,
+      tiktokUsername: '',
+      tiktokConnected: false,
+      eulerStreamApiKey: '',
+    });
+
+    const currentIntegrations = await this.getIntegrations();
+    await this.saveIntegrations(
+      currentIntegrations.map((item) =>
+        item.id === 'tiktok'
+          ? {
+              ...item,
+              status: 'NOT_CONNECTED',
+              connectedUser: undefined,
+            }
+          : item
+      )
+    );
+
+    return cleared;
+  },
+
   // TTS CONFIG
   async getTTSConfig(): Promise<TTSConfig> {
     const stored = await idbGet<TTSConfig>('tts_config');
@@ -953,6 +1059,7 @@ export const StorageService = {
     await this.saveSoundboard(DEFAULT_SOUNDBOARD);
     await this.saveMarketplace(DEFAULT_MARKETPLACE_ITEMS);
     await this.saveIntegrations(DEFAULT_INTEGRATIONS);
+    await idbSet('tiktok_account_state', DEFAULT_TIKTOK_ACCOUNT_STATE);
     await this.saveTTSConfig(DEFAULT_TTS_CONFIG);
     await this.saveUnifiedQueue([]);
     await this.saveLocalTracksMeta([]);

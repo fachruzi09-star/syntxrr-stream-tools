@@ -1026,6 +1026,7 @@ public class FloatingCompanionPlugin extends Plugin {
         String username = call.getString("username", "");
         String eulerApiKey = call.getString("eulerApiKey", "");
         boolean allowEulerFallback = Boolean.TRUE.equals(call.getBoolean("allowEulerFallback", true));
+        String connectionMethod = call.getString("connectionMethod", "direct");
 
         // Pastikan CompanionService berjalan sebagai foreground service agar koneksi LIVE
         // tidak dibekukan sistem Android 12+ ketika streamer berpindah ke aplikasi TikTok.
@@ -1043,7 +1044,7 @@ public class FloatingCompanionPlugin extends Plugin {
 
         TikTokLiveConnector connector = getTikTokConnector();
         connector.setListener(mTikTokListener);
-        connector.connect(username, eulerApiKey, allowEulerFallback);
+        connector.connect(username, eulerApiKey, allowEulerFallback, connectionMethod);
 
         JSObject ret = new JSObject();
         ret.put("accepted", true);
