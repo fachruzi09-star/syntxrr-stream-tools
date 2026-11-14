@@ -278,6 +278,11 @@ public class CompanionService extends Service {
     private void stopCompanionService() {
         sIsRunning = false;
         sHasMicrophoneType = false;
+        try {
+            TikTokLiveConnector.getInstance(getApplicationContext())
+                    .disconnect("Companion Service dihentikan.");
+        } catch (Exception ignored) {
+        }
         notifyLifecycleStopped();
         try {
             NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -313,6 +318,11 @@ public class CompanionService extends Service {
         sHasMicrophoneType = false;
         if (sInstance == this) {
             sInstance = null;
+        }
+        try {
+            TikTokLiveConnector.getInstance(getApplicationContext())
+                    .disconnect("Companion Service dihentikan.");
+        } catch (Exception ignored) {
         }
         notifyLifecycleStopped();
         try {

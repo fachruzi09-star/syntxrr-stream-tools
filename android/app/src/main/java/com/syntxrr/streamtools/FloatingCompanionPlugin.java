@@ -22,6 +22,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 /**
  * FloatingCompanionPlugin
  * Capacitor bridge exposing native Android permissions and CompanionService
@@ -62,6 +65,7 @@ public class FloatingCompanionPlugin extends Plugin {
     public void load() {
         super.load();
         CompanionService.setLifecycleListener(mServiceLifecycleListener);
+        attachTikTokConnectorListener();
     }
 
     @PluginMethod
@@ -978,9 +982,101 @@ public class FloatingCompanionPlugin extends Plugin {
         }
     }
 
+    // =========================================================================
+    // TIKTOK LIVE CONNECTOR BRIDGE (MODE A)
+    // =========================================================================
+
+    @Nullable
+    private volatile TikTokLiveConnector mTikTokConnector;
+
+    private final TikTokLiveConnector.Listener mTikTokListener = new TikTokLiveConnector.Listener() {
+        @Override
+        public void onStateChanged(@NonNull JSONObject stateJson) {
+            emitToJs("tiktokLiveState", toJsObject(stateJson));
+        }
+
+        @Override
+        public void onEventDecoded(@NonNull JSONObject eventJson) {
+            emitToJs("tiktokLiveEvent", toJsObject(eventJson));
+        }
+    };
+
+    private synchronized TikTokLiveConnector getTikTokConnector() {
+        if (mTikTokConnector == null) {
+            mTikTokConnector = TikTokLiveConnector.getInstance(getContext().getApplicationContext());
+        }
+        return mTikTokConnector;
+    }
+
+    private void attachTikTokConnectorListener() {
+        getTikTokConnector().setListener(mTikTokListener);
+    }
+
+    @NonNull
+    private static JSObject toJsObject(@NonNull JSONObject source) {
+        try {
+            return JSObject.fromJSONObject(source);
+        } catch (JSONException e) {
+            return new JSObject();
+        }
+    }
+
+    @PluginMethod
+    public void connectTikTokLive(PluginCall call) {
+        String username = call.getString("username", "");
+        String eulerApiKey = call.getString("eulerApiKey", "");
+        boolean allowEulerFallback = Boolean.TRUE.equals(call.getBoolean("allowEulerFallback", true));
+
+        // Pastikan CompanionService berjalan sebagai foreground service agar koneksi LIVE
+        // tidak dibekukan sistem Android 12+ ketika streamer berpindah ke aplikasi TikTok.
+        Context context = getContext();
+        if (!CompanionService.isRunning()) {
+            try {
+                Intent serviceIntent = new Intent(context, CompanionService.class);
+                serviceIntent.setAction(CompanionService.ACTION_START);
+                startCompanionService(context, serviceIntent);
+            } catch (Exception e) {
+                android.util.Log.w("FloatingCompanion",
+                        "Gagal menjalankan CompanionService untuk koneksi TikTok: " + e.getMessage());
+            }
+        }
+
+        TikTokLiveConnector connector = getTikTokConnector();
+        connector.setListener(mTikTokListener);
+        connector.connect(username, eulerApiKey, allowEulerFallback);
+
+        JSObject ret = new JSObject();
+        ret.put("accepted", true);
+        ret.put("status", toJsObject(connector.getStateSnapshot()));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void disconnectTikTokLive(PluginCall call) {
+        TikTokLiveConnector connector = getTikTokConnector();
+        connector.disconnect("Diputuskan oleh pengguna.");
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        ret.put("status", toJsObject(connector.getStateSnapshot()));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getTikTokLiveStatus(PluginCall call) {
+        TikTokLiveConnector connector = getTikTokConnector();
+        call.resolve(toJsObject(connector.getStateSnapshot()));
+    }
+
     @Override
     protected void handleOnDestroy() {
         CompanionService.clearLifecycleListener(mServiceLifecycleListener);
+        if (mTikTokConnector != null) {
+            mTikTokConnector.setListener(null);
+            if (!CompanionService.isRunning()) {
+                mTikTokConnector.disconnect("Plugin dihancurkan tanpa CompanionService.");
+            }
+        }
         mMainHandler.removeCallbacksAndMessages(null);
         final NativeMicMonitor monitor;
         synchronized (mMicLock) {

@@ -15,6 +15,7 @@ import type {
   HudStateModel,
   HudStatusTone,
 } from './nativeCompanionBridge';
+import type { TikTokConnectionState } from '../types';
 
 /** Batas buffer event di memori agar HUD ringan. */
 export const HUD_EVENT_BUFFER_LIMIT = 60;
@@ -86,8 +87,30 @@ export function filterHudEvents(events: HudChatEntry[], tab: HudChatTab): HudCha
  * - event asli masih segar -> terhubung
  */
 export function hudEventSourceStatus(
-  events: HudChatEntry[]
+  events: HudChatEntry[],
+  connectionState?: TikTokConnectionState
 ): { text: string; tone: HudStatusTone } {
+  if (connectionState === 'connected_direct') {
+    return status('Terhubung (Direct)', 'ok');
+  }
+  if (connectionState === 'connected_euler') {
+    return status('Terhubung (Euler)', 'ok');
+  }
+  if (
+    connectionState === 'resolving_room' ||
+    connectionState === 'connecting_direct' ||
+    connectionState === 'connecting_euler' ||
+    connectionState === 'reconnecting'
+  ) {
+    return status('Menghubungkan', 'warn');
+  }
+  if (connectionState === 'waiting_for_live') {
+    return status('Menunggu LIVE', 'warn');
+  }
+  if (connectionState === 'error') {
+    return status('Gagal terhubung', 'off');
+  }
+
   if (events.length === 0) return status('Belum terhubung', 'off');
 
   const newest = events.reduce((acc, item) => (item.timestamp > acc.timestamp ? item : acc), events[0]);
@@ -114,9 +137,10 @@ export function buildChatModel(
   events: HudChatEntry[],
   tab: HudChatTab,
   paused: boolean,
-  unreadCount: number
+  unreadCount: number,
+  connectionState?: TikTokConnectionState
 ): HudStateModel {
-  const sourceStatus = hudEventSourceStatus(events);
+  const sourceStatus = hudEventSourceStatus(events, connectionState);
 
   const rowsByTab: Record<HudChatTab, HudRowModel[]> = {
     chat: mapEventsToRows(events, 'chat'),

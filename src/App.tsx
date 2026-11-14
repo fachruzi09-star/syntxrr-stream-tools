@@ -24,6 +24,7 @@ import {
   MarketplaceItem,
   IntegrationProvider,
   TTSConfig,
+  TikTokConnectorStatus,
 } from './types';
 import {
   StorageService,
@@ -49,6 +50,7 @@ import {
   type SongRequestItem,
   type SongRequestState,
 } from './services/songRequestEngine';
+import { tiktokLiveConnector } from './services/tiktokLiveConnector';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { NavigationDrawerModal } from './components/NavigationDrawerModal';
@@ -129,6 +131,9 @@ export default function App() {
   // Marketplace & Integrations State
   const [marketplaceItems, setMarketplaceItems] = useState<MarketplaceItem[]>(DEFAULT_MARKETPLACE_ITEMS);
   const [integrations, setIntegrations] = useState<IntegrationProvider[]>(DEFAULT_INTEGRATIONS);
+  const [tiktokStatus, setTiktokStatus] = useState<TikTokConnectorStatus>(() =>
+    tiktokLiveConnector.getStatus()
+  );
 
   // Music Center State (HTML5 local audio + Queue + Song Requests)
   const [songRequests, setSongRequests] = useState<SongRequest[]>(DEFAULT_SONG_REQUESTS);
@@ -197,7 +202,17 @@ export default function App() {
         );
         setSoundboardItems(hydratedSoundboard);
         setMarketplaceItems(savedMarketplace);
-        setIntegrations(savedIntegrations);
+        const liveNow = tiktokLiveConnector.isConnected();
+        setIntegrations(
+          savedIntegrations.map((item) =>
+            item.id === 'tiktok'
+              ? {
+                  ...item,
+                  status: liveNow ? 'ACTIVE' : 'NOT_CONNECTED',
+                }
+              : item
+          )
+        );
         setTTSConfig(savedTTSConfig);
         ttsService.updateConfig(savedTTSConfig);
         setUnifiedQueue(savedQueue);
@@ -606,6 +621,55 @@ export default function App() {
   const handleUpdateIntegrations = async (newIntegrations: IntegrationProvider[]) => {
     setIntegrations(newIntegrations);
     await StorageService.saveIntegrations(newIntegrations);
+  };
+
+  // Sinkronisasi status konektor TikTok LIVE Mode A yang sebenarnya (tanpa status palsu).
+  useEffect(() => {
+    const unsubscribe = tiktokLiveConnector.subscribe((nextStatus) => {
+      setTiktokStatus(nextStatus);
+      const trulyConnected =
+        nextStatus.state === 'connected_direct' || nextStatus.state === 'connected_euler';
+      setIntegrations((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          if (item.id !== 'tiktok') return item;
+          const desiredStatus = trulyConnected ? 'ACTIVE' : 'NOT_CONNECTED';
+          const desiredUser = nextStatus.username || item.connectedUser;
+          if (item.status !== desiredStatus || item.connectedUser !== desiredUser) {
+            changed = true;
+            return {
+              ...item,
+              status: desiredStatus as IntegrationProvider['status'],
+              connectedUser: desiredUser,
+            };
+          }
+          return item;
+        });
+        return changed ? next : prev;
+      });
+    });
+
+    if (Capacitor.getPlatform() === 'android') {
+      void tiktokLiveConnector.syncFromNative();
+    }
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleConnectTikTok = async (
+    username: string,
+    eulerApiKey?: string,
+    allowEulerFallback?: boolean
+  ) => {
+    await tiktokLiveConnector.connect({
+      username,
+      eulerApiKey: eulerApiKey ?? settings.eulerStreamApiKey,
+      allowEulerFallback: allowEulerFallback ?? settings.tiktokEulerFallbackEnabled ?? true,
+    });
+  };
+
+  const handleDisconnectTikTok = async () => {
+    await tiktokLiveConnector.disconnect();
   };
 
   const mapSrItemToUnifiedQueueItem = (
@@ -1429,6 +1493,7 @@ export default function App() {
     void onHudResync(() => {
       if (disposed) return;
       hudLastModelRef.current = '';
+      void tiktokLiveConnector.syncFromNative();
       setHudResyncNonce((value) => value + 1);
     }).then((handle) => {
       if (!handle) return;
@@ -1449,7 +1514,7 @@ export default function App() {
     (panel: HudPanelId): HudStateModel => {
       const chatEvents = hudChatPaused ? hudPausedSnapshot ?? hudEvents : hudEvents;
       if (panel === 'chat') {
-        return buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread);
+        return buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread, tiktokStatus.state);
       }
       if (panel === 'soundboard') {
         return buildSoundboardModel(
@@ -1466,6 +1531,8 @@ export default function App() {
         );
       }
       if (panel === 'music') {
+        const isLiveTransportConnected =
+          tiktokStatus.state === 'connected_direct' || tiktokStatus.state === 'connected_euler';
         return buildMusicModel({
           nowPlaying: effectiveNowPlayingSong
             ? { title: effectiveNowPlayingSong.title, artist: effectiveNowPlayingSong.artist }
@@ -1481,7 +1548,8 @@ export default function App() {
             .filter((item) => item.id !== effectiveNowPlayingSong?.id)
             .slice(0, 6)
             .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
-          requestSourceConnected: hudEventSourceStatus(hudEvents).tone === 'ok',
+          requestSourceConnected:
+            isLiveTransportConnected || hudEventSourceStatus(hudEvents, tiktokStatus.state).tone === 'ok',
           playbackStatus: srState.currentTrack ? srState.playbackStatus : undefined,
           errorMessage: srState.lastError,
         });
@@ -1499,6 +1567,7 @@ export default function App() {
       hudEvents,
       hudChatTab,
       hudUnread,
+      tiktokStatus.state,
       soundboardItems,
       hudPlayingSoundId,
       soundboardVolumeUnit,
@@ -1718,6 +1787,11 @@ export default function App() {
           <IntegrationsView
             integrations={integrations}
             onUpdateIntegrations={handleUpdateIntegrations}
+            settings={settings}
+            onUpdateSettings={handleUpdateSettings}
+            tiktokStatus={tiktokStatus}
+            onConnectTikTok={handleConnectTikTok}
+            onDisconnectTikTok={handleDisconnectTikTok}
           />
         )}
 

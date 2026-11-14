@@ -44,6 +44,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   audioAutoplayNext: true,
   tiktokUsername: '',
   tiktokConnected: false,
+  eulerStreamApiKey: '',
+  tiktokEulerFallbackEnabled: true,
   soundboardVolume: 0.85,
   // === SETTINGS FOUNDATION DEFAULTS ===
   // A. General
@@ -393,7 +395,7 @@ export const DEFAULT_INTEGRATIONS: IntegrationProvider[] = [
     id: 'tiktok',
     name: 'TikTok LIVE Companion',
     category: 'companion',
-    status: 'ACTIVE',
+    status: 'NOT_CONNECTED',
     description: 'Mode pendamping sesi live TikTok dengan floating overlay di atas aplikasi.',
     logo: '🎵',
     guideUrl: 'https://www.tiktok.com/live',
@@ -581,7 +583,12 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 // Kredensial sensitif tidak pernah ditulis ke file cadangan dan tidak
 // pernah dipulihkan dari file cadangan (milik pengguna/perangkat lain).
 // ============================================================
-export const CREDENTIAL_SETTING_KEYS = ['streamKey', 'youtubeApiKey', 'spotifyAccessToken'] as const;
+export const CREDENTIAL_SETTING_KEYS = [
+  'streamKey',
+  'youtubeApiKey',
+  'spotifyAccessToken',
+  'eulerStreamApiKey',
+] as const;
 export type CredentialSettingKey = (typeof CREDENTIAL_SETTING_KEYS)[number];
 
 const isCredentialSettingKey = (key: string): key is CredentialSettingKey =>

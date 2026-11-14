@@ -88,6 +88,8 @@ export interface AppSettings {
   // Mode A TikTok Companion
   tiktokUsername?: string;
   tiktokConnected?: boolean;
+  eulerStreamApiKey?: string;
+  tiktokEulerFallbackEnabled?: boolean;
   // Soundboard & Audio routing
   soundboardVolume?: number;
 
@@ -202,14 +204,48 @@ export type StreamEventType =
   | 'viewer'
   | 'custom';
 
+export type TikTokConnectionState =
+  | 'disconnected'
+  | 'resolving_room'
+  | 'connecting_direct'
+  | 'connected_direct'
+  | 'connecting_euler'
+  | 'connected_euler'
+  | 'reconnecting'
+  | 'waiting_for_live'
+  | 'error';
+
+export type TikTokTransportMode = 'none' | 'direct_ws' | 'euler';
+
+export interface TikTokConnectorStatus {
+  state: TikTokConnectionState;
+  transport: TikTokTransportMode;
+  username: string;
+  roomId: string;
+  viewerCount: number;
+  totalLikeCount: number;
+  message: string;
+  errorCode?: string;
+  updatedAt: number;
+}
+
 export interface StreamEvent {
   id: string;
   type: StreamEventType;
   username: string;
   userAvatar?: string;
+  userId?: string;
   detail: string;
   amount?: number;
   currency?: string;
+  giftId?: string;
+  giftName?: string;
+  repeatCount?: number;
+  diamondCount?: number;
+  giftImage?: string;
+  likeCount?: number;
+  totalLikeCount?: number;
+  viewerCount?: number;
   timestamp: number;
   isSimulation?: boolean;
 }

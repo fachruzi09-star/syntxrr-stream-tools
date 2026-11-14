@@ -7,6 +7,7 @@
  */
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import type { TikTokConnectionState, TikTokTransportMode } from '../types';
 
 export interface OverlayPermissionResult {
   granted: boolean;
@@ -130,6 +131,44 @@ export interface HudResyncPayload {
   timestamp?: number;
 }
 
+export interface NativeTikTokStatePayload {
+  state: TikTokConnectionState;
+  transport: TikTokTransportMode;
+  username: string;
+  roomId: string;
+  viewerCount: number;
+  totalLikeCount: number;
+  message: string;
+  errorCode?: string;
+  timestamp?: number;
+}
+
+export interface NativeTikTokRawEventPayload {
+  method: string;
+  msgId?: string;
+  createTime?: number;
+  userId?: string;
+  username?: string;
+  nickname?: string;
+  avatarUrl?: string;
+  content?: string;
+  giftId?: string;
+  giftName?: string;
+  repeatCount?: number;
+  groupCount?: number;
+  repeatEnd?: number;
+  diamondCount?: number;
+  giftImage?: string;
+  likeCount?: number;
+  totalLikeCount?: number;
+  action?: number;
+  followCount?: number;
+  displayKey?: string;
+  memberCount?: number;
+  viewerCount?: number;
+  controlAction?: number;
+}
+
 export interface FloatingCompanionPluginInterface {
   checkOverlayPermission(): Promise<{ granted: boolean }>;
   requestOverlayPermission(): Promise<{ granted: boolean; openedSettings: boolean }>;
@@ -160,6 +199,14 @@ export interface FloatingCompanionPluginInterface {
   pushHudState(options: { model: string }): Promise<{ accepted: boolean }>;
   collapseHudContent(): Promise<{ success: boolean }>;
   getHudState(): Promise<{ isVisible: boolean; activePanel?: HudPanelId }>;
+  // Tahap 2A-3: Mode A TikTok LIVE native connector
+  connectTikTokLive(options: {
+    username: string;
+    eulerApiKey?: string;
+    allowEulerFallback?: boolean;
+  }): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload }>;
+  disconnectTikTokLive(): Promise<{ success: boolean; status?: NativeTikTokStatePayload }>;
+  getTikTokLiveStatus(): Promise<NativeTikTokStatePayload>;
   addListener(
     eventName: 'floatingHudClick',
     listenerFunc: (data: { timestamp: number }) => void
@@ -175,6 +222,14 @@ export interface FloatingCompanionPluginInterface {
   addListener(
     eventName: 'hudResync',
     listenerFunc: (data: HudResyncPayload) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'tiktokLiveState',
+    listenerFunc: (data: NativeTikTokStatePayload) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'tiktokLiveEvent',
+    listenerFunc: (data: NativeTikTokRawEventPayload) => void
   ): Promise<PluginListenerHandle>;
 }
 
@@ -692,6 +747,86 @@ export async function onHudResync(
   }
 }
 
+export async function connectTikTokLiveNative(options: {
+  username: string;
+  eulerApiKey?: string;
+  allowEulerFallback?: boolean;
+}): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload; message?: string }> {
+  if (!isNativeAndroid()) {
+    return {
+      accepted: false,
+      message:
+        'Koneksi langsung TikTok LIVE memerlukan runtime Android APK native karena browser web memblokir Cookie/User-Agent dan handshake WebSocket kustom.',
+    };
+  }
+
+  try {
+    return await FloatingCompanion.connectTikTokLive(options);
+  } catch (error: any) {
+    return {
+      accepted: false,
+      message: error?.message || 'Gagal memulai koneksi TikTok LIVE native.',
+    };
+  }
+}
+
+export async function disconnectTikTokLiveNative(): Promise<{
+  success: boolean;
+  status?: NativeTikTokStatePayload;
+}> {
+  if (!isNativeAndroid()) {
+    return { success: true };
+  }
+
+  try {
+    return await FloatingCompanion.disconnectTikTokLive();
+  } catch {
+    return { success: false };
+  }
+}
+
+export async function getTikTokLiveStatusNative(): Promise<NativeTikTokStatePayload | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.getTikTokLiveStatus();
+  } catch {
+    return null;
+  }
+}
+
+export async function onTikTokLiveState(
+  callback: (data: NativeTikTokStatePayload) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('tiktokLiveState', callback);
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener tiktokLiveState:', error);
+    return null;
+  }
+}
+
+export async function onTikTokLiveEvent(
+  callback: (data: NativeTikTokRawEventPayload) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('tiktokLiveEvent', callback);
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener tiktokLiveEvent:', error);
+    return null;
+  }
+}
+
 export const nativeCompanionBridge = {
   isNativeAndroid,
   checkOverlayPermission,
@@ -716,6 +851,12 @@ export const nativeCompanionBridge = {
   onHudCommand,
   onHudPanelChanged,
   onHudResync,
+  // Tahap 2A-3 TikTok LIVE connector
+  connectTikTokLiveNative,
+  disconnectTikTokLiveNative,
+  getTikTokLiveStatusNative,
+  onTikTokLiveState,
+  onTikTokLiveEvent,
 };
 
 export default nativeCompanionBridge;
