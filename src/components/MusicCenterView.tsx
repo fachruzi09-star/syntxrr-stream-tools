@@ -8,6 +8,7 @@ import {
   SpotifySearchResult,
 } from '../types';
 import { audioEngine, AudioEngineState } from '../services/localAudioEngine';
+import { songRequestEngine, type SongRequestState } from '../services/songRequestEngine';
 import { LocalAudioPlayer } from './music/LocalAudioPlayer';
 import { YouTubeConnector } from './music/YouTubeConnector';
 import { SpotifyConnector } from './music/SpotifyConnector';
@@ -53,6 +54,7 @@ interface MusicCenterViewProps {
   settings: AppSettings;
   onNavigateToSettings: () => void;
   onUpdateSpotifyToken: (token: string) => void;
+  songRequestState?: SongRequestState;
 }
 
 type ActiveTab = 'local_audio' | 'youtube' | 'spotify' | 'queue' | 'viewer_portal';
@@ -77,6 +79,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   settings,
   onNavigateToSettings,
   onUpdateSpotifyToken,
+  songRequestState,
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('queue');
   const [audioState, setAudioState] = useState<AudioEngineState>(audioEngine.getState());
@@ -189,6 +192,9 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
     const file = localFilesMap.get(trackId);
 
     if (file) {
+      if (songRequestState?.currentTrack || songRequestEngine.getState().isPlaying) {
+        await songRequestEngine.stop();
+      }
       await audioEngine.loadAndPlayFile(item.id, item.title, item.artist, file);
       // Mark as playing in queue
       const updated = unifiedQueue.map((q) => ({
@@ -203,14 +209,19 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
 
   // Determine current Now Playing display
   const activeQueuePlaying = unifiedQueue.find((q) => q.status === 'playing');
-  const displayTitle = audioState.currentTrackId
+  const isSongRequestActive = Boolean(songRequestState?.currentTrack);
+  const displayTitle = isSongRequestActive
+    ? songRequestState!.currentTrack!.title
+    : audioState.currentTrackId
     ? audioState.title
     : activeQueuePlaying?.title || nowPlayingSong?.title || 'No Active Track';
-  const displayArtist = audioState.currentTrackId
+  const displayArtist = isSongRequestActive
+    ? songRequestState!.currentTrack!.artist
+    : audioState.currentTrackId
     ? audioState.artist
     : activeQueuePlaying?.artist || nowPlayingSong?.artist || 'Select a track to start';
-  const isLocalEngineActive = Boolean(audioState.currentTrackId);
-  const isPlayingNow = audioState.isPlaying || isPlaying;
+  const isLocalEngineActive = Boolean(audioState.currentTrackId) && !isSongRequestActive;
+  const isPlayingNow = isSongRequestActive ? !!songRequestState?.isPlaying : (audioState.isPlaying || isPlaying);
 
   const pendingCount = unifiedQueue.filter((q) => q.status === 'pending').length;
 
@@ -267,7 +278,11 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
             Now Playing on Stream
           </span>
           <span className="text-[11px] font-mono text-slate-400">
-            {isLocalEngineActive
+            {isSongRequestActive
+              ? songRequestState?.audioPlaybackMode === 'native_android_media'
+                ? 'Source: Song Request (Native Android)'
+                : `Source: Song Request (${songRequestState?.playbackStatus || 'idle'})`
+              : isLocalEngineActive
               ? 'Source: Local Device Audio'
               : activeQueuePlaying?.source
               ? `Source: ${activeQueuePlaying.source.toUpperCase()}`
@@ -342,10 +357,29 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
           </div>
         </div>
 
+        {/* Song Request Error / Status Notice */}
+        {(songRequestState?.lastError || songRequestState?.playbackStatus === 'preparing') && (
+          <div
+            className={`px-3 py-2 rounded-xl border text-xs ${
+              songRequestState?.lastError
+                ? 'bg-rose-950/50 border-rose-800/70 text-rose-300'
+                : 'bg-blue-950/40 border-blue-800/60 text-blue-300'
+            }`}
+          >
+            {songRequestState?.lastError || 'Memuat dan menyiapkan pemutaran lagu...'}
+          </div>
+        )}
+
         {/* Global Player Controls Bar */}
         <div className="flex items-center justify-between border-t border-slate-800/80 pt-3">
           <div className="text-xs text-slate-400">
-            {isLocalEngineActive ? (
+            {isSongRequestActive ? (
+              <span className={isPlayingNow ? 'text-emerald-400 font-semibold' : 'text-amber-300 font-semibold'}>
+                {songRequestState?.audioPlaybackMode === 'native_android_media'
+                  ? `Native Media (${songRequestState?.playbackStatus})`
+                  : `Song Request (${songRequestState?.playbackStatus})`}
+              </span>
+            ) : isLocalEngineActive ? (
               <span className="text-emerald-400 font-semibold">HTML5 Engine Active</span>
             ) : (
               <span>Queue Standby</span>
@@ -363,7 +397,9 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
 
             <button
               onClick={() => {
-                if (isLocalEngineActive) {
+                if (isSongRequestActive) {
+                  onTogglePlay();
+                } else if (isLocalEngineActive) {
                   audioEngine.togglePlay();
                 } else {
                   onTogglePlay();

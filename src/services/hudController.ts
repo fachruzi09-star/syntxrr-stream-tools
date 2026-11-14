@@ -205,10 +205,21 @@ export function buildMusicModel(options: {
   volume: number;
   queue: HudQueueEntry[];
   requestSourceConnected: boolean;
+  playbackStatus?: 'idle' | 'preparing' | 'playing' | 'paused' | 'completed' | 'stopped' | 'error';
+  errorMessage?: string | null;
 }): HudStateModel {
-  const { nowPlaying, isPlaying, muted, volume, queue, requestSourceConnected } = options;
+  const {
+    nowPlaying,
+    isPlaying,
+    muted,
+    volume,
+    queue,
+    requestSourceConnected,
+    playbackStatus,
+    errorMessage,
+  } = options;
 
-  // Hanya Play/Pause, Next, dan Mute. Next tetap hanya untuk streamer.
+  // Hanya Play/Pause, Next, dan Mute.
   const buttons: HudButtonModel[] = [
     { label: isPlaying ? 'Pause' : 'Play', action: 'music.toggle', active: isPlaying },
     { label: 'Next', action: 'music.next' },
@@ -217,13 +228,32 @@ export function buildMusicModel(options: {
 
   const rows: HudRowModel[] = [];
 
+  const trailingLabel = nowPlaying
+    ? isPlaying
+      ? 'Memutar'
+      : playbackStatus === 'preparing'
+      ? 'Memuat'
+      : playbackStatus === 'error'
+      ? 'Gagal'
+      : 'Dijeda'
+    : '';
+
   rows.push({
     label: nowPlaying ? nowPlaying.title : 'Tidak ada lagu aktif',
     sub: nowPlaying
       ? [nowPlaying.artist, muted ? 'Mute' : undefined].filter(Boolean).join(' · ')
-      : 'Pilih lagu dari Music',
-    trailing: nowPlaying ? (isPlaying ? 'Memutar' : 'Dijeda') : '',
+      : errorMessage
+      ? errorMessage
+      : 'Ketik !play <judul> di chat atau pilih dari Music',
+    trailing: trailingLabel,
   });
+
+  if (errorMessage && nowPlaying) {
+    rows.push({
+      label: 'Info pemutaran',
+      sub: errorMessage,
+    });
+  }
 
   queue.slice(0, 3).forEach((item, index) => {
     rows.push({
@@ -242,11 +272,16 @@ export function buildMusicModel(options: {
     },
   ];
 
-  const statusInfo = nowPlaying
-    ? isPlaying
-      ? status('Memutar', 'ok')
-      : status('Dijeda', 'warn')
-    : status('Tidak ada lagu', 'off');
+  const statusInfo =
+    playbackStatus === 'error'
+      ? status('Gagal putar', 'warn')
+      : playbackStatus === 'preparing'
+      ? status('Memuat lagu', 'warn')
+      : nowPlaying
+      ? isPlaying
+        ? status('Memutar', 'ok')
+        : status('Dijeda', 'warn')
+      : status('Tidak ada lagu', 'off');
 
   return {
     panel: 'music',
@@ -258,7 +293,7 @@ export function buildMusicModel(options: {
     listHeightDp: 128,
     emptyText: requestSourceConnected
       ? 'Antrean kosong.'
-      : 'Antrean kosong. Perintah !play menunggu sumber event TikTok aktif.',
+      : 'Antrean kosong. Perintah !play & !next menunggu sumber event TikTok aktif.',
   };
 }
 

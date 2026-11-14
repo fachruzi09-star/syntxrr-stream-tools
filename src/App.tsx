@@ -39,11 +39,16 @@ import {
   DEFAULT_INTEGRATIONS,
 } from './services/storage';
 import { triggerHaptic } from './services/haptics';
-import { audioEngine } from './services/localAudioEngine';
+import { audioEngine, type AudioEngineState } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
 import { dispatchSoundboard } from './services/soundboardDispatcher';
 import { ttsService, DEFAULT_TTS_CONFIG } from './services/ttsService';
 import { streamEventBus } from './services/eventBus';
+import {
+  songRequestEngine,
+  type SongRequestItem,
+  type SongRequestState,
+} from './services/songRequestEngine';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { NavigationDrawerModal } from './components/NavigationDrawerModal';
@@ -127,8 +132,9 @@ export default function App() {
 
   // Music Center State (HTML5 local audio + Queue + Song Requests)
   const [songRequests, setSongRequests] = useState<SongRequest[]>(DEFAULT_SONG_REQUESTS);
-  const [nowPlayingSong, setNowPlayingSong] = useState<SongRequest | null>(DEFAULT_SONG_REQUESTS[0]);
-  const [isPlayingMusic, setIsPlayingMusic] = useState(false);
+  const [nowPlayingSong, setNowPlayingSong] = useState<SongRequest | null>(null);
+  const [audioEngineState, setAudioEngineState] = useState<AudioEngineState>(audioEngine.getState());
+  const [srState, setSrState] = useState<SongRequestState>(songRequestEngine.getState());
   const [unifiedQueue, setUnifiedQueue] = useState<UnifiedQueueItem[]>([]);
   const [localTracksMeta, setLocalTracksMeta] = useState<LocalAudioTrackMeta[]>([]);
   const [localFilesMap, setLocalFilesMap] = useState<Map<string, File>>(new Map());
@@ -197,15 +203,20 @@ export default function App() {
         setUnifiedQueue(savedQueue);
         setLocalTracksMeta(savedLocalMeta);
         setSongRequests(savedRequests);
-        const currentPlaying = savedRequests.find((r) => r.status === 'playing') || savedRequests[0] || null;
-        setNowPlayingSong(currentPlaying);
         setScenes(savedScenes);
         setActiveSceneId(savedActiveSceneId);
         setAlertSettings(savedAlertSettings);
         setAlertHistory(savedAlertHistory);
 
         // Apply audio volumes (canonical 0.0-1.0)
-        audioEngine.setVolume(normalizeUnitVolume(savedSettings.audioVolume, 0.85));
+        const initialVolumeUnit = normalizeUnitVolume(savedSettings.audioVolume, 0.85);
+        audioEngine.setVolume(initialVolumeUnit);
+        songRequestEngine.configureContext({
+          operatingMode: savedSettings.operatingMode,
+          youtubeApiKey: savedSettings.youtubeApiKey || '',
+          spotifyAccessToken: savedSettings.spotifyAccessToken || '',
+          volumeUnit: initialVolumeUnit,
+        });
         soundboardEngine.setVolume(normalizeUnitVolume(savedSettings.soundboardVolume, 0.85));
 
         // Apply saved theme immediately on startup
@@ -248,10 +259,34 @@ export default function App() {
     previousSoundboardUrls.current.clear();
   }, []);
 
-  // Synchronize music player playback state and automatic track progression
+  // Subscribe to Song Request Engine state
   useEffect(() => {
-    const unsub = audioEngine.subscribe((audioState) => {
-      setIsPlayingMusic(audioState.isPlaying);
+    return songRequestEngine.subscribe(setSrState);
+  }, []);
+
+  // Keep Song Request Engine context & local audio library synchronized
+  useEffect(() => {
+    songRequestEngine.configureContext({
+      operatingMode: settings.operatingMode,
+      youtubeApiKey: settings.youtubeApiKey || '',
+      spotifyAccessToken: settings.spotifyAccessToken || '',
+      volumeUnit: normalizeUnitVolume(settings.audioVolume, 0.85),
+    });
+  }, [
+    settings.operatingMode,
+    settings.youtubeApiKey,
+    settings.spotifyAccessToken,
+    settings.audioVolume,
+  ]);
+
+  useEffect(() => {
+    songRequestEngine.registerLocalLibrary(localTracksMeta, localFilesMap);
+  }, [localTracksMeta, localFilesMap]);
+
+  // Synchronize manual audioEngine playback state and automatic track progression
+  useEffect(() => {
+    const unsub = audioEngine.subscribe((state) => {
+      setAudioEngineState(state);
     });
     audioEngine.setOnEnded(() => {
       void handleNextTrack();
@@ -260,7 +295,7 @@ export default function App() {
       unsub();
       audioEngine.setOnEnded(null);
     };
-  }, [unifiedQueue]);
+  }, [unifiedQueue, srState.currentTrack, srState.queue]);
 
   const handleDismissAlert = useCallback(() => {
     setActiveFloatingAlert(null);
@@ -573,28 +608,117 @@ export default function App() {
     await StorageService.saveIntegrations(newIntegrations);
   };
 
-  // Music Player Controls (HTML5 Audio & Hybrid Queue)
+  const mapSrItemToUnifiedQueueItem = (
+    item: SongRequestItem,
+    status: 'playing' | 'approved'
+  ): UnifiedQueueItem => ({
+    id: item.id,
+    title: item.title,
+    artist: item.artist,
+    source:
+      item.sourceType === 'local_file'
+        ? 'local'
+        : item.sourceType === 'youtube_metadata'
+        ? 'youtube'
+        : item.sourceType === 'spotify_metadata'
+        ? 'spotify'
+        : 'viewer_request',
+    externalUrl: item.externalUrl,
+    thumbnailUrl: item.thumbnailUrl,
+    duration: item.durationSec,
+    requesterName: item.requester,
+    platform: item.platform || 'TikTok',
+    addedAt: item.requestedAt,
+    status,
+    notes: item.notes,
+    localFileKey: item.localFileId,
+  });
+
+  const srActiveIds = new Set<string>([
+    ...(srState.currentTrack ? [srState.currentTrack.id] : []),
+    ...srState.queue.map((item) => item.id),
+  ]);
+
+  const combinedUnifiedQueue: UnifiedQueueItem[] = [
+    ...(srState.currentTrack
+      ? [mapSrItemToUnifiedQueueItem(srState.currentTrack, 'playing')]
+      : []),
+    ...srState.queue.map((item) => mapSrItemToUnifiedQueueItem(item, 'approved')),
+    ...unifiedQueue.filter((item) => !srActiveIds.has(item.id)),
+  ];
+
+  const effectiveNowPlayingSong: SongRequest | null = srState.currentTrack
+    ? {
+        id: srState.currentTrack.id,
+        title: srState.currentTrack.title,
+        artist: srState.currentTrack.artist,
+        duration: srState.durationSec || srState.currentTrack.durationSec,
+        requesterName: srState.currentTrack.requester,
+        platform: srState.currentTrack.platform || 'TikTok',
+        status: srState.isPlaying ? 'playing' : 'queued',
+        requestedAt: srState.currentTrack.requestedAt,
+        source:
+          srState.currentTrack.sourceType === 'local_file'
+            ? 'local'
+            : srState.currentTrack.sourceType === 'youtube_metadata'
+            ? 'youtube'
+            : srState.currentTrack.sourceType === 'spotify_metadata'
+            ? 'spotify'
+            : 'viewer_request',
+        externalUrl: srState.currentTrack.externalUrl,
+        thumbnailUrl: srState.currentTrack.thumbnailUrl,
+      }
+    : audioEngineState.currentTrackId
+    ? {
+        id: audioEngineState.currentTrackId,
+        title: audioEngineState.title,
+        artist: audioEngineState.artist,
+        duration: Math.round(audioEngineState.duration || 0),
+        requesterName: nowPlayingSong?.requesterName || 'Streamer',
+        platform: nowPlayingSong?.platform || 'Local',
+        status: audioEngineState.isPlaying ? 'playing' : 'queued',
+        requestedAt: nowPlayingSong?.requestedAt || Date.now(),
+      }
+    : nowPlayingSong;
+
+  const effectiveIsPlayingMusic = srState.currentTrack
+    ? srState.isPlaying
+    : audioEngineState.isPlaying;
+
+  // Music Player Controls (Mode A SongRequestEngine + HTML5 LocalAudioEngine)
   const handleTogglePlayMusic = () => {
+    if (srState.currentTrack || srState.queue.length > 0) {
+      if (audioEngine.getState().isPlaying) {
+        audioEngine.pause();
+      }
+      void songRequestEngine.togglePlayPause();
+      return;
+    }
+
     const audioState = audioEngine.getState();
     if (audioState.isPlaying) {
       audioEngine.pause();
-      setIsPlayingMusic(false);
+    } else if (audioState.currentTrackId) {
+      void audioEngine.play();
     } else {
-      if (audioState.currentTrackId) {
-        void audioEngine.play();
-        setIsPlayingMusic(true);
-      } else {
-        const activeSong = unifiedQueue.find((s) => s.status === 'playing') || unifiedQueue[0];
-        if (activeSong && activeSong.externalUrl) {
-          void audioEngine.loadAndPlayUrl(activeSong.id, activeSong.title, activeSong.artist, activeSong.externalUrl);
-        } else {
-          setIsPlayingMusic((prev) => !prev);
+      const activeSong = unifiedQueue.find((s) => s.status === 'playing') || unifiedQueue[0];
+      if (activeSong?.localFileKey) {
+        const file = localFilesMap.get(activeSong.localFileKey);
+        if (file) {
+          void audioEngine.loadAndPlayFile(activeSong.id, activeSong.title, activeSong.artist, file);
         }
+      } else if (activeSong?.externalUrl) {
+        void audioEngine.loadAndPlayUrl(activeSong.id, activeSong.title, activeSong.artist, activeSong.externalUrl);
       }
     }
   };
 
   const handleNextTrack = async () => {
+    if (srState.currentTrack || srState.queue.length > 0) {
+      await songRequestEngine.skipTrack('Streamer');
+      return;
+    }
+
     const queued = unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending');
     if (queued.length > 0) {
       const nextItem = queued[0];
@@ -617,13 +741,15 @@ export default function App() {
         requestedAt: nextItem.addedAt,
       };
       setNowPlayingSong(legacyItem);
-      if (nextItem.externalUrl) {
+      if (nextItem.localFileKey && localFilesMap.has(nextItem.localFileKey)) {
+        const file = localFilesMap.get(nextItem.localFileKey)!;
+        await audioEngine.loadAndPlayFile(nextItem.id, nextItem.title, nextItem.artist, file);
+      } else if (nextItem.externalUrl && nextItem.source === 'local') {
         await audioEngine.loadAndPlayUrl(nextItem.id, nextItem.title, nextItem.artist, nextItem.externalUrl);
       }
-      setIsPlayingMusic(true);
     } else {
       audioEngine.pause();
-      setIsPlayingMusic(false);
+      setNowPlayingSong(null);
     }
   };
 
@@ -650,10 +776,12 @@ export default function App() {
         requestedAt: prevItem.addedAt,
       };
       setNowPlayingSong(legacyItem);
-      if (prevItem.externalUrl) {
+      if (prevItem.localFileKey && localFilesMap.has(prevItem.localFileKey)) {
+        const file = localFilesMap.get(prevItem.localFileKey)!;
+        await audioEngine.loadAndPlayFile(prevItem.id, prevItem.title, prevItem.artist, file);
+      } else if (prevItem.externalUrl && prevItem.source === 'local') {
         await audioEngine.loadAndPlayUrl(prevItem.id, prevItem.title, prevItem.artist, prevItem.externalUrl);
       }
-      setIsPlayingMusic(true);
     }
   };
 
@@ -666,6 +794,15 @@ export default function App() {
     const updated = [...songRequests, newSong];
     setSongRequests(updated);
     await StorageService.saveSongRequests(updated);
+
+    if (isModeAOperatingMode(settings.operatingMode) && newRequest.title?.trim()) {
+      await songRequestEngine.handlePlayCommand(
+        newRequest.requesterName || 'Streamer',
+        newRequest.title.trim(),
+        false
+      );
+      return;
+    }
 
     const queueItem: UnifiedQueueItem = {
       id: newSong.id,
@@ -683,18 +820,11 @@ export default function App() {
     await StorageService.saveUnifiedQueue(updatedQueue);
   };
 
-  // Handler terbaru untuk listener yang dipasang sekali (menghindari closure basi).
-  const addSongRequestRef = useRef(handleAddSongRequest);
-  useEffect(() => {
-    addSongRequestRef.current = handleAddSongRequest;
-  });
-
   /**
    * Buffer event LIVE untuk panel Chat HUD.
    * - terbatas di memori (HUD_EVENT_BUFFER_LIMIT), terbaru lebih dulu
    * - identitas event unik agar tidak duplikat saat reconnect
-   * - perintah viewer "!play <judul>" menambah antrean lagu yang sama dengan Music
-   *   ("!next" sengaja TIDAK didukung: Next hanya untuk streamer)
+   * - perintah !play / !next Mode A diproses oleh songRequestEngine.
    */
   useEffect(() => {
     type BusEvent = ReturnType<typeof streamEventBus.getHistory>[number];
@@ -722,31 +852,19 @@ export default function App() {
 
     return streamEventBus.subscribe((streamEvent) => {
       pushEvent(streamEvent);
-
-      if (streamEvent.type !== 'chat') return;
-      const match = /^!play\s+(.+)$/i.exec(streamEvent.detail.trim());
-      if (!match) return;
-      const title = match[1].trim().slice(0, 120);
-      if (!title) return;
-
-      void addSongRequestRef.current({
-        title,
-        artist: 'Song Request',
-        duration: 180,
-        requesterName: streamEvent.username || 'Viewer',
-        platform: 'TikTok',
-        status: 'queued',
-        source: 'viewer_request',
-      });
     });
   }, []);
 
   const handleDeleteSongRequest = async (id: string) => {
     const updated = songRequests.filter((s) => s.id !== id);
     setSongRequests(updated);
+    if (srState.currentTrack?.id === id) {
+      await songRequestEngine.stop();
+    } else if (srState.queue.some((q) => q.id === id)) {
+      songRequestEngine.removeQueueItem(id);
+    }
     if (nowPlayingSong?.id === id) {
-      const nextSong = updated[0] || null;
-      setNowPlayingSong(nextSong);
+      setNowPlayingSong(null);
     }
     await StorageService.saveSongRequests(updated);
 
@@ -763,7 +881,6 @@ export default function App() {
     });
     setSongRequests(updated);
     setNowPlayingSong(song);
-    setIsPlayingMusic(true);
     await StorageService.saveSongRequests(updated);
   };
 
@@ -841,9 +958,31 @@ export default function App() {
     await StorageService.saveLocalTracksMeta(updated);
   };
 
-  const handleUpdateUnifiedQueue = async (queue: UnifiedQueueItem[]) => {
-    setUnifiedQueue(queue);
-    await StorageService.saveUnifiedQueue(queue);
+  const handleUpdateUnifiedQueue = async (nextQueue: UnifiedQueueItem[]) => {
+    const currentSrId = srState.currentTrack?.id;
+    const queuedSrMap = new Map(srState.queue.map((item) => [item.id, item]));
+
+    if (currentSrId && !nextQueue.some((item) => item.id === currentSrId)) {
+      await songRequestEngine.stop();
+    }
+
+    const updatedSrQueue: SongRequestItem[] = [];
+    const manualQueue: UnifiedQueueItem[] = [];
+    for (const item of nextQueue) {
+      if (item.id === currentSrId) {
+        continue;
+      }
+      const existingSr = queuedSrMap.get(item.id);
+      if (existingSr) {
+        updatedSrQueue.push(existingSr);
+      } else {
+        manualQueue.push(item);
+      }
+    }
+
+    songRequestEngine.setQueue(updatedSrQueue);
+    setUnifiedQueue(manualQueue);
+    await StorageService.saveUnifiedQueue(manualQueue);
   };
 
   const handleUpdateSpotifyToken = async (token: string) => {
@@ -993,6 +1132,7 @@ export default function App() {
       const unit = percentToUnitVolume(sliderValue, 0.85);
       next.audioVolume = unit;
       if (!musicMuted) audioEngine.setVolume(unit);
+      songRequestEngine.setVolume(Math.round(unit * 100));
     } else if (key === 'soundboardVolume') {
       const unit = percentToUnitVolume(sliderValue, 0.85);
       next.soundboardVolume = unit;
@@ -1156,6 +1296,7 @@ export default function App() {
     setMusicMuted((prev) => {
       const next = !prev;
       audioEngine.setVolume(next ? 0 : musicVolumeUnit);
+      songRequestEngine.setMuted(next);
       return next;
     });
   };
@@ -1163,6 +1304,7 @@ export default function App() {
   const handleHudMusicVolume = (percent: number) => {
     const unit = percentToUnitVolume(percent, 0.85);
     if (!musicMuted) audioEngine.setVolume(unit);
+    songRequestEngine.setVolume(Math.round(unit * 100));
     void handleUpdateSettings({ ...settings, audioVolume: unit });
   };
 
@@ -1325,20 +1467,23 @@ export default function App() {
       }
       if (panel === 'music') {
         return buildMusicModel({
-          nowPlaying: nowPlayingSong
-            ? { title: nowPlayingSong.title, artist: nowPlayingSong.artist }
+          nowPlaying: effectiveNowPlayingSong
+            ? { title: effectiveNowPlayingSong.title, artist: effectiveNowPlayingSong.artist }
             : null,
-          isPlaying: isPlayingMusic,
+          isPlaying: effectiveIsPlayingMusic,
           muted: musicMuted,
           volume: Math.round(musicVolumeUnit * 100),
-          queue: unifiedQueue
+          queue: combinedUnifiedQueue
             .filter(
               (item) =>
                 item.status === 'approved' || item.status === 'pending' || item.status === 'playing'
             )
+            .filter((item) => item.id !== effectiveNowPlayingSong?.id)
             .slice(0, 6)
             .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
           requestSourceConnected: hudEventSourceStatus(hudEvents).tone === 'ok',
+          playbackStatus: srState.currentTrack ? srState.playbackStatus : undefined,
+          errorMessage: srState.lastError,
         });
       }
       return buildMixerModel({
@@ -1358,11 +1503,14 @@ export default function App() {
       hudPlayingSoundId,
       soundboardVolumeUnit,
       ttsVolumeUnit,
-      nowPlayingSong,
-      isPlayingMusic,
+      effectiveNowPlayingSong,
+      effectiveIsPlayingMusic,
       musicMuted,
       musicVolumeUnit,
-      unifiedQueue,
+      combinedUnifiedQueue,
+      srState.playbackStatus,
+      srState.lastError,
+      srState.currentTrack,
     ]
   );
 
@@ -1426,7 +1574,7 @@ export default function App() {
     );
   }
 
-  const pendingRequestsCount = unifiedQueue.filter((s) => s.status === 'pending').length;
+  const pendingRequestsCount = combinedUnifiedQueue.filter((s) => s.status === 'pending' || s.status === 'approved').length;
 
   return (
     <I18nProvider language={settings.language || 'id-ID'}>
@@ -1535,8 +1683,8 @@ export default function App() {
           <MusicCenterView
             // Stage 1 Backwards Compatible Props
             songRequests={songRequests}
-            nowPlayingSong={nowPlayingSong}
-            isPlaying={isPlayingMusic}
+            nowPlayingSong={effectiveNowPlayingSong}
+            isPlaying={effectiveIsPlayingMusic}
             onTogglePlay={handleTogglePlayMusic}
             onNextTrack={handleNextTrack}
             onPrevTrack={handlePrevTrack}
@@ -1545,7 +1693,7 @@ export default function App() {
             onLoadPresetPack={handleLoadPresetPack}
             onSetNowPlaying={handleSetNowPlaying}
             // Stage 2 Upgraded Props
-            unifiedQueue={unifiedQueue}
+            unifiedQueue={combinedUnifiedQueue}
             onUpdateUnifiedQueue={handleUpdateUnifiedQueue}
             localTracksMeta={localTracksMeta}
             localFilesMap={localFilesMap}
@@ -1554,6 +1702,7 @@ export default function App() {
             settings={settings}
             onNavigateToSettings={() => setActiveNav('settings')}
             onUpdateSpotifyToken={handleUpdateSpotifyToken}
+            songRequestState={srState}
           />
         )}
 
@@ -1617,10 +1766,10 @@ export default function App() {
         alerts={alertHistory}
         sounds={soundboardItems}
         onPlaySound={handlePlaySoundFromDeck}
-        nowPlaying={nowPlayingSong}
-        isPlayingMusic={isPlayingMusic}
+        nowPlaying={effectiveNowPlayingSong}
+        isPlayingMusic={effectiveIsPlayingMusic}
         onTogglePlayMusic={handleTogglePlayMusic}
-        queueCount={unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
+        queueCount={combinedUnifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
         masterVolume={unitVolumeToPercent(settings.audioVolume, 0.85)}
         soundboardVolume={unitVolumeToPercent(settings.soundboardVolume, 0.85)}
         micGain={Math.max(0, Math.min(200, Math.round(settings.micGain ?? 100)))}
