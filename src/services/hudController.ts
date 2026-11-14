@@ -170,18 +170,19 @@ export function buildSoundboardModel(
     })),
   };
 
+  const clampPct = (v: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(v) ? v : 0)));
   const sliders: HudSliderModel[] = [
     {
       id: 'soundboardVolume',
       label: 'Volume efek',
-      value: Math.round(soundboardVolume * 100),
+      value: clampPct(soundboardVolume * 100),
       max: 100,
       action: 'soundboard.volume',
     },
     {
       id: 'ttsVolume',
       label: 'Volume TTS',
-      value: Math.round(ttsVolume * 100),
+      value: clampPct(ttsVolume * 100),
       max: 100,
       action: 'tts.volume',
     },
@@ -235,7 +236,7 @@ export function buildMusicModel(options: {
     {
       id: 'audioVolume',
       label: 'Volume musik',
-      value: Math.round(volume),
+      value: Math.max(0, Math.min(100, Math.round(Number.isFinite(volume) ? volume : 85))),
       max: 100,
       action: 'music.volume',
     },

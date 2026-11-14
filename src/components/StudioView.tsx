@@ -155,11 +155,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Multi-Camera Stream Store (elementId -> MediaStream)
   const [activeCameraStreams, setActiveCameraStreams] = useState<Record<string, MediaStream>>({});
+  const activeCameraStreamsRef = useRef<Record<string, MediaStream>>({});
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
   // Screen Capture Stream Store
   const [screenCaptureStream, setScreenCaptureStream] = useState<MediaStream | null>(null);
+  const screenCaptureStreamRef = useRef<MediaStream | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  const isMountedRef = useRef<boolean>(true);
 
   // Active Reactions on Canvas (Trigger Engine)
   const [activeReactions, setActiveReactions] = useState<Record<string, ActiveElementReaction>>({});
@@ -280,17 +283,56 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const selectedElement = elements.find((e) => e.id === selectedId) || null;
 
-  // Cleanup camera and screen tracks on unmount
   useEffect(() => {
+    activeCameraStreamsRef.current = activeCameraStreams;
+  }, [activeCameraStreams]);
+
+  useEffect(() => {
+    screenCaptureStreamRef.current = screenCaptureStream;
+  }, [screenCaptureStream]);
+
+  // Stop orphaned camera streams if a preset switch or external update removes those elements
+  useEffect(() => {
+    const activeElementIds = new Set(
+      elements.filter((elem) => elem.type === 'camera').map((elem) => elem.id)
+    );
+    const currentStreams = activeCameraStreamsRef.current;
+    const orphanedIds = Object.keys(currentStreams).filter((id) => !activeElementIds.has(id));
+    if (orphanedIds.length === 0) return;
+
+    orphanedIds.forEach((id) => {
+      currentStreams[id]?.getTracks().forEach((track) => track.stop());
+      if (videoRefs.current[id]) {
+        videoRefs.current[id]!.srcObject = null;
+      }
+    });
+
+    setActiveCameraStreams((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      orphanedIds.forEach((id) => {
+        if (next[id]) {
+          delete next[id];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [elements]);
+
+  // Cleanup all remaining camera and screen tracks strictly on component unmount
+  useEffect(() => {
+    isMountedRef.current = true;
     return () => {
-      Object.values(activeCameraStreams).forEach((stream) => {
+      isMountedRef.current = false;
+      Object.values(activeCameraStreamsRef.current).forEach((stream) => {
         stream.getTracks().forEach((track) => track.stop());
       });
-      if (screenCaptureStream) {
-        screenCaptureStream.getTracks().forEach((track) => track.stop());
+      if (screenCaptureStreamRef.current) {
+        screenCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [activeCameraStreams, screenCaptureStream]);
+  }, []);
 
   // EVENT-TO-ELEMENT ENGINE: Subscribe to streamEventBus
   useEffect(() => {
@@ -470,10 +512,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // MULTI-CAMERA STREAM CONTROL PER ELEMENT
   const handleToggleCameraForElement = async (elemId: string, requestedFacingMode?: 'user' | 'environment') => {
-    const existing = activeCameraStreams[elemId];
+    const existing = activeCameraStreamsRef.current[elemId];
     if (existing) {
       existing.getTracks().forEach((track) => track.stop());
       setActiveCameraStreams((prev) => {
+        if (!prev[elemId]) return prev;
         const next = { ...prev };
         delete next[elemId];
         return next;
@@ -484,7 +527,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     } else {
       try {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const facing = requestedFacingMode || selectedElement?.properties?.facingMode || 'user';
+          const targetElement = elementsRef.current.find((e) => e.id === elemId);
+          const facing = requestedFacingMode || targetElement?.properties?.facingMode || 'user';
           const stream = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: facing,
@@ -494,10 +538,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
             audio: false,
           });
 
-          setActiveCameraStreams((prev) => ({
-            ...prev,
-            [elemId]: stream,
-          }));
+          if (!isMountedRef.current) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+
+          setActiveCameraStreams((prev) => {
+            const previousForElem = prev[elemId];
+            if (previousForElem && previousForElem !== stream) {
+              previousForElem.getTracks().forEach((track) => track.stop());
+            }
+            return {
+              ...prev,
+              [elemId]: stream,
+            };
+          });
 
           if (videoRefs.current[elemId]) {
             videoRefs.current[elemId]!.srcObject = stream;
@@ -515,8 +570,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // SCREEN CAPTURE CONTROL (getDisplayMedia)
   const handleToggleScreenCapture = async () => {
-    if (screenCaptureStream) {
-      screenCaptureStream.getTracks().forEach((t) => t.stop());
+    const existingScreen = screenCaptureStreamRef.current;
+    if (existingScreen) {
+      existingScreen.getTracks().forEach((t) => t.stop());
       setScreenCaptureStream(null);
       if (screenVideoRef.current) {
         screenVideoRef.current.srcObject = null;
@@ -524,18 +580,30 @@ export const StudioView: React.FC<StudioViewProps> = ({
     } else {
       try {
         if (navigator.mediaDevices && (navigator.mediaDevices as any).getDisplayMedia) {
-          const stream = await (navigator.mediaDevices as any).getDisplayMedia({
+          const stream: MediaStream = await (navigator.mediaDevices as any).getDisplayMedia({
             video: { frameRate: { ideal: 60 } },
             audio: true,
           });
+
+          if (!isMountedRef.current) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+
           setScreenCaptureStream(stream);
           if (screenVideoRef.current) {
             screenVideoRef.current.srcObject = stream;
             screenVideoRef.current.play().catch(() => {});
           }
-          stream.getVideoTracks()[0].onended = () => {
-            setScreenCaptureStream(null);
-          };
+          const videoTrack = stream.getVideoTracks()[0];
+          if (videoTrack) {
+            videoTrack.onended = () => {
+              setScreenCaptureStream((current) => (current === stream ? null : current));
+              if (screenVideoRef.current && screenVideoRef.current.srcObject === stream) {
+                screenVideoRef.current.srcObject = null;
+              }
+            };
+          }
         } else {
           alert('Screen capture getDisplayMedia tidak didukung di perangkat/browser ini.');
         }

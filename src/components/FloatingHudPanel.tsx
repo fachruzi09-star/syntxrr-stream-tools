@@ -39,7 +39,7 @@ import {
   UserPlus,
   ListMusic,
 } from 'lucide-react';
-import type { AlertEvent, OperatingMode, SongRequest, SoundboardItem } from '../types';
+import { isModeAOperatingMode, type AlertEvent, type OperatingMode, type SongRequest, type SoundboardItem } from '../types';
 
 export type HudPanelId = 'chat' | 'soundboard' | 'music' | 'mixer' | 'live' | 'settings';
 
@@ -140,11 +140,13 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
   const recentAlerts = alerts.slice(0, 12);
 
   const handleMuteToggle = () => {
-    if (masterVolume > 0) {
-      setMutedVolume(masterVolume);
+    const currentPercent = clampPercent(masterVolume, 0, 100);
+    if (currentPercent > 0) {
+      setMutedVolume(currentPercent);
       onMixerChange('audioVolume', 0);
     } else {
-      onMixerChange('audioVolume', mutedVolume ?? 60);
+      const restorePercent = mutedVolume !== null && mutedVolume > 0 ? clampPercent(mutedVolume, 1, 100) : 85;
+      onMixerChange('audioVolume', restorePercent);
       setMutedVolume(null);
     }
   };
@@ -279,7 +281,7 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
       case 'live':
         return (
           <div className="space-y-3">
-            {(operatingMode === 'MODE_A_TIKTOK_COMPANION' || operatingMode === 'MODE_A_OVERLAY') ? (
+            {isModeAOperatingMode(operatingMode) ? (
               <>
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Mode A adalah pendamping TikTok LIVE. Siaran tetap dijalankan dan dikendalikan oleh

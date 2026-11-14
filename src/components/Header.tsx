@@ -1,4 +1,4 @@
-import { NavigationTab, OperatingMode, StudioPreset } from '../types';
+import { NavigationTab, OperatingMode, isModeAOperatingMode, StudioPreset } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import {
   Radio,
@@ -26,7 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenModeModal,
 }) => {
   const { t } = useTranslation();
-  const isModeA = operatingMode === 'MODE_A_TIKTOK_COMPANION' || operatingMode === 'MODE_A_OVERLAY';
+  const isModeA = isModeAOperatingMode(operatingMode);
 
   return (
     <header className="pt-safe sticky top-0 z-30 bg-[#080c16]/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3">

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   AppSettings,
   OperatingMode,
+  isModeAOperatingMode,
   StudioPreset,
   NavigationTab,
   IntegrationProvider,
@@ -60,9 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const { t, isEnglish } = useTranslation();
 
-  const isModeA =
-    settings.operatingMode === 'MODE_A_TIKTOK_COMPANION' ||
-    settings.operatingMode === 'MODE_A_OVERLAY';
+  const isModeA = isModeAOperatingMode(settings.operatingMode);
 
   const connectedCount = integrations.filter((i) => i.status === 'ACTIVE').length;
   const elementsCount = activePreset?.elements.length || 0;
@@ -152,8 +151,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         return;
       }
 
-      // 2. Call showFloatingHud
-      const res = await showFloatingHud();
+      // 2. Call showFloatingHud with saved appearance preferences
+      const res = await showFloatingHud({
+        sizeDp: settings.hudButtonSize ?? 48,
+        opacity: settings.hudOpacity ?? 92,
+        position: settings.hudPosition === 'left' ? 'left' : 'right',
+      });
       if (res.success || res.isVisible) {
         setIsHudVisible(true);
         setHudFeedback({

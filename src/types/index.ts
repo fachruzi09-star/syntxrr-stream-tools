@@ -2,6 +2,38 @@ import { FeatureStatus } from '../theme/designSystem';
 
 export type OperatingMode = 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER' | 'MODE_A_OVERLAY' | 'MODE_B_ENCODER';
 
+export type CanonicalOperatingMode = 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER';
+
+export function isModeAOperatingMode(mode: OperatingMode | string | undefined | null): boolean {
+  return mode === 'MODE_A_TIKTOK_COMPANION' || mode === 'MODE_A_OVERLAY';
+}
+
+export function isModeBOperatingMode(mode: OperatingMode | string | undefined | null): boolean {
+  return mode === 'MODE_B_STREAMING_ENCODER' || mode === 'MODE_B_ENCODER';
+}
+
+export function normalizeOperatingMode(mode: OperatingMode | string | undefined | null): CanonicalOperatingMode {
+  return isModeBOperatingMode(mode) ? 'MODE_B_STREAMING_ENCODER' : 'MODE_A_TIKTOK_COMPANION';
+}
+
+export function normalizeUnitVolume(value: unknown, fallback: number = 0.85): number {
+  const safeFallback = Number.isFinite(fallback) ? Math.max(0, Math.min(1, fallback)) : 0.85;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return safeFallback;
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.max(0, Math.min(1, normalized));
+}
+
+export function unitVolumeToPercent(unit: unknown, fallbackUnit: number = 0.85): number {
+  return Math.round(normalizeUnitVolume(unit, fallbackUnit) * 100);
+}
+
+export function percentToUnitVolume(percent: unknown, fallbackUnit: number = 0.85): number {
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) {
+    return normalizeUnitVolume(fallbackUnit, 0.85);
+  }
+  return Math.max(0, Math.min(1, percent / 100));
+}
+
 export type CanvasOrientation = '9:16' | '16:9' | '1:1';
 
 export type ResolutionTarget = '720p' | '1080p' | '1440p';

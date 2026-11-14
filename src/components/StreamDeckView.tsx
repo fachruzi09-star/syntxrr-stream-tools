@@ -9,6 +9,7 @@ import {
   AppSettings,
   StudioPreset,
   OperatingMode,
+  isModeAOperatingMode,
 } from '../types';
 import {
   streamDeckService,
@@ -182,11 +183,14 @@ export const StreamDeckView: React.FC<StreamDeckViewProps> = ({
                 onSelectPreset(packet.payload.presetId);
               }
               break;
-            case 'switch_mode':
-              const nextMode = operatingMode === 'MODE_A_OVERLAY' ? 'MODE_B_ENCODER' : 'MODE_A_OVERLAY';
+            case 'switch_mode': {
+              const nextMode = isModeAOperatingMode(operatingMode)
+                ? 'MODE_B_STREAMING_ENCODER'
+                : 'MODE_A_TIKTOK_COMPANION';
               logMessage = `Beralih ke mode: ${nextMode}`;
               onSelectMode(nextMode);
               break;
+            }
             case 'play_soundboard':
               logMessage = `Putar SFX: ${packet.payload?.name || packet.payload?.soundId}`;
               if (onPlaySound && packet.payload?.soundId) {
@@ -263,7 +267,11 @@ export const StreamDeckView: React.FC<StreamDeckViewProps> = ({
         if (btn.command === 'music_skip' && onSkipMusic) onSkipMusic();
         if (btn.command === 'switch_scene' && btn.payload?.presetId) onSelectPreset(btn.payload.presetId);
         if (btn.command === 'switch_mode') {
-          onSelectMode(operatingMode === 'MODE_A_OVERLAY' ? 'MODE_B_ENCODER' : 'MODE_A_OVERLAY');
+          onSelectMode(
+            isModeAOperatingMode(operatingMode)
+              ? 'MODE_B_STREAMING_ENCODER'
+              : 'MODE_A_TIKTOK_COMPANION'
+          );
         }
         if (btn.command === 'play_soundboard' && onPlaySound && btn.payload?.soundId) {
           onPlaySound(btn.payload.soundId);

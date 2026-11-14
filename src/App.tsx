@@ -9,6 +9,12 @@ import {
   AlertEvent,
   AlertType,
   OperatingMode,
+  isModeAOperatingMode,
+  isModeBOperatingMode,
+  normalizeOperatingMode,
+  normalizeUnitVolume,
+  unitVolumeToPercent,
+  percentToUnitVolume,
   CanvasOrientation,
   UnifiedQueueItem,
   LocalAudioTrackMeta,
@@ -198,10 +204,9 @@ export default function App() {
         setAlertSettings(savedAlertSettings);
         setAlertHistory(savedAlertHistory);
 
-        // Apply audio volume
-        if (savedSettings.audioVolume !== undefined) {
-          audioEngine.setVolume(savedSettings.audioVolume);
-        }
+        // Apply audio volumes (canonical 0.0-1.0)
+        audioEngine.setVolume(normalizeUnitVolume(savedSettings.audioVolume, 0.85));
+        soundboardEngine.setVolume(normalizeUnitVolume(savedSettings.soundboardVolume, 0.85));
 
         // Apply saved theme immediately on startup
         applyTheme(savedSettings.theme || 'navy_dark');
@@ -257,13 +262,42 @@ export default function App() {
     };
   }, [unifiedQueue]);
 
+  const handleDismissAlert = useCallback(() => {
+    setActiveFloatingAlert(null);
+  }, []);
+
   // Subscribe to Stream Event Bus to display floating overlay alerts
   useEffect(() => {
+    const mapStreamEventToAlertType = (eventType: string): AlertType => {
+      switch (eventType) {
+        case 'gift':
+          return 'gift';
+        case 'donation':
+          return 'donation';
+        case 'follow':
+        case 'follower':
+          return 'follow';
+        case 'like':
+          return 'like';
+        case 'share':
+          return 'share';
+        case 'sub':
+          return 'sub';
+        case 'chat':
+        case 'chat_event':
+        case 'join':
+        case 'viewer':
+        case 'custom':
+        default:
+          return 'chat_event';
+      }
+    };
+
     const unsubscribe = streamEventBus.subscribe((streamEvent) => {
-      // Map stream event to floating alert banner
+      // Map stream event to floating alert banner using canonical `message` property
       const alert: AlertEvent = {
         id: streamEvent.id,
-        type: streamEvent.type === 'gift' ? 'gift' : streamEvent.type === 'donation' ? 'donation' : 'follow',
+        type: mapStreamEventToAlertType(streamEvent.type),
         username: streamEvent.username,
         message: streamEvent.detail,
         amount: streamEvent.amount,
@@ -272,7 +306,6 @@ export default function App() {
         formattedTime: new Date(streamEvent.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setActiveFloatingAlert(alert);
-      setTimeout(() => setActiveFloatingAlert(null), 5000);
     });
 
     return () => unsubscribe();
@@ -316,7 +349,8 @@ export default function App() {
       const slot = Number(event.key);
       if (!Number.isInteger(slot) || slot < 1 || slot > 4) return;
 
-      void dispatchSoundboard(slot, soundboardItems, settings.soundboardVolume ?? 0.85).then((result) => {
+      const sbVolume = normalizeUnitVolume(settings.soundboardVolume, 0.85);
+      void dispatchSoundboard(slot, soundboardItems, sbVolume).then((result) => {
         switch (result.status) {
           case 'played':
             return;
@@ -373,12 +407,9 @@ export default function App() {
 
   // Mode Selection
   const handleSelectMode = async (mode: OperatingMode) => {
-    const isCurrentModeA =
-      settings.operatingMode === 'MODE_A_TIKTOK_COMPANION' ||
-      settings.operatingMode === 'MODE_A_OVERLAY';
-    const isTargetModeB =
-      mode === 'MODE_B_STREAMING_ENCODER' ||
-      mode === 'MODE_B_ENCODER';
+    const normalizedMode = normalizeOperatingMode(mode);
+    const isCurrentModeA = isModeAOperatingMode(settings.operatingMode);
+    const isTargetModeB = isModeBOperatingMode(normalizedMode);
 
     if (isCurrentModeA && isTargetModeB) {
       try {
@@ -388,7 +419,7 @@ export default function App() {
       }
     }
 
-    const updated = { ...settings, operatingMode: mode };
+    const updated = { ...settings, operatingMode: normalizedMode };
     setSettings(updated);
     await StorageService.saveSettings(updated);
   };
@@ -953,14 +984,23 @@ export default function App() {
   // Live Control dan Settings sengaja tidak lagi menjadi ikon HUD.
 
   /**
-   * Mixer HUD memakai handleUpdateSettings yang sudah men-debounce penulisan storage
-   * (300-500 ms), jadi slider tetap responsif tanpa menulis setiap piksel.
+   * Mixer FloatingHudPanel mengirim slider UI (0–100 untuk audio/soundboard, 0–200 untuk micGain).
+   * Nilai volume audio disimpan ke settings pada skala kanonik 0.0–1.0.
    */
-  const handleHudMixerChange = (key: HudMixerKey, value: number) => {
+  const handleHudMixerChange = (key: HudMixerKey, sliderValue: number) => {
     const next: AppSettings = { ...settings };
-    if (key === 'audioVolume') next.audioVolume = value;
-    else if (key === 'soundboardVolume') next.soundboardVolume = value;
-    else next.micGain = value;
+    if (key === 'audioVolume') {
+      const unit = percentToUnitVolume(sliderValue, 0.85);
+      next.audioVolume = unit;
+      if (!musicMuted) audioEngine.setVolume(unit);
+    } else if (key === 'soundboardVolume') {
+      const unit = percentToUnitVolume(sliderValue, 0.85);
+      next.soundboardVolume = unit;
+      soundboardEngine.setVolume(unit);
+    } else {
+      const safeGain = Number.isFinite(sliderValue) ? sliderValue : (settings.micGain ?? 100);
+      next.micGain = Math.max(0, Math.min(200, Math.round(safeGain)));
+    }
     void handleUpdateSettings(next);
   };
 
@@ -1054,27 +1094,21 @@ export default function App() {
   };
 
   const handleSimulateEventFromDeck = (type: string, detail: string, amount?: number) => {
-    const newEvent: AlertEvent = {
-      id: `deck_evt_${Date.now()}`,
-      type: (type as AlertType) || 'gift',
-      username: 'Viewer_Deck',
-      detail,
-      amount,
-      timestamp: Date.now(),
-      formattedTime: new Date().toLocaleTimeString('id-ID'),
-    };
-    setActiveFloatingAlert(newEvent);
+    const timestamp = Date.now();
+    const id = `deck_evt_${timestamp}`;
+    const eventType = type || 'gift';
     streamEventBus.emit({
-      id: newEvent.id,
-      type: newEvent.type as any,
-      username: newEvent.username,
-      detail: newEvent.detail || '',
-      amount: newEvent.amount,
-      timestamp: newEvent.timestamp,
+      id,
+      type: eventType as any,
+      username: 'Viewer_Deck',
+      detail: detail || '',
+      amount,
+      timestamp,
+      isSimulation: true,
     });
     if (ttsConfig.enabled) {
       ttsService.prime();
-      ttsService.speakEvent(newEvent.type, newEvent.username, newEvent.detail);
+      ttsService.speakEvent(eventType, 'Viewer_Deck', detail);
     }
   };
 
@@ -1096,25 +1130,16 @@ export default function App() {
   // Dinaikkan saat native meminta resync agar model panel dikirim ulang setelah app kembali foreground.
   const [hudResyncNonce, setHudResyncNonce] = useState(0);
 
-  const musicVolumeUnit = (() => {
-    const raw = settings.audioVolume ?? 0.85;
-    return raw <= 1 ? raw : raw / 100;
-  })();
-  const soundboardVolumeUnit = (() => {
-    const raw = settings.soundboardVolume ?? 0.85;
-    return raw <= 1 ? raw : raw / 100;
-  })();
-  const ttsVolumeUnit = (() => {
-    const raw = ttsConfig.volume ?? 0.9;
-    return raw <= 1 ? raw : raw / 100;
-  })();
+  const musicVolumeUnit = normalizeUnitVolume(settings.audioVolume, 0.85);
+  const soundboardVolumeUnit = normalizeUnitVolume(settings.soundboardVolume, 0.85);
+  const ttsVolumeUnit = normalizeUnitVolume(ttsConfig.volume, 0.9);
 
   /** Tap sound di HUD: memakai engine Soundboard yang sama, satu suara pada satu waktu. */
   const handleHudPlaySound = (soundId: string) => {
     const item = soundboardItems.find((sound) => sound.id === soundId);
     if (!item) return;
 
-    void dispatchSoundboard(item, soundboardItems, settings.soundboardVolume ?? 0.85).then((result) => {
+    void dispatchSoundboard(item, soundboardItems, soundboardVolumeUnit).then((result) => {
       if (result.status !== 'played') return;
 
       setHudPlayingSoundId(item.id);
@@ -1136,23 +1161,20 @@ export default function App() {
   };
 
   const handleHudMusicVolume = (percent: number) => {
-    const clamped = Math.max(0, Math.min(100, percent));
-    if (!musicMuted) audioEngine.setVolume(clamped / 100);
-    const raw = settings.audioVolume ?? 0.85;
-    handleHudMixerChange('audioVolume', raw <= 1 ? clamped / 100 : clamped);
+    const unit = percentToUnitVolume(percent, 0.85);
+    if (!musicMuted) audioEngine.setVolume(unit);
+    void handleUpdateSettings({ ...settings, audioVolume: unit });
   };
 
   const handleHudSoundboardVolume = (percent: number) => {
-    const clamped = Math.max(0, Math.min(100, percent));
-    soundboardEngine.setVolume(clamped / 100);
-    const raw = settings.soundboardVolume ?? 0.85;
-    handleHudMixerChange('soundboardVolume', raw <= 1 ? clamped / 100 : clamped);
+    const unit = percentToUnitVolume(percent, 0.85);
+    soundboardEngine.setVolume(unit);
+    void handleUpdateSettings({ ...settings, soundboardVolume: unit });
   };
 
   const handleHudTtsVolume = (percent: number) => {
-    const clamped = Math.max(0, Math.min(100, percent));
-    const raw = ttsConfig.volume ?? 0.9;
-    void handleUpdateTTSConfig({ ...ttsConfig, volume: raw <= 1 ? clamped / 100 : clamped });
+    const unit = percentToUnitVolume(percent, 0.9);
+    void handleUpdateTTSConfig({ ...ttsConfig, volume: unit });
   };
 
   const hudCommandHandlersRef = useRef({
@@ -1422,7 +1444,7 @@ export default function App() {
       {/* Floating Alert Banner Overlay */}
       <AlertBannerOverlay
         currentAlert={activeFloatingAlert}
-        onDismiss={() => setActiveFloatingAlert(null)}
+        onDismiss={handleDismissAlert}
       />
 
       {/* Mode A / Mode B Launcher Preview Modal */}
@@ -1599,9 +1621,9 @@ export default function App() {
         isPlayingMusic={isPlayingMusic}
         onTogglePlayMusic={handleTogglePlayMusic}
         queueCount={unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
-        masterVolume={settings.audioVolume ?? 60}
-        soundboardVolume={settings.soundboardVolume ?? 80}
-        micGain={settings.micGain ?? 100}
+        masterVolume={unitVolumeToPercent(settings.audioVolume, 0.85)}
+        soundboardVolume={unitVolumeToPercent(settings.soundboardVolume, 0.85)}
+        micGain={Math.max(0, Math.min(200, Math.round(settings.micGain ?? 100)))}
         onMixerChange={handleHudMixerChange}
         operatingMode={settings.operatingMode}
         isNativeAndroid={isNativeAndroidPlatform}

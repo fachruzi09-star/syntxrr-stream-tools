@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { AlertEvent } from '../types';
-import { UserCheck, Gift, Heart, MessageSquare, X } from 'lucide-react';
+import { UserCheck, Gift, Heart, MessageSquare, DollarSign, Share2, Star, Sparkles, X } from 'lucide-react';
 
 interface AlertBannerOverlayProps {
   currentAlert: AlertEvent | null;
@@ -23,6 +23,7 @@ export const AlertBannerOverlay: React.FC<AlertBannerOverlayProps> = ({
 
   const getAlertVisuals = () => {
     switch (currentAlert.type) {
+      case 'follow':
       case 'follower':
         return {
           icon: UserCheck,
@@ -37,6 +38,13 @@ export const AlertBannerOverlay: React.FC<AlertBannerOverlayProps> = ({
           badgeText: 'STREAM GIFT',
           badgeBg: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
         };
+      case 'donation':
+        return {
+          icon: DollarSign,
+          accent: 'border-emerald-500/80 bg-emerald-950/90 text-emerald-300',
+          badgeText: 'DONATION',
+          badgeBg: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        };
       case 'like':
         return {
           icon: Heart,
@@ -44,19 +52,40 @@ export const AlertBannerOverlay: React.FC<AlertBannerOverlayProps> = ({
           badgeText: 'TAP COMBO',
           badgeBg: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
         };
+      case 'share':
+        return {
+          icon: Share2,
+          accent: 'border-cyan-500/80 bg-cyan-950/90 text-cyan-300',
+          badgeText: 'STREAM SHARE',
+          badgeBg: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+        };
+      case 'sub':
+        return {
+          icon: Star,
+          accent: 'border-indigo-500/80 bg-indigo-950/90 text-indigo-300',
+          badgeText: 'NEW SUBSCRIBER',
+          badgeBg: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+        };
       case 'chat_event':
-      default:
         return {
           icon: MessageSquare,
           accent: 'border-purple-500/80 bg-purple-950/90 text-purple-300',
           badgeText: 'CHAT EVENT',
           badgeBg: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
         };
+      default:
+        return {
+          icon: Sparkles,
+          accent: 'border-slate-500/80 bg-slate-900/95 text-slate-300',
+          badgeText: 'LIVE EVENT',
+          badgeBg: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+        };
     }
   };
 
   const visuals = getAlertVisuals();
   const Icon = visuals.icon;
+  const alertMessage = currentAlert.message ?? currentAlert.detail ?? '';
 
   return (
     <div className="fixed top-16 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none transition-all duration-300 ease-out">
@@ -79,9 +108,11 @@ export const AlertBannerOverlay: React.FC<AlertBannerOverlayProps> = ({
             <div className="text-sm font-bold text-white truncate mt-0.5">
               {currentAlert.username}
             </div>
-            <div className="text-xs text-slate-200 truncate">
-              {currentAlert.detail}
-            </div>
+            {alertMessage && (
+              <div className="text-xs text-slate-200 truncate">
+                {alertMessage}
+              </div>
+            )}
           </div>
         </div>
 

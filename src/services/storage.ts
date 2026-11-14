@@ -13,6 +13,8 @@ import {
   IntegrationProvider,
   TTSConfig,
   StreamEvent,
+  normalizeOperatingMode,
+  normalizeUnitVolume,
 } from '../types';
 import { DEFAULT_TTS_CONFIG } from './ttsService';
 
@@ -610,18 +612,44 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
     if (value === undefined || value === null) continue; // jangan menghapus nilai lokal
     merged[key] = value;
   }
+  if ('operatingMode' in merged) {
+    merged.operatingMode = normalizeOperatingMode(merged.operatingMode as string | undefined);
+  }
+  if ('audioVolume' in merged) {
+    merged.audioVolume = normalizeUnitVolume(merged.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85);
+  }
+  if ('soundboardVolume' in merged) {
+    merged.soundboardVolume = normalizeUnitVolume(merged.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85);
+  }
+  if ('micGain' in merged && typeof merged.micGain === 'number' && Number.isFinite(merged.micGain)) {
+    merged.micGain = Math.max(0, Math.min(200, Math.round(merged.micGain)));
+  }
   return merged as unknown as AppSettings;
+}
+
+function normalizeSettingsFields(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    operatingMode: normalizeOperatingMode(settings.operatingMode),
+    audioVolume: normalizeUnitVolume(settings.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85),
+    soundboardVolume: normalizeUnitVolume(settings.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85),
+    micGain:
+      typeof settings.micGain === 'number' && Number.isFinite(settings.micGain)
+        ? Math.max(0, Math.min(200, Math.round(settings.micGain)))
+        : (DEFAULT_SETTINGS.micGain ?? 100),
+  };
 }
 
 export const StorageService = {
   // SETTINGS
   async getSettings(): Promise<AppSettings> {
     const stored = await idbGet<AppSettings>('settings');
-    return stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+    const merged = stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+    return normalizeSettingsFields(merged);
   },
 
   async saveSettings(settings: AppSettings): Promise<void> {
-    await idbSet('settings', settings);
+    await idbSet('settings', normalizeSettingsFields(settings));
   },
 
   // PRESETS
@@ -768,11 +796,18 @@ export const StorageService = {
   // TTS CONFIG
   async getTTSConfig(): Promise<TTSConfig> {
     const stored = await idbGet<TTSConfig>('tts_config');
-    return stored ? { ...DEFAULT_TTS_CONFIG, ...stored } : DEFAULT_TTS_CONFIG;
+    const merged = stored ? { ...DEFAULT_TTS_CONFIG, ...stored } : DEFAULT_TTS_CONFIG;
+    return {
+      ...merged,
+      volume: normalizeUnitVolume(merged.volume, DEFAULT_TTS_CONFIG.volume),
+    };
   },
 
   async saveTTSConfig(config: TTSConfig): Promise<void> {
-    await idbSet('tts_config', config);
+    await idbSet('tts_config', {
+      ...config,
+      volume: normalizeUnitVolume(config.volume, DEFAULT_TTS_CONFIG.volume),
+    });
   },
 
   // QUEUE & AUDIO (STAGE 2 PRESERVED)
