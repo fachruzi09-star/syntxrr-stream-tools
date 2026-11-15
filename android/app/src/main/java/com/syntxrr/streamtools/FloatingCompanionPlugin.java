@@ -25,15 +25,18 @@ import com.getcapacitor.annotation.PermissionCallback;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
+
 /**
  * FloatingCompanionPlugin
  * Capacitor bridge exposing native Android permissions and CompanionService
  * lifecycle controls to the SYNTXRR STREAM web application.
  *
- * Phase 4.4: the Floating HUD is fully native (it must render above the TikTok app),
- * so the WebView only supplies panel models and receives user commands. No state is
- * duplicated here: the plugin forwards "hudCommand" / "hudPanelChanged" to JS, and JS
- * applies them to the same services that the main application uses.
+ * Phase 4.4 / P0-2: the Floating HUD is native-first (it must render above the TikTok app).
+ * Native TikTok LIVE states and events update FloatingHudManager directly without waiting
+ * for a WebView round-trip, while JS listeners continue receiving events for TTS, SFX,
+ * Song Request, and in-app UI. Listener & HUD lifecycle follow CompanionService so
+ * Activity pause/recreation never drops live events.
  */
 @CapacitorPlugin(
     name = "FloatingCompanion",
@@ -52,6 +55,82 @@ public class FloatingCompanionPlugin extends Plugin {
 
     private static final long[] MIXER_PROMO_RETRY_DELAYS_MS = { 120L, 250L, 500L };
 
+    private static final Object sSharedLock = new Object();
+    @Nullable
+    private static volatile FloatingHudManager sSharedHudManager;
+    @Nullable
+    private static volatile WeakReference<FloatingCompanionPlugin> sActivePluginRef;
+    private static volatile boolean sTikTokListenerAttached = false;
+
+    private static final TikTokLiveConnector.Listener sSharedTikTokListener =
+            new TikTokLiveConnector.Listener() {
+                @Override
+                public void onStateChanged(@NonNull JSONObject stateJson) {
+                    FloatingHudManager hud = getSharedHudManagerIfCreated();
+                    if (hud != null) {
+                        hud.updateNativeTikTokState(stateJson);
+                    }
+                    FloatingCompanionPlugin plugin = getActivePlugin();
+                    if (plugin != null) {
+                        plugin.emitToJs("tiktokLiveState", toJsObject(stateJson));
+                    }
+                }
+
+                @Override
+                public void onEventDecoded(@NonNull JSONObject eventJson) {
+                    FloatingHudManager hud = getSharedHudManagerIfCreated();
+                    if (hud != null) {
+                        hud.pushNativeTikTokEvent(eventJson);
+                    }
+                    FloatingCompanionPlugin plugin = getActivePlugin();
+                    if (plugin != null) {
+                        plugin.emitToJs("tiktokLiveEvent", toJsObject(eventJson));
+                    }
+                }
+            };
+
+    @Nullable
+    private static FloatingCompanionPlugin getActivePlugin() {
+        WeakReference<FloatingCompanionPlugin> ref = sActivePluginRef;
+        return ref != null ? ref.get() : null;
+    }
+
+    @Nullable
+    private static FloatingHudManager getSharedHudManagerIfCreated() {
+        return sSharedHudManager;
+    }
+
+    /**
+     * Dipanggil ketika CompanionService benar-benar dihentikan (termasuk saat Activity
+     * sudah dihancurkan): lepas listener native, hentikan konektor jika masih aktif, dan
+     * bersihkan buffer 60 item Floating HUD.
+     */
+    public static void onNativeCompanionStopped(@NonNull Context appContext) {
+        Context safeContext = appContext.getApplicationContext();
+        TikTokLiveConnector connector = TikTokLiveConnector.getInstance(safeContext);
+        connector.setListener(null);
+        if (connector.isSessionActive()) {
+            connector.disconnect("Companion Service dihentikan.");
+        }
+
+        final FloatingHudManager hud;
+        final boolean shouldDestroyHud;
+        synchronized (sSharedLock) {
+            sTikTokListenerAttached = false;
+            hud = sSharedHudManager;
+            shouldDestroyHud = hud != null && getActivePlugin() == null;
+            if (shouldDestroyHud) {
+                sSharedHudManager = null;
+            }
+        }
+        if (hud != null) {
+            hud.clearNativeTikTokSession(true);
+            if (shouldDestroyHud) {
+                hud.destroy();
+            }
+        }
+    }
+
     private final Object mMicLock = new Object();
     private final CompanionService.OnCompanionLifecycleListener mServiceLifecycleListener =
             new CompanionService.OnCompanionLifecycleListener() {
@@ -64,7 +143,11 @@ public class FloatingCompanionPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+        synchronized (sSharedLock) {
+            sActivePluginRef = new WeakReference<>(this);
+        }
         CompanionService.setLifecycleListener(mServiceLifecycleListener);
+        getHudManager();
         attachTikTokConnectorListener();
     }
 
@@ -181,7 +264,7 @@ public class FloatingCompanionPlugin extends Plugin {
     public void requestMicPermission(PluginCall call) {
         if (hasRecordAudioPermission()) {
             boolean upgraded = refreshCompanionMicrophoneTypeIfForeground();
-            FloatingHudManager hud = mHudManager;
+            FloatingHudManager hud = getSharedHudManagerIfCreated();
             if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
                 if (upgraded) {
                     scheduleMixerMicStartCheck();
@@ -207,7 +290,7 @@ public class FloatingCompanionPlugin extends Plugin {
                 || hasRecordAudioPermission();
         if (granted) {
             boolean upgraded = refreshCompanionMicrophoneTypeIfForeground();
-            FloatingHudManager hud = mHudManager;
+            FloatingHudManager hud = getSharedHudManagerIfCreated();
             if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
                 if (upgraded) {
                     scheduleMixerMicStartCheck();
@@ -309,6 +392,7 @@ public class FloatingCompanionPlugin extends Plugin {
     public void stopCompanion(PluginCall call) {
         Context context = getContext();
         stopMonitorOnCompanionShutdown("Companion Service dihentikan.");
+        onNativeCompanionStopped(context.getApplicationContext());
 
         try {
             Intent intent = new Intent(context, CompanionService.class);
@@ -338,8 +422,6 @@ public class FloatingCompanionPlugin extends Plugin {
     // =========================================================================
 
     @Nullable
-    private volatile FloatingHudManager mHudManager;
-    @Nullable
     private NativeSoundPoolManager mSoundPoolManager;
     @Nullable
     private NativeMicMonitor mMicMonitor;
@@ -350,7 +432,7 @@ public class FloatingCompanionPlugin extends Plugin {
     private final Runnable mDeferredMixerStartTask = new Runnable() {
         @Override
         public void run() {
-            FloatingHudManager hud = mHudManager;
+            FloatingHudManager hud = getSharedHudManagerIfCreated();
             if (hud == null || !hud.isHudVisible() || !"mixer".equals(hud.getActivePanel())) {
                 cancelMixerPromoRetry();
                 return;
@@ -412,8 +494,9 @@ public class FloatingCompanionPlugin extends Plugin {
                 @Override
                 public void onSoundStarted(final String soundId) {
                     runOnUi(() -> {
-                        if (mHudManager != null) {
-                            mHudManager.setSoundboardPlayingState(soundId, true);
+                        FloatingHudManager hud = getSharedHudManagerIfCreated();
+                        if (hud != null) {
+                            hud.setSoundboardPlayingState(soundId, true);
                         }
                     });
                 }
@@ -421,8 +504,9 @@ public class FloatingCompanionPlugin extends Plugin {
                 @Override
                 public void onSoundCompleted(final String soundId) {
                     runOnUi(() -> {
-                        if (mHudManager != null) {
-                            mHudManager.setSoundboardPlayingState(soundId, false);
+                        FloatingHudManager hud = getSharedHudManagerIfCreated();
+                        if (hud != null) {
+                            hud.setSoundboardPlayingState(soundId, false);
                         }
                     });
                 }
@@ -431,109 +515,131 @@ public class FloatingCompanionPlugin extends Plugin {
         return mSoundPoolManager;
     }
 
-    private synchronized FloatingHudManager getHudManager() {
-        if (mHudManager == null) {
-            Context appContext = getContext().getApplicationContext();
-            mHudManager = new FloatingHudManager(appContext);
+    private FloatingHudManager getHudManager() {
+        final FloatingHudManager hud;
+        synchronized (sSharedLock) {
+            if (sSharedHudManager == null) {
+                Context appContext = getContext().getApplicationContext();
+                sSharedHudManager = new FloatingHudManager(appContext);
+            }
+            hud = sSharedHudManager;
+        }
 
-            // Kompatibilitas: event klik bubble tetap dikirim.
-            mHudManager.setOnHudClickListener(new FloatingHudManager.OnHudClickListener() {
-                @Override
-                public void onHudClick() {
+        // Pastikan callback pada shared HUD selalu menunjuk plugin aktif via WeakReference
+        // sehingga Activity recreation tidak membocorkan instance lama maupun memutus aksi.
+        hud.setOnHudClickListener(new FloatingHudManager.OnHudClickListener() {
+            @Override
+            public void onHudClick() {
+                FloatingCompanionPlugin plugin = getActivePlugin();
+                if (plugin != null) {
                     JSObject data = new JSObject();
                     data.put("timestamp", System.currentTimeMillis());
-                    emitToJs("floatingHudClick", data);
+                    plugin.emitToJs("floatingHudClick", data);
                 }
-            });
+            }
+        });
 
-            // Kanal perintah HUD -> aplikasi.
-            // Aksi audio & tampilan HUD dijalankan langsung di native agar tetap berfungsi
-            // saat aplikasi di-background (WebView di-pause oleh Android saat buka TikTok LIVE).
-            mHudManager.setOnHudActionListener(new FloatingHudManager.OnHudActionListener() {
-                @Override
-                public void onHudCommand(@NonNull String action, @Nullable String id, int value) {
-                    // Direct native execution for background responsiveness
-                    if ("soundboard.play".equals(action)) {
+        hud.setOnHudActionListener(new FloatingHudManager.OnHudActionListener() {
+            @Override
+            public void onHudCommand(@NonNull String action, @Nullable String id, int value) {
+                FloatingCompanionPlugin plugin = getActivePlugin();
+                FloatingHudManager currentHud = getSharedHudManagerIfCreated();
+
+                if ("soundboard.play".equals(action)) {
+                    if (plugin != null) {
                         String soundId = (id != null && !id.isEmpty()) ? id : "horn";
-                        getSoundPoolManager().playSynthSound(soundId, 1.0f);
-                    } else if ("music.toggle".equals(action)) {
-                        if (mHudManager != null) {
-                            mHudManager.toggleMusicState();
-                        }
-                    } else if ("music.next".equals(action)) {
-                        if (mHudManager != null) {
-                            mHudManager.advanceMusicQueue();
-                        }
-                    } else if ("music.mute".equals(action)) {
-                        if (mHudManager != null) {
-                            mHudManager.toggleMusicMute();
-                        }
-                    } else if ("music.volume".equals(action)) {
-                        if (mHudManager != null) {
-                            mHudManager.setMusicVolume(value);
-                        }
-                    } else if ("mixer.sfx".equals(action)) {
-                        getSoundPoolManager().setMasterVolume(value / 100.0f);
-                    } else if ("chat.tab".equals(action)) {
-                        if (mHudManager == null || !mHudManager.selectChatTab(id)) {
-                            return;
-                        }
-                    } else if ("mic.mute".equals(action)) {
-                        final boolean mutedNow;
-                        synchronized (mMicLock) {
-                            mMicMuted = !mMicMuted;
-                            mutedNow = mMicMuted;
-                            if (mutedNow) {
-                                mMixerPromoRetryIndex = 0;
-                            }
-                        }
-                        if (mutedNow) {
-                            cancelMixerPromoRetry();
-                            stopNativeMicMonitor();
-                            FloatingHudManager hud = mHudManager;
-                            if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
-                                hud.updateMixerMicState(
-                                        false,
-                                        true,
-                                        0,
-                                        "Monitor dijeda",
-                                        "warn",
-                                        "Monitor mic SYNTXRR dimute (tidak memengaruhi aplikasi lain)."
-                                );
-                            }
-                        } else {
-                            startNativeMicMonitorIfEligible();
-                        }
+                        plugin.getSoundPoolManager().playSynthSound(soundId, 1.0f);
                     }
+                } else if ("music.toggle".equals(action)) {
+                    if (currentHud != null) {
+                        currentHud.toggleMusicState();
+                    }
+                } else if ("music.next".equals(action)) {
+                    if (currentHud != null) {
+                        currentHud.advanceMusicQueue();
+                    }
+                } else if ("music.mute".equals(action)) {
+                    if (currentHud != null) {
+                        currentHud.toggleMusicMute();
+                    }
+                } else if ("music.volume".equals(action)) {
+                    if (currentHud != null) {
+                        currentHud.setMusicVolume(value);
+                    }
+                } else if ("mixer.sfx".equals(action)) {
+                    if (plugin != null) {
+                        plugin.getSoundPoolManager().setMasterVolume(value / 100.0f);
+                    }
+                } else if ("chat.tab".equals(action)) {
+                    if (currentHud == null || !currentHud.selectChatTab(id)) {
+                        return;
+                    }
+                } else if ("mic.mute".equals(action)) {
+                    if (plugin != null) {
+                        plugin.handleHudMicMuteCommand();
+                    }
+                }
 
-                    // Forward to JS so application state stays synchronized
+                if (plugin != null) {
                     JSObject data = new JSObject();
                     data.put("action", action);
                     if (id != null) {
                         data.put("id", id);
                     }
                     data.put("value", value);
-                    emitToJs("hudCommand", data);
+                    plugin.emitToJs("hudCommand", data);
                 }
+            }
 
-                @Override
-                public void onHudPanelChanged(@Nullable String panel) {
+            @Override
+            public void onHudPanelChanged(@Nullable String panel) {
+                FloatingCompanionPlugin plugin = getActivePlugin();
+                if (plugin != null) {
                     if ("mixer".equals(panel)) {
-                        startNativeMicMonitorIfEligible();
+                        plugin.startNativeMicMonitorIfEligible();
                     } else {
-                        cancelMixerPromoRetry();
-                        stopNativeMicMonitor();
+                        plugin.cancelMixerPromoRetry();
+                        plugin.stopNativeMicMonitor();
                     }
 
                     JSObject data = new JSObject();
                     if (panel != null) {
                         data.put("panel", panel);
                     }
-                    emitToJs("hudPanelChanged", data);
+                    plugin.emitToJs("hudPanelChanged", data);
                 }
-            });
+            }
+        });
+
+        return hud;
+    }
+
+    private void handleHudMicMuteCommand() {
+        final boolean mutedNow;
+        synchronized (mMicLock) {
+            mMicMuted = !mMicMuted;
+            mutedNow = mMicMuted;
+            if (mutedNow) {
+                mMixerPromoRetryIndex = 0;
+            }
         }
-        return mHudManager;
+        if (mutedNow) {
+            cancelMixerPromoRetry();
+            stopNativeMicMonitor();
+            FloatingHudManager hud = getSharedHudManagerIfCreated();
+            if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
+                hud.updateMixerMicState(
+                        false,
+                        true,
+                        0,
+                        "Monitor dijeda",
+                        "warn",
+                        "Monitor mic SYNTXRR dimute (tidak memengaruhi aplikasi lain)."
+                );
+            }
+        } else {
+            startNativeMicMonitorIfEligible();
+        }
     }
 
     private NativeMicMonitor getMicMonitor() {
@@ -557,7 +663,7 @@ public class FloatingCompanionPlugin extends Plugin {
     }
 
     private void startNativeMicMonitorIfEligible() {
-        FloatingHudManager hud = mHudManager;
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
         if (hud == null || !hud.isHudVisible() || !"mixer".equals(hud.getActivePanel())) {
             cancelMixerPromoRetry();
             stopNativeMicMonitor();
@@ -639,7 +745,7 @@ public class FloatingCompanionPlugin extends Plugin {
         }
         mMainHandler.removeCallbacks(mDeferredMixerStartTask);
         stopNativeMicMonitor();
-        FloatingHudManager hud = mHudManager;
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
         if (hud != null && hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
             hud.updateMixerMicState(
                     false,
@@ -664,7 +770,7 @@ public class FloatingCompanionPlugin extends Plugin {
             @NonNull NativeMicMonitor.Status status,
             int level,
             @Nullable String reason) {
-        FloatingHudManager hud = mHudManager;
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
         if (hud == null || !hud.isHudVisible() || !"mixer".equals(hud.getActivePanel())) {
             return;
         }
@@ -741,7 +847,7 @@ public class FloatingCompanionPlugin extends Plugin {
         if (getActivity() != null) {
             getActivity().runOnUiThread(task);
         } else {
-            task.run();
+            mMainHandler.post(task);
         }
     }
 
@@ -814,8 +920,9 @@ public class FloatingCompanionPlugin extends Plugin {
         final int opacity = opacityOpt != null ? opacityOpt : 100;
         final boolean alignLeft = "left".equalsIgnoreCase(positionOpt);
 
+        FloatingHudManager existingHud = getSharedHudManagerIfCreated();
         // Belum tampil: tidak perlu membuat overlay baru, nilai akan dipakai saat showHud.
-        if (mHudManager == null || !mHudManager.isHudVisible()) {
+        if (existingHud == null || !existingHud.isHudVisible()) {
             JSObject ret = new JSObject();
             ret.put("success", true);
             ret.put("isVisible", false);
@@ -868,7 +975,8 @@ public class FloatingCompanionPlugin extends Plugin {
 
     @PluginMethod
     public void isFloatingHudVisible(PluginCall call) {
-        boolean visible = mHudManager != null && mHudManager.isHudVisible();
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
+        boolean visible = hud != null && hud.isHudVisible();
         JSObject ret = new JSObject();
         ret.put("isVisible", visible);
         call.resolve(ret);
@@ -924,7 +1032,7 @@ public class FloatingCompanionPlugin extends Plugin {
     @PluginMethod
     public void getHudState(PluginCall call) {
         JSObject ret = new JSObject();
-        FloatingHudManager hud = mHudManager;
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
         boolean visible = hud != null && hud.isHudVisible();
         ret.put("isVisible", visible);
         if (hud != null) {
@@ -940,15 +1048,15 @@ public class FloatingCompanionPlugin extends Plugin {
     protected void handleOnResume() {
         super.handleOnResume();
         boolean upgradedMicType = refreshCompanionMicrophoneTypeIfForeground();
-        // Setelah proses dibekukan sistem selama aplikasi di background, state JS bisa
-        // tertinggal dari kondisi layanan sebenarnya. Minta aplikasi mengirim ulang model
-        // panel aktif; tidak ada status yang dipalsukan di sisi native.
-        CompanionService.updateStatusDetail("Aplikasi aktif \u00b7 Status HUD disegarkan");
-        FloatingHudManager hud = mHudManager;
+        TikTokLiveConnector connector = getTikTokConnector();
+        boolean liveActive = connector.isSessionActive();
+        if (!liveActive) {
+            CompanionService.updateStatusDetail("Aplikasi aktif \u00b7 Status HUD disegarkan");
+        }
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
         if (hud != null) {
-            // Tampilkan data terakhir lebih dulu, ditandai "Status terakhir", sampai model
-            // baru dari WebView tiba dan menggantikannya.
-            hud.renderLastKnownModel(true);
+            hud.updateNativeTikTokState(connector.getStateSnapshot());
+            hud.renderLastKnownModel(!liveActive);
             if (hud.isHudVisible() && "mixer".equals(hud.getActivePanel())) {
                 if (upgradedMicType) {
                     scheduleMixerMicStartCheck();
@@ -972,13 +1080,17 @@ public class FloatingCompanionPlugin extends Plugin {
     @Override
     protected void handleOnPause() {
         super.handleOnPause();
-        // WebView dijeda sistem saat aplikasi masuk background: hentikan klaim kesegaran
-        // data, pertahankan model terakhir yang valid, dan perbarui notifikasi secara jujur.
-        CompanionService.updateStatusDetail(
-                "Aplikasi di latar belakang \u00b7 Status terakhir dipertahankan");
-        FloatingHudManager hud = mHudManager;
+        TikTokLiveConnector connector = getTikTokConnector();
+        boolean liveActive = connector.isSessionActive();
+        // Jangan ubah status ke "Status terakhir" hanya karena onPause jika koneksi
+        // TikTok LIVE native sedang aktif; event tetap mengalir via CompanionService.
+        if (!liveActive) {
+            CompanionService.updateStatusDetail(
+                    "Aplikasi di latar belakang \u00b7 Status terakhir dipertahankan");
+        }
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
         if (hud != null) {
-            hud.renderLastKnownModel(true);
+            hud.renderLastKnownModel(!liveActive);
         }
     }
 
@@ -989,18 +1101,6 @@ public class FloatingCompanionPlugin extends Plugin {
     @Nullable
     private volatile TikTokLiveConnector mTikTokConnector;
 
-    private final TikTokLiveConnector.Listener mTikTokListener = new TikTokLiveConnector.Listener() {
-        @Override
-        public void onStateChanged(@NonNull JSONObject stateJson) {
-            emitToJs("tiktokLiveState", toJsObject(stateJson));
-        }
-
-        @Override
-        public void onEventDecoded(@NonNull JSONObject eventJson) {
-            emitToJs("tiktokLiveEvent", toJsObject(eventJson));
-        }
-    };
-
     private synchronized TikTokLiveConnector getTikTokConnector() {
         if (mTikTokConnector == null) {
             mTikTokConnector = TikTokLiveConnector.getInstance(getContext().getApplicationContext());
@@ -1009,7 +1109,18 @@ public class FloatingCompanionPlugin extends Plugin {
     }
 
     private void attachTikTokConnectorListener() {
-        getTikTokConnector().setListener(mTikTokListener);
+        FloatingHudManager hud = getHudManager();
+        TikTokLiveConnector connector = getTikTokConnector();
+        final boolean shouldAttach;
+        synchronized (sSharedLock) {
+            shouldAttach = !sTikTokListenerAttached;
+            sTikTokListenerAttached = true;
+        }
+        if (shouldAttach) {
+            connector.setListener(sSharedTikTokListener);
+        } else {
+            hud.updateNativeTikTokState(connector.getStateSnapshot());
+        }
     }
 
     @NonNull
@@ -1042,8 +1153,8 @@ public class FloatingCompanionPlugin extends Plugin {
             }
         }
 
+        attachTikTokConnectorListener();
         TikTokLiveConnector connector = getTikTokConnector();
-        connector.setListener(mTikTokListener);
         connector.connect(username, eulerApiKey, allowEulerFallback, connectionMethod);
 
         JSObject ret = new JSObject();
@@ -1056,6 +1167,14 @@ public class FloatingCompanionPlugin extends Plugin {
     public void disconnectTikTokLive(PluginCall call) {
         TikTokLiveConnector connector = getTikTokConnector();
         connector.disconnect("Diputuskan oleh pengguna.");
+        connector.setListener(null);
+        synchronized (sSharedLock) {
+            sTikTokListenerAttached = false;
+        }
+        FloatingHudManager hud = getSharedHudManagerIfCreated();
+        if (hud != null) {
+            hud.clearNativeTikTokSession(true);
+        }
 
         JSObject ret = new JSObject();
         ret.put("success", true);
@@ -1072,12 +1191,32 @@ public class FloatingCompanionPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         CompanionService.clearLifecycleListener(mServiceLifecycleListener);
-        if (mTikTokConnector != null) {
-            mTikTokConnector.setListener(null);
-            if (!CompanionService.isRunning()) {
-                mTikTokConnector.disconnect("Plugin dihancurkan tanpa CompanionService.");
+        synchronized (sSharedLock) {
+            if (sActivePluginRef != null && sActivePluginRef.get() == this) {
+                sActivePluginRef = null;
             }
         }
+
+        TikTokLiveConnector connector = mTikTokConnector;
+        boolean keepServiceAlive = CompanionService.isRunning()
+                || (connector != null && connector.isSessionActive());
+
+        if (!keepServiceAlive) {
+            if (connector != null) {
+                connector.setListener(null);
+                connector.disconnect("Plugin dihancurkan tanpa CompanionService.");
+            }
+            final FloatingHudManager hudToDestroy;
+            synchronized (sSharedLock) {
+                sTikTokListenerAttached = false;
+                hudToDestroy = sSharedHudManager;
+                sSharedHudManager = null;
+            }
+            if (hudToDestroy != null) {
+                hudToDestroy.destroy();
+            }
+        }
+
         mMainHandler.removeCallbacksAndMessages(null);
         final NativeMicMonitor monitor;
         synchronized (mMicLock) {
@@ -1088,10 +1227,6 @@ public class FloatingCompanionPlugin extends Plugin {
         }
         if (monitor != null) {
             monitor.release();
-        }
-        if (mHudManager != null) {
-            mHudManager.destroy();
-            mHudManager = null;
         }
         if (mSoundPoolManager != null) {
             mSoundPoolManager.release();

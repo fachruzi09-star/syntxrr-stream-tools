@@ -10,7 +10,11 @@ import {
   TikTokConnectorStatus,
   ModeASessionMode,
 } from '../types';
-import { buildModeAHonestStatus } from '../services/tiktokLiveConnector';
+import {
+  buildModeAHonestStatus,
+  isValidTikTokTargetUsername,
+  resolveTikTokTargetUsername,
+} from '../services/tiktokLiveConnector';
 import { useTranslation } from '../i18n/I18nContext';
 import {
   Radio,
@@ -101,6 +105,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const { t, isEnglish } = useTranslation();
 
   const isModeA = isModeAOperatingMode(settings.operatingMode);
+  const targetUsername = resolveTikTokTargetUsername(settings, tiktokAccount);
+  const hasValidTargetUsername = isValidTikTokTargetUsername(targetUsername);
   const honestStatus = buildModeAHonestStatus({
     account: tiktokAccount,
     connector: tiktokStatus,
@@ -111,6 +117,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const visibleElementsCount = activePreset?.elements.filter((e) => e.visible).length || 0;
   const [startSessionDialog, setStartSessionDialog] = useState<'unlinked' | 'linked' | null>(null);
   const [isSessionActionPending, setIsSessionActionPending] = useState(false);
+  const [sessionValidationError, setSessionValidationError] = useState<string | null>(null);
 
   // Native Floating HUD State (Phase 4.3C)
   const [isHudVisible, setIsHudVisible] = useState(false);
@@ -266,7 +273,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const handlePressStartSession = () => {
-    if (tiktokAccount.isLinked && tiktokAccount.accountLinkStatus === 'linked') {
+    setSessionValidationError(null);
+    if (hasValidTargetUsername) {
       setStartSessionDialog('linked');
     } else {
       setStartSessionDialog('unlinked');
@@ -275,6 +283,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const handleConfirmConnectAndStart = async () => {
     setStartSessionDialog(null);
+    if (!hasValidTargetUsername) {
+      setSessionValidationError(
+        'Target @username TikTok belum diisi atau tidak valid. Atur target username di halaman Koneksi terlebih dahulu.'
+      );
+      return;
+    }
+    setSessionValidationError(null);
     setIsSessionActionPending(true);
     try {
       await onStartModeAWithConnection?.();
@@ -286,6 +301,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const handleConfirmStartWithoutConnection = async () => {
     setStartSessionDialog(null);
+    setSessionValidationError(null);
     setIsSessionActionPending(true);
     try {
       await onStartModeAWithoutConnection?.();
@@ -334,7 +350,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6 pb-20 md:pb-8">
-      {/* Dialog Mulai Sesi Mode A — Kondisi A (Belum Terhubung) */}
+      {/* Dialog Mulai Sesi Mode A — Kondisi A (Target Username Belum Diatur) */}
       {startSessionDialog === 'unlinked' && (
         <div
           role="dialog"
@@ -349,7 +365,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <h3 id="mode-a-unlinked-title" className="text-base font-bold text-white">
-                  Belum tersambung ke live-mu
+                  Target username LIVE belum diatur
                 </h3>
               </div>
               <button
@@ -363,7 +379,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Overlay tetap tampil, tapi gift, chat, dan follow tidak akan muncul tanpa koneksi ke akun live-mu. Sambungkan TikTok sekarang.
+              Overlay tetap tampil, tetapi gift, chat, dan follow tidak akan masuk sebelum target <span className="font-mono text-white">@username</span> LIVE TikTok diisi di Koneksi (tanpa perlu login OAuth).
             </p>
 
             <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
@@ -376,7 +392,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 className="flex-1 py-2.5 px-4 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-600/25"
               >
                 <Link2 className="w-4 h-4" />
-                <span>Buka Koneksi</span>
+                <span>Atur Target di Koneksi</span>
               </button>
               <button
                 type="button"
@@ -390,7 +406,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* Dialog Mulai Sesi Mode A — Kondisi B (Sudah Terhubung) */}
+      {/* Dialog Mulai Sesi Mode A — Kondisi B (Target Username Siap) */}
       {startSessionDialog === 'linked' && (
         <div
           role="dialog"
@@ -405,7 +421,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Siap memulai sesi Mode A?
                 </h3>
                 <div className="text-xs text-blue-300 mt-0.5 font-mono">
-                  Akun: {honestStatus.accountLinked.detail}
+                  Target LIVE: @{targetUsername}
                 </div>
               </div>
               <button
@@ -429,7 +445,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span>Sambungkan &amp; mulai</span>
                 </div>
                 <p className="text-[11px] text-blue-100 leading-relaxed">
-                  Hubungkan SYNTXRR ke LIVE akun TikTok-mu. Kalau belum LIVE, koneksi akan menunggu sampai LIVE dimulai.
+                  Hubungkan SYNTXRR ke room LIVE publik @{targetUsername}. Kalau belum LIVE, koneksi akan menunggu sampai LIVE dimulai.
                 </p>
               </button>
 
@@ -734,9 +750,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="p-4 rounded-xl bg-[#080c16]/90 border border-slate-800 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="text-xs font-bold text-white">Sesi Mode A &amp; Status Koneksi</div>
+                <div className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
+                  <span>Sesi Mode A &amp; Status Koneksi</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
+                      hasValidTargetUsername
+                        ? 'bg-blue-950/70 text-blue-300 border-blue-700/60'
+                        : 'bg-slate-900 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    {hasValidTargetUsername ? `Target: @${targetUsername}` : 'Target: Belum diatur'}
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Status akun terhubung, sesi companion, room LIVE, dan transport event dilaporkan terpisah secara jujur.
+                  Status akun, target LIVE publik, sesi companion, room LIVE, dan transport event dilaporkan terpisah secara jujur.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -783,9 +810,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-[11px]">
               <div className="p-2.5 rounded-lg bg-[#0e172a] border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase">Account Linked</div>
-                <div className="font-bold text-white mt-0.5">{honestStatus.accountLinked.label}</div>
-                <div className="text-[10px] text-slate-400 truncate">{honestStatus.accountLinked.detail}</div>
+                <div className="text-[10px] text-slate-400 uppercase">Target LIVE</div>
+                <div className="font-bold text-white mt-0.5 font-mono truncate">
+                  {hasValidTargetUsername ? `@${targetUsername}` : 'Belum diatur'}
+                </div>
+                <div className="text-[10px] text-slate-400 truncate">
+                  {tiktokAccount.isLinked ? `OAuth: ${honestStatus.accountLinked.label}` : 'OAuth opsional'}
+                </div>
               </div>
               <div className="p-2.5 rounded-lg bg-[#0e172a] border border-slate-800">
                 <div className="text-[10px] text-slate-400 uppercase">Mode A Session</div>
@@ -805,6 +836,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <div className="text-[10px] text-slate-400 truncate">{honestStatus.eventTransport.detail}</div>
               </div>
             </div>
+
+            {sessionValidationError && (
+              <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-700/60 text-[11px] text-rose-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{sessionValidationError}</span>
+              </div>
+            )}
 
             {modeASessionMode === 'without_live_connection' && (
               <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-200 flex items-center gap-2">

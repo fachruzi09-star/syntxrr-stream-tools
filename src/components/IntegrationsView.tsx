@@ -14,6 +14,9 @@ import {
 } from '../theme/designSystem';
 import {
   buildModeAHonestStatus,
+  isValidTikTokTargetUsername,
+  normalizeTikTokTargetUsername,
+  resolveTikTokTargetUsername,
 } from '../services/tiktokLiveConnector';
 import {
   getTikTokAuthConfiguration,
@@ -36,6 +39,7 @@ import {
   UserCheck,
   Loader2,
   Trash2,
+  AtSign,
 } from 'lucide-react';
 
 interface IntegrationsViewProps {
@@ -48,6 +52,7 @@ interface IntegrationsViewProps {
   companionRunning?: boolean;
   modeASessionMode?: ModeASessionMode;
   openTikTokSettingsNonce?: number;
+  onSaveTikTokTargetUsername?: (username: string) => Promise<void> | void;
   onLoginTikTok?: () => Promise<void> | void;
   onUnlinkTikTok?: () => Promise<void> | void;
   onUpdateTikTokConnectionPrefs?: (prefs: {
@@ -102,11 +107,13 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   integrations,
   onUpdateIntegrations,
   settings,
+  onUpdateSettings,
   tiktokStatus = DEFAULT_STATUS,
   tiktokAccount = DEFAULT_ACCOUNT,
   companionRunning = false,
   modeASessionMode = 'inactive',
   openTikTokSettingsNonce = 0,
+  onSaveTikTokTargetUsername,
   onLoginTikTok,
   onUnlinkTikTok,
   onUpdateTikTokConnectionPrefs,
@@ -121,15 +128,56 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   const [eulerApiKeyDraft, setEulerApiKeyDraft] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const savedTargetUsername = resolveTikTokTargetUsername(settings, tiktokAccount);
+  const [targetUsernameDraft, setTargetUsernameDraft] = useState(savedTargetUsername);
+  const [targetValidationError, setTargetValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTargetUsernameDraft(savedTargetUsername);
+    setTargetValidationError(null);
+  }, [savedTargetUsername]);
+
   useEffect(() => {
     if (openTikTokSettingsNonce > 0) {
+      setTargetUsernameDraft(savedTargetUsername);
+      setTargetValidationError(null);
       setIsTikTokSettingsOpen(true);
     }
-  }, [openTikTokSettingsNonce]);
+  }, [openTikTokSettingsNonce, savedTargetUsername]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3200);
+  };
+
+  const persistTargetUsername = async (normalized: string) => {
+    if (onSaveTikTokTargetUsername) {
+      await onSaveTikTokTargetUsername(normalized);
+    } else if (settings && onUpdateSettings) {
+      await onUpdateSettings({ ...settings, tiktokUsername: normalized });
+    }
+  };
+
+  const handleSaveTargetUsername = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const normalized = normalizeTikTokTargetUsername(targetUsernameDraft);
+    if (!isValidTikTokTargetUsername(normalized)) {
+      setTargetValidationError(
+        'Masukkan username TikTok yang valid (1–64 karakter: huruf, angka, titik, atau garis bawah).'
+      );
+      return;
+    }
+    setTargetValidationError(null);
+    setTargetUsernameDraft(normalized);
+    await persistTargetUsername(normalized);
+    showToast(`Target LIVE @${normalized} disimpan.`);
+  };
+
+  const handleClearTargetUsername = async () => {
+    setTargetValidationError(null);
+    setTargetUsernameDraft('');
+    await persistTargetUsername('');
+    showToast('Target username LIVE TikTok dihapus.');
   };
 
   const honestStatus = buildModeAHonestStatus({
@@ -165,6 +213,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   const handleOpenConfig = (provider: IntegrationProvider) => {
     if (provider.id === 'tiktok') {
       setEulerApiKeyDraft('');
+      setTargetUsernameDraft(savedTargetUsername);
+      setTargetValidationError(null);
       setIsTikTokSettingsOpen(true);
       return;
     }
@@ -288,29 +338,119 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                 <span>Pengaturan Koneksi TikTok</span>
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
-                Hubungkan akun TikTok secara sah melalui Login Kit / OAuth PKCE dan pilih metode transport event LIVE.
+                Atur target @username LIVE publik yang ingin dipantau dan metode transport Mode A. OAuth opsional.
               </p>
             </div>
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-bold border self-start sm:self-auto ${toneBadgeClasses(
-                honestStatus.accountLinked.tone
-              )}`}
-            >
-              Status Akun: {honestStatus.accountLinked.label}
-            </span>
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  savedTargetUsername
+                    ? 'bg-blue-950/70 text-blue-300 border-blue-700/60'
+                    : 'bg-slate-900/90 text-slate-300 border-slate-700'
+                }`}
+              >
+                {savedTargetUsername ? `Target: @${savedTargetUsername}` : 'Target: Belum diatur'}
+              </span>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-bold border ${toneBadgeClasses(
+                  honestStatus.accountLinked.tone
+                )}`}
+              >
+                OAuth: {honestStatus.accountLinked.label}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Bagian 1: Autentikasi & Profil Akun TikTok */}
+        {/* Bagian 0: Target Username LIVE TikTok Publik */}
+        <section className="bg-[#0e172a] border border-blue-500/35 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <AtSign className="w-4 h-4 text-blue-400" />
+                <span>Target Username LIVE TikTok</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Identitas target LIVE publik yang dipantau oleh Mode A (bukan akun terautentikasi). Tidak memerlukan OAuth, password, cookie, atau API key untuk memulai pembacaan room LIVE publik.
+              </p>
+            </div>
+            {savedTargetUsername && (
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-700/50 text-emerald-300 text-xs font-mono shrink-0 self-start sm:self-auto">
+                Dipantau: @{savedTargetUsername}
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={(e) => void handleSaveTargetUsername(e)} className="space-y-2.5">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1 flex items-center bg-[#080c16] border border-[#1e293b] focus-within:border-[#2563EB] rounded-xl px-3 py-2">
+                <span className="text-xs font-mono text-slate-400 mr-1 select-none">@</span>
+                <input
+                  type="text"
+                  value={targetUsernameDraft}
+                  onChange={(e) => {
+                    setTargetUsernameDraft(e.target.value);
+                    if (targetValidationError) setTargetValidationError(null);
+                  }}
+                  placeholder="username_live"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Target username LIVE TikTok"
+                  className="flex-1 bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none font-mono"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-xs font-bold shrink-0"
+              >
+                Simpan Target
+              </button>
+
+              {savedTargetUsername && (
+                <button
+                  type="button"
+                  onClick={() => void handleClearTargetUsername()}
+                  className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/60 text-rose-200 text-xs font-semibold flex items-center justify-center gap-1 shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus</span>
+                </button>
+              )}
+            </div>
+
+            {targetValidationError && (
+              <div className="p-2.5 rounded-xl bg-rose-950/50 border border-rose-700/60 text-xs text-rose-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{targetValidationError}</span>
+              </div>
+            )}
+
+            <div className="text-[11px] text-slate-400">
+              {savedTargetUsername ? (
+                <span>
+                  Target aktif saat ini: <strong className="text-slate-200 font-mono">@{savedTargetUsername}</strong>{' '}
+                  (disimpan lokal &amp; dipakai bersama oleh Dashboard dan Integrations).
+                </span>
+              ) : (
+                <span>Belum ada target username LIVE yang disimpan.</span>
+              )}
+            </div>
+          </form>
+        </section>
+
+        {/* Bagian 1: Autentikasi & Profil Akun TikTok (Opsional) */}
         <section className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-blue-400" />
-                <span>Autentikasi Akun TikTok</span>
+                <span>Autentikasi Akun TikTok (OAuth PKCE · Opsional)</span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Menggunakan alur resmi TikTok OAuth 2.0 + PKCE (S256). SYNTXRR tidak pernah meminta password atau mengambil cookie sesi pribadi Anda.
+                Opsional untuk verifikasi identitas profil via Login Kit TikTok. Pembacaan event LIVE publik tidak mewajibkan login OAuth ini.
               </p>
             </div>
           </div>
@@ -622,13 +762,20 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+            <div className="text-[11px] text-slate-400">
+              Target koneksi:{' '}
+              <span className="font-mono text-slate-200">
+                {savedTargetUsername ? `@${savedTargetUsername}` : 'Belum diatur'}
+              </span>
+            </div>
+
             {isTransportActiveOrBusy || tiktokStatus.state === 'waiting_for_live' ? (
               <button
                 type="button"
                 onClick={() => {
                   void onDisconnectTikTok?.();
-                  showToast('Transport LIVE diputuskan (akun tetap terhubung).');
+                  showToast('Transport LIVE diputuskan (target & akun tetap tersimpan).');
                 }}
                 className="px-4 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-600/60 text-rose-200 text-xs font-bold"
               >
@@ -637,22 +784,32 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
             ) : (
               <button
                 type="button"
-                disabled={!hasProfileUsername}
-                onClick={() => {
-                  if (!tiktokAccount.username) return;
-                  void onConnectTikTok?.(
-                    tiktokAccount.username,
+                onClick={async () => {
+                  const candidate = normalizeTikTokTargetUsername(targetUsernameDraft) || savedTargetUsername;
+                  if (!isValidTikTokTargetUsername(candidate)) {
+                    setTargetValidationError(
+                      'Masukkan target @username TikTok yang valid terlebih dahulu sebelum menyambungkan.'
+                    );
+                    return;
+                  }
+                  setTargetValidationError(null);
+                  if (candidate !== savedTargetUsername) {
+                    setTargetUsernameDraft(candidate);
+                    await persistTargetUsername(candidate);
+                  }
+                  await onConnectTikTok?.(
+                    candidate,
                     settings?.eulerStreamApiKey,
                     tiktokAccount.fallbackEnabled,
                     tiktokAccount.connectionMethod
                   );
-                  showToast(`Memulai koneksi transport LIVE @${tiktokAccount.username}...`);
+                  showToast(`Memulai koneksi transport LIVE @${candidate}...`);
                 }}
-                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-xs font-bold"
               >
-                {hasProfileUsername
+                {savedTargetUsername || isValidTikTokTargetUsername(targetUsernameDraft)
                   ? 'Sambungkan Transport LIVE'
-                  : 'Login Akun dengan Username Terverifikasi Dahulu'}
+                  : 'Isi Target @username Dahulu'}
               </button>
             )}
           </div>
@@ -811,9 +968,15 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
 
                   <div className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] text-[11px] space-y-1.5 mb-3">
                     <div className="flex items-center justify-between text-slate-400">
-                      <span>Akun Terhubung:</span>
+                      <span>Target LIVE:</span>
                       <span className="font-mono text-slate-200 truncate max-w-[150px]">
-                        {tiktokAccount.isLinked ? honestStatus.accountLinked.detail : 'Belum terhubung'}
+                        {savedTargetUsername ? `@${savedTargetUsername}` : 'Belum diatur'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>OAuth (Opsional):</span>
+                      <span className="font-mono text-slate-200 truncate max-w-[150px]">
+                        {tiktokAccount.isLinked ? honestStatus.accountLinked.detail : 'Belum ditautkan'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-400">

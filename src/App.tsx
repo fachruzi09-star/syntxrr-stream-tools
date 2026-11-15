@@ -57,6 +57,9 @@ import {
 import {
   tiktokLiveConnector,
   buildModeAHonestStatus,
+  isValidTikTokTargetUsername,
+  normalizeTikTokTargetUsername,
+  resolveTikTokTargetUsername,
 } from './services/tiktokLiveConnector';
 import {
   applyVerifiedProfileToAccountState,
@@ -235,6 +238,7 @@ export default function App() {
         setMarketplaceItems(savedMarketplace);
         setTiktokAccount(savedTikTokAccount);
         const liveNow = tiktokLiveConnector.isConnected();
+        const savedTargetUser = resolveTikTokTargetUsername(savedSettings, savedTikTokAccount);
         setIntegrations(
           savedIntegrations.map((item) =>
             item.id === 'tiktok'
@@ -242,12 +246,11 @@ export default function App() {
                   ...item,
                   status: liveNow ? 'ACTIVE' : 'NOT_CONNECTED',
                   connectedUser: liveNow
-                    ? tiktokLiveConnector.getStatus().username || savedTikTokAccount.username
-                    : savedTikTokAccount.isLinked
-                    ? savedTikTokAccount.username ||
-                      savedTikTokAccount.displayName ||
-                      savedTikTokAccount.openId
-                    : undefined,
+                    ? tiktokLiveConnector.getStatus().username || savedTargetUser || undefined
+                    : savedTargetUser ||
+                      (savedTikTokAccount.isLinked
+                        ? savedTikTokAccount.displayName || savedTikTokAccount.openId
+                        : undefined),
                 }
               : item
           )
@@ -673,12 +676,16 @@ export default function App() {
         const next = prev.map((item) => {
           if (item.id !== 'tiktok') return item;
           const desiredStatus = trulyConnected ? 'ACTIVE' : 'NOT_CONNECTED';
+          const configuredTarget = resolveTikTokTargetUsername(
+            settingsRef.current,
+            tiktokAccountRef.current
+          );
           const linkedLabel = tiktokAccountRef.current.isLinked
             ? tiktokAccountRef.current.username ||
               tiktokAccountRef.current.displayName ||
               tiktokAccountRef.current.openId
             : undefined;
-          const desiredUser = nextStatus.username || linkedLabel;
+          const desiredUser = nextStatus.username || configuredTarget || linkedLabel;
           if (item.status !== desiredStatus || item.connectedUser !== desiredUser) {
             changed = true;
             return {
@@ -719,10 +726,11 @@ export default function App() {
 
       const nextSettings: AppSettings = {
         ...settingsRef.current,
-        tiktokUsername: nextAccount.username || '',
+        tiktokUsername: resolveTikTokTargetUsername(settingsRef.current, nextAccount),
       };
+      settingsRef.current = nextSettings;
       setSettings(nextSettings);
-      await StorageService.saveSettings(nextSettings);
+      await writeSettingsToStorage(nextSettings);
       return;
     }
 
@@ -789,20 +797,55 @@ export default function App() {
     }
   };
 
-  const handleUnlinkTikTok = async () => {
-    await tiktokLiveConnector.disconnect();
-    const cleared = await StorageService.clearTikTokAccount();
-    setTiktokAccount(cleared);
-    setSettings((prev) => ({
-      ...prev,
-      tiktokUsername: '',
-      tiktokConnected: false,
-      eulerStreamApiKey: '',
-    }));
+  const handleSaveTikTokTargetUsername = async (rawUsername: string) => {
+    const trimmed = (rawUsername || '').trim();
+    const normalized = trimmed === '' ? '' : normalizeTikTokTargetUsername(trimmed);
+    if (normalized !== '' && !isValidTikTokTargetUsername(normalized)) {
+      return;
+    }
+
+    const nextSettings: AppSettings = {
+      ...settingsRef.current,
+      tiktokUsername: normalized,
+    };
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    await writeSettingsToStorage(nextSettings);
+
+    const resolvedPreview = resolveTikTokTargetUsername(nextSettings, tiktokAccountRef.current);
     setIntegrations((prev) =>
       prev.map((item) =>
         item.id === 'tiktok'
-          ? { ...item, status: 'NOT_CONNECTED', connectedUser: undefined }
+          ? {
+              ...item,
+              connectedUser: tiktokLiveConnector.isConnected()
+                ? tiktokLiveConnector.getStatus().username || resolvedPreview || undefined
+                : resolvedPreview || undefined,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleUnlinkTikTok = async () => {
+    await tiktokLiveConnector.disconnect();
+    const cleared = await StorageService.clearTikTokAccount();
+    tiktokAccountRef.current = cleared;
+    setTiktokAccount(cleared);
+
+    const persistedSettings = await StorageService.getSettings();
+    settingsRef.current = persistedSettings;
+    setSettings(persistedSettings);
+
+    const remainingTarget = resolveTikTokTargetUsername(persistedSettings, cleared);
+    setIntegrations((prev) =>
+      prev.map((item) =>
+        item.id === 'tiktok'
+          ? {
+              ...item,
+              status: 'NOT_CONNECTED',
+              connectedUser: remainingTarget || undefined,
+            }
           : item
       )
     );
@@ -831,8 +874,9 @@ export default function App() {
         ? { eulerStreamApiKey: prefs.eulerApiKey }
         : {}),
     };
+    settingsRef.current = nextSettings;
     setSettings(nextSettings);
-    await StorageService.saveSettings(nextSettings);
+    await writeSettingsToStorage(nextSettings);
   };
 
   const handleConnectTikTok = async (
@@ -841,18 +885,23 @@ export default function App() {
     allowEulerFallback?: boolean,
     connectionMethod?: TikTokConnectionMethod
   ) => {
+    const normalized = normalizeTikTokTargetUsername(username);
+    if (!isValidTikTokTargetUsername(normalized)) {
+      return;
+    }
+
     await tiktokLiveConnector.connect({
-      username,
-      eulerApiKey: eulerApiKey ?? settings.eulerStreamApiKey,
+      username: normalized,
+      eulerApiKey: eulerApiKey ?? settingsRef.current.eulerStreamApiKey,
       allowEulerFallback:
         allowEulerFallback ??
-        tiktokAccount.fallbackEnabled ??
-        settings.tiktokEulerFallbackEnabled ??
+        tiktokAccountRef.current.fallbackEnabled ??
+        settingsRef.current.tiktokEulerFallbackEnabled ??
         true,
       connectionMethod:
         connectionMethod ??
-        tiktokAccount.connectionMethod ??
-        settings.tiktokConnectionMethod ??
+        tiktokAccountRef.current.connectionMethod ??
+        settingsRef.current.tiktokConnectionMethod ??
         'direct',
     });
   };
@@ -1434,6 +1483,13 @@ export default function App() {
 
   // Kondisi C: Sambungkan & mulai (Mode A dengan konektor TikTok LIVE).
   const handleStartModeAWithConnection = async () => {
+    const acct = tiktokAccountRef.current;
+    const activeSettings = settingsRef.current;
+    const targetUsername = resolveTikTokTargetUsername(activeSettings, acct);
+    if (!isValidTikTokTargetUsername(targetUsername)) {
+      return;
+    }
+
     if (isNativeAndroidPlatform) {
       const res = await startCompanion();
       setCompanionRunning(!!res?.isRunning);
@@ -1445,10 +1501,8 @@ export default function App() {
       setModeASessionMode('with_live_connector');
     }
 
-    const acct = tiktokAccountRef.current;
-    const activeSettings = settingsRef.current;
     await tiktokLiveConnector.connect({
-      username: acct.username || '',
+      username: targetUsername,
       connectionMethod: acct.connectionMethod ?? activeSettings.tiktokConnectionMethod ?? 'direct',
       eulerApiKey: activeSettings.eulerStreamApiKey,
       allowEulerFallback: acct.fallbackEnabled ?? activeSettings.tiktokEulerFallbackEnabled ?? true,
@@ -2125,6 +2179,7 @@ export default function App() {
             companionRunning={companionRunning}
             modeASessionMode={modeASessionMode}
             openTikTokSettingsNonce={openTikTokSettingsNonce}
+            onSaveTikTokTargetUsername={handleSaveTikTokTargetUsername}
             onLoginTikTok={handleLoginTikTok}
             onUnlinkTikTok={handleUnlinkTikTok}
             onUpdateTikTokConnectionPrefs={handleUpdateTikTokConnectionPrefs}

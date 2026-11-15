@@ -283,6 +283,10 @@ public class CompanionService extends Service {
                     .disconnect("Companion Service dihentikan.");
         } catch (Exception ignored) {
         }
+        try {
+            FloatingCompanionPlugin.onNativeCompanionStopped(getApplicationContext());
+        } catch (Exception ignored) {
+        }
         notifyLifecycleStopped();
         try {
             NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -322,6 +326,10 @@ public class CompanionService extends Service {
         try {
             TikTokLiveConnector.getInstance(getApplicationContext())
                     .disconnect("Companion Service dihentikan.");
+        } catch (Exception ignored) {
+        }
+        try {
+            FloatingCompanionPlugin.onNativeCompanionStopped(getApplicationContext());
         } catch (Exception ignored) {
         }
         notifyLifecycleStopped();

@@ -13,6 +13,9 @@ import {
 import {
   TikTokLiveConnector,
   buildModeAHonestStatus,
+  isValidTikTokTargetUsername,
+  normalizeTikTokTargetUsername,
+  resolveTikTokTargetUsername,
   type TikTokTransportAdapter,
 } from '../tiktokLiveConnector';
 import {
@@ -598,6 +601,34 @@ function runHonestStatusAndHudTests(): void {
   assertEqual(waitingSummary.eventTransport.label, 'Menunggu LIVE', 'Transport separates Menunggu LIVE');
 }
 
+function runTargetUsernameResolutionTests(): void {
+  assertEqual(normalizeTikTokTargetUsername('  @@contoh_user  '), 'contoh_user', 'Normalizes leading @ and spaces');
+  assertEqual(isValidTikTokTargetUsername('@contoh'), true, 'Validates @contoh');
+  assertEqual(isValidTikTokTargetUsername('   '), false, 'Rejects empty username');
+  assertEqual(isValidTikTokTargetUsername('@bad user!'), false, 'Rejects invalid characters');
+
+  // Shared target username works even when OAuth is unconfigured/unlinked
+  const resolvedPublic = resolveTikTokTargetUsername(
+    { tiktokUsername: '  @contoh  ' },
+    { isLinked: false, username: undefined }
+  );
+  assertEqual(resolvedPublic, 'contoh', 'Public target resolves without OAuth');
+
+  // Manual target takes precedence over OAuth profile username
+  const resolvedManualPriority = resolveTikTokTargetUsername(
+    { tiktokUsername: 'target_live' },
+    { isLinked: true, username: 'oauth_owner' }
+  );
+  assertEqual(resolvedManualPriority, 'target_live', 'Manual target takes priority over OAuth username');
+
+  // Falls back to linked OAuth username if manual target is empty
+  const resolvedFallback = resolveTikTokTargetUsername(
+    { tiktokUsername: '' },
+    { isLinked: true, username: '@oauth_owner' }
+  );
+  assertEqual(resolvedFallback, 'oauth_owner', 'Falls back to linked OAuth username when manual target empty');
+}
+
 async function main(): Promise<void> {
   runNormalizerTests();
   runBoundedDedupTests();
@@ -605,6 +636,7 @@ async function main(): Promise<void> {
   runStorageAndBackupSecurityTests();
   await runOAuthPkceAndScopeTests();
   runHonestStatusAndHudTests();
+  runTargetUsernameResolutionTests();
   console.log('ALL_TIKTOK_CONNECTOR_TESTS_PASSED');
 }
 

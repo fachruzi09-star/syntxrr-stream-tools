@@ -43,6 +43,12 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
+import java.util.Locale;
+
 /**
  * FloatingHudManager
  *
@@ -147,6 +153,27 @@ public class FloatingHudManager {
     private TextView mMixerReasonView = null;
     private int mMixerLastBarColor = 0;
 
+    private static final int NATIVE_CHAT_BUFFER_LIMIT = 60;
+    private static final int NATIVE_DEDUP_LIMIT = 256;
+
+    private static final class NativeChatEntry {
+        @NonNull final String tab;
+        @NonNull final String username;
+        @NonNull final String detail;
+        @NonNull final String trailing;
+
+        NativeChatEntry(
+                @NonNull String tab,
+                @NonNull String username,
+                @NonNull String detail,
+                @NonNull String trailing) {
+            this.tab = tab;
+            this.username = username;
+            this.detail = detail;
+            this.trailing = trailing;
+        }
+    }
+
     // Authoritative native mic monitor state for Mixer panel when active
     private boolean mNativeMicHasState = false;
     private boolean mNativeMicAvailable = false;
@@ -158,6 +185,22 @@ public class FloatingHudManager {
     private String mNativeMicStatusTone = "off";
     @Nullable
     private String mNativeMicReason = null;
+
+    // Authoritative native TikTok LIVE event buffer & state for Chat panel (RAM only, max 60)
+    private final LinkedList<NativeChatEntry> mNativeChatEvents = new LinkedList<>();
+    private final LinkedHashSet<String> mNativeDedupKeys = new LinkedHashSet<>();
+    private final SimpleDateFormat mNativeTimeFormat =
+            new SimpleDateFormat("HH:mm", Locale.getDefault());
+    private boolean mNativeTikTokHasState = false;
+    private boolean mNativeTikTokActive = false;
+    @NonNull
+    private String mNativeTikTokState = "disconnected";
+    @NonNull
+    private String mNativeTikTokStatusText = "Belum terhubung";
+    @NonNull
+    private String mNativeTikTokStatusTone = "off";
+    @NonNull
+    private String mNativeChatActiveTab = "chat";
 
     /** Posisi absolut bubble di layar (bukan posisi window). */
     private int mBubbleScreenX = -1;
@@ -552,6 +595,10 @@ public class FloatingHudManager {
                     if (model != null) {
                         if ("chat".equals(key)) {
                             applyPendingChatTabIfNeeded(model);
+                            syncNativeActiveTabFromModelLocked(model);
+                            if (mNativeTikTokHasState && (mNativeTikTokActive || !mNativeChatEvents.isEmpty())) {
+                                canonicalizeChatModelWithNativeLocked(model);
+                            }
                         } else if ("mixer".equals(key) && mNativeMicHasState) {
                             canonicalizeMixerModelForNative(model);
                         }
@@ -567,6 +614,10 @@ public class FloatingHudManager {
             singlePanel = root.optString("panel", "");
             if ("chat".equals(singlePanel)) {
                 applyPendingChatTabIfNeeded(root);
+                syncNativeActiveTabFromModelLocked(root);
+                if (mNativeTikTokHasState && (mNativeTikTokActive || !mNativeChatEvents.isEmpty())) {
+                    canonicalizeChatModelWithNativeLocked(root);
+                }
             } else if ("mixer".equals(singlePanel) && mNativeMicHasState) {
                 canonicalizeMixerModelForNative(root);
             }
@@ -946,6 +997,7 @@ public class FloatingHudManager {
 
         mPendingChatTab = tabId;
         mPendingChatTabAtMs = SystemClock.uptimeMillis();
+        mNativeChatActiveTab = tabId;
 
         String chatJson = mPanelModels.get("chat");
         if (chatJson != null) {
@@ -966,6 +1018,343 @@ public class FloatingHudManager {
             renderLastKnownModel(mLastRenderedStale);
         }
         return true;
+    }
+
+    // =========================================================================
+    // NATIVE-FIRST TIKTOK LIVE CHAT & STATUS UPDATES (NO WEBVIEW ROUND-TRIP)
+    // =========================================================================
+
+    public void updateNativeTikTokState(@Nullable JSONObject stateJson) {
+        if (stateJson == null) {
+            return;
+        }
+        final String state = stateJson.optString("state", "disconnected");
+        final boolean active;
+        final String statusText;
+        final String statusTone;
+
+        switch (state) {
+            case "connected_direct":
+                active = true;
+                statusText = "Terhubung (Direct)";
+                statusTone = "ok";
+                break;
+            case "connected_euler":
+                active = true;
+                statusText = "Terhubung (Euler)";
+                statusTone = "ok";
+                break;
+            case "resolving_room":
+            case "connecting_direct":
+            case "connecting_euler":
+            case "reconnecting":
+                active = true;
+                statusText = "Menghubungkan";
+                statusTone = "warn";
+                break;
+            case "waiting_for_live":
+                active = true;
+                statusText = "Menunggu LIVE";
+                statusTone = "warn";
+                break;
+            case "error":
+                active = false;
+                statusText = "Gagal terhubung";
+                statusTone = "off";
+                break;
+            case "disconnected":
+            default:
+                active = false;
+                statusText = "Belum terhubung";
+                statusTone = "off";
+                break;
+        }
+
+        final boolean shouldRefresh;
+        synchronized (this) {
+            mNativeTikTokHasState = true;
+            mNativeTikTokActive = active;
+            mNativeTikTokState = state;
+            mNativeTikTokStatusText = statusText;
+            mNativeTikTokStatusTone = statusTone;
+            updateNativeChatModelLocked();
+            shouldRefresh = mIsAttached && "chat".equals(mActivePanel);
+        }
+
+        if (shouldRefresh) {
+            runOnUiThreadSafe(() -> renderLastKnownModel(false));
+        }
+    }
+
+    public void pushNativeTikTokEvent(@Nullable JSONObject eventJson) {
+        if (eventJson == null) {
+            return;
+        }
+        final String method = eventJson.optString("method", "").trim();
+        if (method.isEmpty()) {
+            return;
+        }
+
+        final String msgId = eventJson.optString("msgId", "").trim();
+        final String tab;
+        final String username;
+        final String detail;
+        final String dedupKey;
+
+        if ("WebcastChatMessage".equals(method) || "WebcastEmoteChatMessage".equals(method)) {
+            detail = normalizeSingleLine(eventJson.optString("content", ""), 280);
+            username = resolveNativeEventUsername(eventJson);
+            if (detail.isEmpty() || username.isEmpty()) {
+                return;
+            }
+            tab = "chat";
+            dedupKey = !msgId.isEmpty() ? "chat:" + msgId : "";
+        } else if ("WebcastGiftMessage".equals(method)) {
+            String giftId = eventJson.optString("giftId", "").trim();
+            String giftName = normalizeSingleLine(eventJson.optString("giftName", ""), 80);
+            if (giftName.isEmpty() && !giftId.isEmpty()) {
+                giftName = "Gift #" + giftId;
+            }
+            if (giftName.isEmpty()) {
+                return;
+            }
+            long repeatCount = Math.max(1L, eventJson.optLong("repeatCount", 1L));
+            String sender = resolveNativeEventUsername(eventJson);
+            username = sender.isEmpty() ? "Penonton LIVE" : sender;
+            detail = repeatCount > 1L
+                    ? ("mengirim " + repeatCount + "x " + giftName)
+                    : ("mengirim " + giftName);
+            tab = "gift";
+            dedupKey = !msgId.isEmpty()
+                    ? ("gift:" + msgId + ":" + (!giftId.isEmpty() ? giftId : giftName) + ":" + repeatCount)
+                    : "";
+        } else if ("WebcastLikeMessage".equals(method)) {
+            long likeCount = Math.max(0L, eventJson.optLong("likeCount", 0L));
+            long totalLikeCount = Math.max(0L, eventJson.optLong("totalLikeCount", 0L));
+            if (likeCount <= 0L && totalLikeCount <= 0L) {
+                return;
+            }
+            String sender = resolveNativeEventUsername(eventJson);
+            username = sender.isEmpty() ? "Penonton LIVE" : sender;
+            detail = likeCount > 0L
+                    ? ("mengirim " + likeCount + " tap layar")
+                    : ("total " + totalLikeCount + " like");
+            tab = "like";
+            dedupKey = !msgId.isEmpty()
+                    ? ("like:" + msgId + ":" + likeCount + ":" + totalLikeCount)
+                    : "";
+        } else if ("WebcastSocialMessage".equals(method)) {
+            long action = eventJson.optLong("action", 0L);
+            String displayKey = eventJson.optString("displayKey", "").trim().toLowerCase(Locale.ROOT);
+            if (action != 1L && !displayKey.contains("follow")) {
+                return;
+            }
+            String sender = resolveNativeEventUsername(eventJson);
+            username = sender.isEmpty() ? "Penonton LIVE" : sender;
+            detail = "mulai mengikuti siaran Anda";
+            tab = "follow";
+            dedupKey = !msgId.isEmpty() ? "follow:" + msgId : "";
+        } else {
+            return;
+        }
+
+        long rawTs = eventJson.optLong("createTime", 0L);
+        long tsMs = rawTs <= 0L
+                ? System.currentTimeMillis()
+                : (rawTs < 1_000_000_000_000L ? rawTs * 1000L : rawTs);
+
+        final boolean shouldRefresh;
+        synchronized (this) {
+            if (!dedupKey.isEmpty()) {
+                if (mNativeDedupKeys.contains(dedupKey)) {
+                    return;
+                }
+                mNativeDedupKeys.add(dedupKey);
+                while (mNativeDedupKeys.size() > NATIVE_DEDUP_LIMIT) {
+                    java.util.Iterator<String> it = mNativeDedupKeys.iterator();
+                    if (it.hasNext()) {
+                        it.next();
+                        it.remove();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            String trailing = mNativeTimeFormat.format(new Date(tsMs));
+            mNativeChatEvents.addFirst(new NativeChatEntry(tab, username, detail, tsMs > 0 ? trailing : ""));
+            while (mNativeChatEvents.size() > NATIVE_CHAT_BUFFER_LIMIT) {
+                mNativeChatEvents.removeLast();
+            }
+            updateNativeChatModelLocked();
+            shouldRefresh = mIsAttached && "chat".equals(mActivePanel);
+        }
+
+        if (shouldRefresh) {
+            runOnUiThreadSafe(() -> renderLastKnownModel(false));
+        }
+    }
+
+    public void clearNativeTikTokSession(final boolean resetModel) {
+        final boolean shouldRefresh;
+        synchronized (this) {
+            mNativeChatEvents.clear();
+            mNativeDedupKeys.clear();
+            mNativeTikTokHasState = false;
+            mNativeTikTokActive = false;
+            mNativeTikTokState = "disconnected";
+            mNativeTikTokStatusText = "Belum terhubung";
+            mNativeTikTokStatusTone = "off";
+            if (resetModel) {
+                updateNativeChatModelLocked();
+            }
+            shouldRefresh = resetModel && mIsAttached && "chat".equals(mActivePanel);
+        }
+
+        if (shouldRefresh) {
+            runOnUiThreadSafe(() -> renderLastKnownModel(false));
+        }
+    }
+
+    private void syncNativeActiveTabFromModelLocked(@NonNull JSONObject chatModel) {
+        if (mPendingChatTab != null) {
+            return;
+        }
+        String tab = chatModel.optString("activeTab", "");
+        if (isValidChatTab(tab)) {
+            mNativeChatActiveTab = tab;
+        }
+    }
+
+    private void canonicalizeChatModelWithNativeLocked(@NonNull JSONObject chatModel) {
+        try {
+            JSONObject status = new JSONObject();
+            status.put("text", mNativeTikTokStatusText);
+            status.put("tone", mNativeTikTokStatusTone);
+            chatModel.put("status", status);
+
+            String activeTab = isValidChatTab(mNativeChatActiveTab) ? mNativeChatActiveTab : "chat";
+            JSONObject rowsByTab = buildNativeRowsByTabLocked();
+            chatModel.put("activeTab", activeTab);
+            chatModel.put("rowsByTab", rowsByTab);
+            JSONArray activeRows = rowsByTab.optJSONArray(activeTab);
+            chatModel.put("rows", activeRows != null ? activeRows : new JSONArray());
+        } catch (JSONException e) {
+            Log.w(TAG, "Gagal menyelaraskan model chat native: " + e.getMessage());
+        }
+    }
+
+    private void updateNativeChatModelLocked() {
+        try {
+            JSONObject model;
+            String existing = mPanelModels.get("chat");
+            if (existing != null) {
+                model = new JSONObject(existing);
+            } else {
+                model = new JSONObject();
+                model.put("panel", "chat");
+                model.put("title", "Live Chat");
+            }
+
+            JSONObject status = new JSONObject();
+            status.put("text", mNativeTikTokStatusText);
+            status.put("tone", mNativeTikTokStatusTone);
+            model.put("status", status);
+
+            String[] tIds = {"chat", "gift", "like", "follow"};
+            String[] tLabels = {"Chat", "Gift", "Like", "Follow"};
+            JSONArray tabs = new JSONArray();
+            JSONObject emptyTextByTab = new JSONObject();
+            for (int i = 0; i < tIds.length; i++) {
+                JSONObject t = new JSONObject();
+                t.put("id", tIds[i]);
+                t.put("label", tLabels[i]);
+                tabs.put(t);
+                emptyTextByTab.put(tIds[i], defaultEmptyTextForTab(tIds[i]));
+            }
+            model.put("tabs", tabs);
+            model.put("emptyTextByTab", emptyTextByTab);
+
+            String activeTab = mPendingChatTab != null && isValidChatTab(mPendingChatTab)
+                    ? mPendingChatTab
+                    : (isValidChatTab(mNativeChatActiveTab) ? mNativeChatActiveTab : "chat");
+            JSONObject rowsByTab = buildNativeRowsByTabLocked();
+            model.put("activeTab", activeTab);
+            model.put("rowsByTab", rowsByTab);
+            JSONArray activeRows = rowsByTab.optJSONArray(activeTab);
+            model.put("rows", activeRows != null ? activeRows : new JSONArray());
+            model.put("listHeightDp", 164);
+            model.put("emptyText", emptyTextByTab.optString(activeTab, defaultEmptyTextForTab(activeTab)));
+
+            String updatedJson = model.toString();
+            mPanelModels.put("chat", updatedJson);
+            if ("chat".equals(mActivePanel)) {
+                mLastModelJson = updatedJson;
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Gagal memperbarui model chat native: " + e.getMessage());
+        }
+    }
+
+    @NonNull
+    private JSONObject buildNativeRowsByTabLocked() throws JSONException {
+        JSONObject rowsByTab = new JSONObject();
+        JSONArray chatRows = new JSONArray();
+        JSONArray giftRows = new JSONArray();
+        JSONArray likeRows = new JSONArray();
+        JSONArray followRows = new JSONArray();
+
+        for (NativeChatEntry entry : mNativeChatEvents) {
+            JSONObject row = new JSONObject();
+            row.put("label", entry.username);
+            row.put("sub", entry.detail);
+            row.put("trailing", entry.trailing);
+
+            switch (entry.tab) {
+                case "gift":
+                    giftRows.put(row);
+                    break;
+                case "like":
+                    likeRows.put(row);
+                    break;
+                case "follow":
+                    followRows.put(row);
+                    break;
+                case "chat":
+                default:
+                    chatRows.put(row);
+                    break;
+            }
+        }
+
+        rowsByTab.put("chat", chatRows);
+        rowsByTab.put("gift", giftRows);
+        rowsByTab.put("like", likeRows);
+        rowsByTab.put("follow", followRows);
+        return rowsByTab;
+    }
+
+    @NonNull
+    private static String normalizeSingleLine(@Nullable String value, int maxLen) {
+        if (value == null) {
+            return "";
+        }
+        String collapsed = value.trim().replaceAll("\\s+", " ");
+        return collapsed.length() <= maxLen ? collapsed : collapsed.substring(0, maxLen);
+    }
+
+    @NonNull
+    private static String resolveNativeEventUsername(@NonNull JSONObject raw) {
+        String handle = normalizeSingleLine(raw.optString("username", ""), 64);
+        if (!handle.isEmpty()) {
+            return handle;
+        }
+        String nick = normalizeSingleLine(raw.optString("nickname", ""), 64);
+        if (!nick.isEmpty()) {
+            return nick;
+        }
+        String uid = normalizeSingleLine(raw.optString("userId", ""), 32);
+        return !uid.isEmpty() ? ("user_" + uid) : "";
     }
 
     private void resetRenderedCache() {
@@ -1188,9 +1577,17 @@ public class FloatingHudManager {
             if (isMixerPanel && mNativeMicHasState) {
                 statusText = mNativeMicStatusText;
                 tone = mNativeMicStatusTone;
+            } else if ("chat".equals(panelId) && mNativeTikTokHasState) {
+                if (stale && !mNativeTikTokActive) {
+                    statusText = "Status terakhir";
+                    tone = "warn";
+                } else {
+                    statusText = mNativeTikTokStatusText;
+                    tone = mNativeTikTokStatusTone;
+                }
             } else if (stale && "chat".equals(panelId)) {
-                // Data dari cache saat WebView dijeda: jangan mengklaim "Terhubung" atau
-                // nilai yang mungkin sudah kedaluwarsa khusus untuk stream LIVE TikTok.
+                // Data dari cache saat WebView dijeda dan tidak ada koneksi native aktif:
+                // jangan mengklaim "Terhubung" atau nilai yang mungkin sudah kedaluwarsa.
                 statusText = "Status terakhir";
                 tone = "warn";
             }
@@ -2125,6 +2522,7 @@ public class FloatingHudManager {
         mMainHandler.removeCallbacksAndMessages(null);
         mPendingChatTab = null;
         mPendingChatTabAtMs = 0L;
+        clearNativeTikTokSession(false);
         resetRenderedCache();
         clearMixerViewRefs();
         mNativeMicHasState = false;

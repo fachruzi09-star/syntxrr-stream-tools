@@ -4,6 +4,8 @@
 
 import type { PluginListenerHandle } from '@capacitor/core';
 import type {
+  AppSettings,
+  TikTokAccountState,
   TikTokConnectionMethod,
   TikTokConnectionState,
   TikTokConnectorStatus,
@@ -21,6 +23,42 @@ import {
   type NativeTikTokStatePayload,
 } from './nativeCompanionBridge';
 import { TikTokEventNormalizer } from './tiktokEventNormalizer';
+
+export const TIKTOK_USERNAME_REGEX = /^[A-Za-z0-9._]{1,64}$/;
+
+export function normalizeTikTokTargetUsername(raw?: string | null): string {
+  let clean = (raw || '').trim();
+  while (clean.startsWith('@')) {
+    clean = clean.slice(1).trim();
+  }
+  return clean;
+}
+
+export function isValidTikTokTargetUsername(raw?: string | null): boolean {
+  const clean = normalizeTikTokTargetUsername(raw);
+  return TIKTOK_USERNAME_REGEX.test(clean);
+}
+
+/**
+ * Satu sumber kebenaran target username LIVE TikTok publik untuk Dashboard, Integrations,
+ * dan TikTokLiveConnector tanpa mewajibkan login OAuth.
+ */
+export function resolveTikTokTargetUsername(
+  settings?: Pick<AppSettings, 'tiktokUsername'> | null,
+  account?: Pick<TikTokAccountState, 'isLinked' | 'username'> | null
+): string {
+  const fromSettings = normalizeTikTokTargetUsername(settings?.tiktokUsername);
+  if (isValidTikTokTargetUsername(fromSettings)) {
+    return fromSettings;
+  }
+  if (account?.isLinked) {
+    const fromAccount = normalizeTikTokTargetUsername(account.username);
+    if (isValidTikTokTargetUsername(fromAccount)) {
+      return fromAccount;
+    }
+  }
+  return '';
+}
 
 export interface TikTokConnectOptions {
   username: string;
@@ -55,11 +93,7 @@ const DEFAULT_NATIVE_ADAPTER: TikTokTransportAdapter = {
 };
 
 function sanitizeUsernameInput(raw: string): string {
-  let clean = (raw || '').trim();
-  while (clean.startsWith('@')) {
-    clean = clean.slice(1).trim();
-  }
-  return clean;
+  return normalizeTikTokTargetUsername(raw);
 }
 
 function initialStatus(): TikTokConnectorStatus {

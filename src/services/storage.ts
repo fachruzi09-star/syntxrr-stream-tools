@@ -883,13 +883,21 @@ export const StorageService = {
     await idbSet('tiktok_account_state', cleared);
 
     const currentSettings = await this.getSettings();
-    await this.saveSettings({
+    const normalizedSettingsTarget = (currentSettings.tiktokUsername || '').trim().replace(/^@+/, '').toLowerCase();
+    const normalizedAccountUser = (current.username || '').trim().replace(/^@+/, '').toLowerCase();
+    const shouldClearTarget =
+      normalizedSettingsTarget !== '' &&
+      normalizedAccountUser !== '' &&
+      normalizedSettingsTarget === normalizedAccountUser;
+    const nextSettings = {
       ...currentSettings,
-      tiktokUsername: '',
+      ...(shouldClearTarget ? { tiktokUsername: '' } : {}),
       tiktokConnected: false,
       eulerStreamApiKey: '',
-    });
+    };
+    await this.saveSettings(nextSettings);
 
+    const preservedTarget = (nextSettings.tiktokUsername || '').trim().replace(/^@+/, '');
     const currentIntegrations = await this.getIntegrations();
     await this.saveIntegrations(
       currentIntegrations.map((item) =>
@@ -897,7 +905,7 @@ export const StorageService = {
           ? {
               ...item,
               status: 'NOT_CONNECTED',
-              connectedUser: undefined,
+              connectedUser: preservedTarget || undefined,
             }
           : item
       )
