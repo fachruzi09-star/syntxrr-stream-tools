@@ -339,7 +339,7 @@ public class FloatingHudManager {
             JSONArray mixButtons = new JSONArray();
             JSONObject mixMuteBtn = new JSONObject();
             mixMuteBtn.put("id", "mic_mute");
-            mixMuteBtn.put("label", "Mute mic");
+            mixMuteBtn.put("label", "Mute monitor");
             mixMuteBtn.put("action", "mic.mute");
             mixMuteBtn.put("active", false);
             mixButtons.put(mixMuteBtn);
@@ -694,21 +694,34 @@ public class FloatingHudManager {
         try {
             JSONObject model = new JSONObject(musicJson);
             JSONObject status = model.optJSONObject("status");
+            String statusText = status != null ? status.optString("text", "") : "";
+            JSONArray rows = model.optJSONArray("rows");
+            String firstRowLabel = (rows != null && rows.length() > 0 && rows.optJSONObject(0) != null)
+                    ? rows.optJSONObject(0).optString("label", "")
+                    : "";
+            boolean hasTrack = !("Tidak ada lagu".equalsIgnoreCase(statusText)
+                    || "Gagal putar".equalsIgnoreCase(statusText)
+                    || "Tidak ada lagu aktif".equalsIgnoreCase(firstRowLabel)
+                    || "Antrean Musik".equalsIgnoreCase(firstRowLabel));
+            boolean hasQueue = rows != null && rows.length() > 1;
+            if (!hasTrack && !hasQueue) {
+                return;
+            }
             if (status == null) {
                 status = new JSONObject();
                 model.put("status", status);
             }
-            boolean currentlyPlaying = "Memutar".equalsIgnoreCase(status.optString("text"));
+            boolean currentlyPlaying = "Memutar".equalsIgnoreCase(statusText);
             boolean nextPlaying = !currentlyPlaying;
-            status.put("text", nextPlaying ? "Memutar" : "Jeda");
-            status.put("tone", nextPlaying ? "ok" : "off");
+            status.put("text", nextPlaying ? "Memutar" : "Dijeda");
+            status.put("tone", nextPlaying ? "ok" : "warn");
 
             JSONArray buttons = model.optJSONArray("buttons");
             if (buttons != null) {
                 for (int i = 0; i < buttons.length(); i++) {
                     JSONObject b = buttons.optJSONObject(i);
                     if (b != null && "play".equals(b.optString("id"))) {
-                        b.put("label", nextPlaying ? "Jeda" : "Putar");
+                        b.put("label", nextPlaying ? "Pause" : "Play");
                         b.put("active", nextPlaying);
                     }
                 }
@@ -726,18 +739,25 @@ public class FloatingHudManager {
         if (musicJson == null) return;
         try {
             JSONObject model = new JSONObject(musicJson);
+            JSONArray rows = model.optJSONArray("rows");
+            boolean hasQueuedNext = rows != null && rows.length() > 1;
             JSONObject status = model.optJSONObject("status");
             if (status != null) {
-                status.put("text", "Memutar");
-                status.put("tone", "ok");
+                if (hasQueuedNext) {
+                    status.put("text", "Memutar");
+                    status.put("tone", "ok");
+                } else {
+                    status.put("text", "Tidak ada lagu");
+                    status.put("tone", "off");
+                }
             }
             JSONArray buttons = model.optJSONArray("buttons");
             if (buttons != null) {
                 for (int i = 0; i < buttons.length(); i++) {
                     JSONObject b = buttons.optJSONObject(i);
                     if (b != null && "play".equals(b.optString("id"))) {
-                        b.put("label", "Jeda");
-                        b.put("active", true);
+                        b.put("label", hasQueuedNext ? "Pause" : "Play");
+                        b.put("active", hasQueuedNext);
                     }
                 }
             }
@@ -1394,7 +1414,7 @@ public class FloatingHudManager {
                 for (int i = 0; i < buttons.length(); i++) {
                     JSONObject b = buttons.optJSONObject(i);
                     if (b != null && "mic.mute".equals(b.optString("action"))) {
-                        b.put("label", "Mute mic");
+                        b.put("label", "Mute monitor");
                         b.put("active", false);
                     }
                 }
@@ -1449,7 +1469,7 @@ public class FloatingHudManager {
             mMixerStatusText.setText(mNativeMicStatusText);
         }
         if (mMixerMuteButton != null) {
-            mMixerMuteButton.setText(mNativeMicMuted ? "Unmute mic" : "Mute mic");
+            mMixerMuteButton.setText(mNativeMicMuted ? "Unmute monitor" : "Mute monitor");
             mMixerMuteButton.setTextColor(mNativeMicMuted ? C_TEXT : C_TEXT_DIM);
             mMixerMuteButton.setBackground(rounded(
                     dp(9),
@@ -1866,7 +1886,7 @@ public class FloatingHudManager {
             String label = button.optString("label", "");
             if (captureMixerRefs && "mic.mute".equals(action) && mNativeMicHasState) {
                 active = mNativeMicMuted;
-                label = mNativeMicMuted ? "Unmute mic" : "Mute mic";
+                label = mNativeMicMuted ? "Unmute monitor" : "Mute monitor";
             }
 
             TextView view = text(label, 10f, active ? C_TEXT : C_TEXT_DIM, true);

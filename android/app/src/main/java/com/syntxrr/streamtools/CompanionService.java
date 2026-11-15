@@ -175,9 +175,8 @@ public class CompanionService extends Service {
      * Menahan proses tetap hidup selama Floating HUD aktif. Dipanggil pada setiap START
      * agar status foreground tetap segar walau service sempat di-restart sistem.
      *
-     * Tipe MICROPHONE hanya disertakan ketika izin RECORD_AUDIO sudah granted agar
-     * Android 11+/14+ tidak melempar SecurityException. Jika izin belum ada atau aktivasi
-     * tipe microphone ditolak sistem, service tetap berjalan dengan MEDIA_PLAYBACK saja.
+     * Hanya menggunakan FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK agar CompanionService
+     * tidak pernah mengklaim akses mikrofon latar belakang terhadap aplikasi TikTok LIVE.
      */
     private void promoteToForeground() {
         Notification notification = buildStatusNotification();
@@ -187,34 +186,14 @@ public class CompanionService extends Service {
             return;
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                boolean micGranted = hasRecordAudioPermission();
-                int foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
-                if (micGranted) {
-                    foregroundTypes |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
-                }
-                try {
-                    startForeground(NOTIFICATION_ID, notification, foregroundTypes);
-                    sHasMicrophoneType = micGranted;
-                } catch (SecurityException | IllegalStateException e) {
-                    sHasMicrophoneType = false;
-                    if (micGranted) {
-                        Log.w(TAG, "Gagal mengaktifkan tipe foreground microphone; fallback ke mediaPlayback: " + e.getMessage());
-                        startForeground(NOTIFICATION_ID, notification,
-                                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-                    } else {
-                        throw e;
-                    }
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                sHasMicrophoneType = false;
+            sHasMicrophoneType = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification,
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             } else {
-                sHasMicrophoneType = false;
                 startForeground(NOTIFICATION_ID, notification);
             }
-            Log.i(TAG, "CompanionService berjalan sebagai foreground service (microphoneType=" + sHasMicrophoneType + ").");
+            Log.i(TAG, "CompanionService berjalan sebagai foreground service (mediaPlayback).");
         } catch (Exception e) {
             sHasMicrophoneType = false;
             Log.e(TAG, "Gagal masuk foreground: " + e.getMessage());
@@ -284,6 +263,10 @@ public class CompanionService extends Service {
         } catch (Exception ignored) {
         }
         try {
+            NativeMusicPlayer.releaseSharedIfCreated();
+        } catch (Exception ignored) {
+        }
+        try {
             FloatingCompanionPlugin.onNativeCompanionStopped(getApplicationContext());
         } catch (Exception ignored) {
         }
@@ -326,6 +309,10 @@ public class CompanionService extends Service {
         try {
             TikTokLiveConnector.getInstance(getApplicationContext())
                     .disconnect("Companion Service dihentikan.");
+        } catch (Exception ignored) {
+        }
+        try {
+            NativeMusicPlayer.releaseSharedIfCreated();
         } catch (Exception ignored) {
         }
         try {

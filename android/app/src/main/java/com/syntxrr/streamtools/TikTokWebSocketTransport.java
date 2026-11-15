@@ -99,31 +99,65 @@ public final class TikTokWebSocketTransport {
     ) {
         try {
             StringBuilder sb = new StringBuilder(baseUrl);
-            char sep = baseUrl.indexOf('?') >= 0 ? '&' : '?';
+            int queryStart = baseUrl.indexOf('?');
+            char sep = queryStart >= 0 ? '&' : '?';
+
+            java.util.Set<String> existingKeys = new java.util.HashSet<>();
+            if (queryStart >= 0 && queryStart + 1 < baseUrl.length()) {
+                String existingQuery = baseUrl.substring(queryStart + 1);
+                for (String pair : existingQuery.split("&")) {
+                    int eq = pair.indexOf('=');
+                    String rawKey = eq > 0 ? pair.substring(0, eq) : pair;
+                    if (!rawKey.isEmpty()) {
+                        existingKeys.add(rawKey);
+                    }
+                }
+            }
 
             Map<String, String> params = new LinkedHashMap<>();
+            // Parameter standar TikTok Webcast WebSocket (tidak menimpa parameter URL yang sudah ditandatangani).
+            putIfMissing(params, existingKeys, "aid", "1988");
+            putIfMissing(params, existingKeys, "app_language", "en");
+            putIfMissing(params, existingKeys, "app_name", "tiktok_web");
+            putIfMissing(params, existingKeys, "browser_language", "en");
+            putIfMissing(params, existingKeys, "browser_name", "Mozilla");
+            putIfMissing(params, existingKeys, "browser_platform", "Linux aarch64");
+            putIfMissing(params, existingKeys, "browser_version", "5.0");
+            putIfMissing(params, existingKeys, "compress", "gzip");
+            putIfMissing(params, existingKeys, "device_platform", "web_mobile");
+            putIfMissing(params, existingKeys, "did_rule", "3");
+            putIfMissing(params, existingKeys, "fetch_rule", "1");
+            putIfMissing(params, existingKeys, "identity", "audience");
+            putIfMissing(params, existingKeys, "live_id", "12");
+            putIfMissing(params, existingKeys, "tz_name", "UTC");
+            putIfMissing(params, existingKeys, "update_version_code", "1.3.0");
+            putIfMissing(params, existingKeys, "version_code", "180800");
+            putIfMissing(params, existingKeys, "webcast_sdk_version", "1.3.0");
+
             if (routeParams != null) {
                 for (Map.Entry<String, String> e : routeParams.entrySet()) {
-                    if (e.getKey() != null && !e.getKey().isEmpty() && e.getValue() != null) {
+                    if (e.getKey() != null && !e.getKey().isEmpty() && e.getValue() != null
+                            && !existingKeys.contains(e.getKey())) {
                         params.put(e.getKey(), e.getValue());
                     }
                 }
             }
-            params.put("room_id", roomId);
-            params.put("ws_direct", wsDirect ? "1" : "0");
-            params.put("resp_content_type", "protobuf");
-            params.put("heartbeat_duration", String.valueOf(Math.max(5_000L, heartbeatDurationMs)));
+            putIfMissing(params, existingKeys, "room_id", roomId);
+            putIfMissing(params, existingKeys, "ws_direct", wsDirect ? "1" : "0");
+            putIfMissing(params, existingKeys, "resp_content_type", "protobuf");
+            putIfMissing(params, existingKeys, "heartbeat_duration",
+                    String.valueOf(Math.max(5_000L, heartbeatDurationMs)));
             if (clientEnter) {
-                params.put("client_enter", "1");
+                putIfMissing(params, existingKeys, "client_enter", "1");
             }
             if (lastRttMs > 0L) {
-                params.put("last_rtt", String.valueOf(lastRttMs));
+                putIfMissing(params, existingKeys, "last_rtt", String.valueOf(lastRttMs));
             }
             if (cursor != null && !cursor.isEmpty()) {
-                params.put("cursor", cursor);
+                putIfMissing(params, existingKeys, "cursor", cursor);
             }
             if (internalExt != null && !internalExt.isEmpty()) {
-                params.put("internal_ext", internalExt);
+                putIfMissing(params, existingKeys, "internal_ext", internalExt);
             }
 
             for (Map.Entry<String, String> e : params.entrySet()) {
@@ -136,6 +170,17 @@ public final class TikTokWebSocketTransport {
             return sb.toString();
         } catch (Exception e) {
             return baseUrl;
+        }
+    }
+
+    private static void putIfMissing(
+            @NonNull Map<String, String> target,
+            @NonNull java.util.Set<String> existingKeys,
+            @NonNull String key,
+            @NonNull String value
+    ) {
+        if (!existingKeys.contains(key)) {
+            target.put(key, value);
         }
     }
 
@@ -215,7 +260,9 @@ public final class TikTokWebSocketTransport {
                 req.append("Connection: Upgrade\r\n");
                 req.append("Sec-WebSocket-Key: ").append(secWebSocketKey).append("\r\n");
                 req.append("Sec-WebSocket-Version: 13\r\n");
-                req.append("User-Agent: SYNTXRR-Companion/1.0 (Android)\r\n");
+                req.append("Origin: https://www.tiktok.com\r\n");
+                req.append("Accept-Language: en-US,en;q=0.9,id;q=0.8\r\n");
+                req.append("User-Agent: ").append(TikTokRoomResolver.MOBILE_USER_AGENT).append("\r\n");
                 String cookieHeader = TikTokRoomResolver.formatCookieHeader(sessionCookies);
                 if (!cookieHeader.isEmpty()) {
                     req.append("Cookie: ").append(cookieHeader).append("\r\n");

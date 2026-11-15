@@ -339,7 +339,7 @@ export function buildMixerModel(options: {
   const { available, metering, muted, level, reason } = options;
 
   const buttons: HudButtonModel[] = [
-    { label: muted ? 'Unmute mic' : 'Mute mic', action: 'mic.mute', active: muted },
+    { label: muted ? 'Unmute monitor' : 'Mute monitor', action: 'mic.mute', active: muted },
   ];
 
   const rows: HudRowModel[] = [];

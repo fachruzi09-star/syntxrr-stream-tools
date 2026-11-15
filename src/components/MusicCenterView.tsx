@@ -29,6 +29,8 @@ import {
   ExternalLink,
   ShieldCheck,
   Info,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 
 interface MusicCenterViewProps {
@@ -83,18 +85,25 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('queue');
   const [audioState, setAudioState] = useState<AudioEngineState>(audioEngine.getState());
+  const [notice, setNotice] = useState<{ text: string; tone: 'warn' | 'error' } | null>(null);
 
   useEffect(() => {
     const unsub = audioEngine.subscribe(setAudioState);
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   // Handle adding from YouTube
   const handleAddYouTubeResult = (item: YouTubeSearchResult) => {
     // Check duplicate
     const exists = unifiedQueue.some((q) => q.externalUrl === item.videoUrl || q.title.toLowerCase() === item.title.toLowerCase());
     if (exists) {
-      alert(`"${item.title}" is already in the queue!`);
+      setNotice({ text: `"${item.title}" sudah ada di dalam antrean.`, tone: 'warn' });
       return;
     }
 
@@ -118,7 +127,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   const handleAddSpotifyResult = (item: SpotifySearchResult) => {
     const exists = unifiedQueue.some((q) => q.externalUrl === item.spotifyUrl || q.title.toLowerCase() === item.title.toLowerCase());
     if (exists) {
-      alert(`"${item.title}" is already in the queue!`);
+      setNotice({ text: `"${item.title}" sudah ada di dalam antrean.`, tone: 'warn' });
       return;
     }
 
@@ -143,7 +152,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   const handleAddLocalToQueue = (track: LocalAudioTrackMeta) => {
     const exists = unifiedQueue.some((q) => q.localFileKey === track.id || (q.title === track.title && q.source === 'local'));
     if (exists) {
-      alert(`"${track.title}" is already in the queue!`);
+      setNotice({ text: `"${track.title}" sudah ada di dalam antrean.`, tone: 'warn' });
       return;
     }
 
@@ -203,7 +212,10 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
       }));
       onUpdateUnifiedQueue(updated);
     } else {
-      alert(`Local file for "${item.title}" is not available in the current browser session. Re-select the file under Local Audio.`);
+      setNotice({
+        text: `File lokal untuk "${item.title}" belum dimuat di sesi saat ini. Pilih ulang file lewat tab Local Audio Engine.`,
+        tone: 'error',
+      });
     }
   };
 
@@ -269,6 +281,30 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
           </span>
         </div>
       </div>
+
+      {notice && (
+        <div
+          role="status"
+          className={`flex items-start justify-between gap-3 px-4 py-3 rounded-xl border text-xs ${
+            notice.tone === 'error'
+              ? 'bg-rose-950/60 border-rose-800 text-rose-200'
+              : 'bg-amber-950/60 border-amber-800 text-amber-200'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{notice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="p-1 rounded-md hover:bg-white/10 transition-colors shrink-0"
+            aria-label="Tutup pemberitahuan"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Now Playing Studio Showcase Card */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-blue-950/80 shadow-xl space-y-4">

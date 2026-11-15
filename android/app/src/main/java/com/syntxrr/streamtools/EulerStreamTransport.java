@@ -73,8 +73,25 @@ public final class EulerStreamTransport {
             @Nullable String cursor,
             @Nullable String internalExt
     ) throws IOException {
+        return buildFetchUrl(roomId, null, cursor, internalExt);
+    }
+
+    @NonNull
+    public static String buildFetchUrl(
+            @Nullable String roomId,
+            @Nullable String uniqueId,
+            @Nullable String cursor,
+            @Nullable String internalExt
+    ) throws IOException {
+        String cleanRoomId = roomId != null ? roomId.trim() : "";
+        String cleanUniqueId = uniqueId != null ? uniqueId.trim() : "";
         StringBuilder sb = new StringBuilder(EULER_FETCH_ENDPOINT);
-        sb.append("?room_id=").append(URLEncoder.encode(roomId, StandardCharsets.UTF_8.name()));
+        sb.append("?client=syntxrr");
+        if (!cleanRoomId.isEmpty()) {
+            sb.append("&room_id=").append(URLEncoder.encode(cleanRoomId, StandardCharsets.UTF_8.name()));
+        } else if (!cleanUniqueId.isEmpty()) {
+            sb.append("&unique_id=").append(URLEncoder.encode(cleanUniqueId, StandardCharsets.UTF_8.name()));
+        }
         if (cursor != null && !cursor.isEmpty()) {
             sb.append("&cursor=").append(URLEncoder.encode(cursor, StandardCharsets.UTF_8.name()));
         }
@@ -91,25 +108,38 @@ public final class EulerStreamTransport {
             @Nullable String internalExt,
             @Nullable String userApiKey
     ) {
-        if (roomId.trim().isEmpty()) {
+        return fetch(roomId, null, cursor, internalExt, userApiKey);
+    }
+
+    @NonNull
+    public static FetchResult fetch(
+            @Nullable String roomId,
+            @Nullable String uniqueId,
+            @Nullable String cursor,
+            @Nullable String internalExt,
+            @Nullable String userApiKey
+    ) {
+        String cleanRoomId = roomId != null ? roomId.trim() : "";
+        String cleanUniqueId = uniqueId != null ? uniqueId.trim() : "";
+        if (cleanRoomId.isEmpty() && cleanUniqueId.isEmpty()) {
             return new FetchResult(
                     FetchStatus.MISSING_CURSOR_OR_BAD_REQUEST,
                     400,
-                    "room_id kosong saat memanggil EulerStream fetch.",
+                    "room_id dan unique_id kosong saat memanggil EulerStream fetch.",
                     null
             );
         }
 
         HttpURLConnection conn = null;
         try {
-            String urlStr = buildFetchUrl(roomId, cursor, internalExt);
+            String urlStr = buildFetchUrl(cleanRoomId, cleanUniqueId, cursor, internalExt);
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setRequestProperty("Accept", "application/x-protobuf, application/octet-stream, application/json");
-            conn.setRequestProperty("User-Agent", "SYNTXRR-Companion/1.0 (Android)");
+            conn.setRequestProperty("User-Agent", TikTokRoomResolver.MOBILE_USER_AGENT);
 
             // Gunakan hanya API key milik pengguna sendiri via header; jangan pernah di-log.
             if (userApiKey != null && !userApiKey.trim().isEmpty()) {

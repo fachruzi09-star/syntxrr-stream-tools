@@ -188,6 +188,7 @@ public final class TikTokLiveConnector {
         final long gen;
         synchronized (mLock) {
             boolean alreadySameSession = isSessionActive()
+                    && !"waiting_for_live".equals(mState)
                     && normalized.equalsIgnoreCase(mUsername)
                     && method.equals(mConnectionMethod)
                     && allowEulerFallback == mAllowEulerFallback;
@@ -270,8 +271,15 @@ public final class TikTokLiveConnector {
                 scheduleWaitingForLiveCheck(gen, username, res.message);
                 return;
             case ROOM_UNREADABLE:
-                synchronized (mLock) { mRoomStatus = "unreadable"; }
-                failSessionIfCurrent(gen, "error", "ROOM_UNREADABLE", res.message);
+                synchronized (mLock) {
+                    mRoomStatus = "unreadable";
+                    mSessionCookies.putAll(res.sessionCookies);
+                }
+                if (mAllowEulerFallback || "euler".equals(mConnectionMethod)) {
+                    startEulerFallback(gen, "Lookup room langsung dibatasi (" + res.message + "); mencoba fallback EulerStream...");
+                } else {
+                    failSessionIfCurrent(gen, "error", "ROOM_UNREADABLE", res.message);
+                }
                 return;
             case NETWORK_ERROR:
                 scheduleReconnectOrFail(gen, "NETWORK_ERROR", res.message, false);
@@ -333,38 +341,98 @@ public final class TikTokLiveConnector {
 
     private void startDirectWebSocket(long gen) {
         final String roomId;
-        final String cursor;
-        final String internalExt;
-        final Map<String, String> cookies;
+        final String existingCursor;
+        final String existingExt;
+        final Map<String, String> baseCookies;
         final boolean allowEuler;
         final String username;
 
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
             roomId = mRoomId;
-            cursor = mCursor;
-            internalExt = mInternalExt;
-            cookies = new LinkedHashMap<>(mSessionCookies);
+            existingCursor = mCursor;
+            existingExt = mInternalExt;
+            baseCookies = new LinkedHashMap<>(mSessionCookies);
             allowEuler = mAllowEulerFallback;
             username = mUsername;
             closeActiveWsLocked();
             setStateLocked(
                     "connecting_direct",
                     "direct_ws",
-                    "Menghubungkan WebSocket langsung ke @" + username + "..."
+                    "Mengambil sesi Webcast & menghubungkan WebSocket langsung ke @" + username + "..."
             );
         }
 
+        // Bootstrap awal ke /webcast/im/fetch/ agar mendapat cursor, internalExt,
+        // routeParams (imprp/wrss), pushServer, heartbeatDurationMs, dan cookie sesi.
+        String targetWsBase = TikTokWebSocketTransport.DIRECT_WS_BASE_URL;
+        String cursor = existingCursor;
+        String internalExt = existingExt;
+        Map<String, String> routeParams = null;
+        Map<String, String> cookies = baseCookies;
+        long heartbeatMs = 10_000L;
+        long lastRttMs = 0L;
+
+        if (cursor.isEmpty() || internalExt.isEmpty()) {
+            TikTokRoomResolver.InitialFetchResult initFetch =
+                    TikTokRoomResolver.fetchInitialWebcastResponse(roomId, baseCookies);
+            if (isStaleGeneration(gen)) return;
+
+            cookies = new LinkedHashMap<>(initFetch.mergedCookies);
+            if (!initFetch.ok || initFetch.decoded == null) {
+                Log.w(TAG, "Bootstrap im/fetch gagal (http=" + initFetch.httpStatus + "): " + initFetch.message);
+                if (allowEuler) {
+                    startEulerFallback(gen, "Sesi langsung TikTok ditolak (" + initFetch.message + "); mencoba fallback EulerStream...");
+                    return;
+                }
+                if (initFetch.httpStatus == 401 || initFetch.httpStatus == 403 || initFetch.httpStatus == 429) {
+                    failSessionIfCurrent(
+                            gen,
+                            "error",
+                            "DIRECT_FETCH_REJECTED",
+                            initFetch.message + " Aktifkan fallback EulerStream di Integrasi jika diperlukan."
+                    );
+                } else {
+                    scheduleReconnectOrFail(gen, "DIRECT_FETCH_ERROR", initFetch.message, false);
+                }
+                return;
+            }
+
+            TikTokWebcastDecoder.DecodedResponse decodedInit = initFetch.decoded;
+            if (!decodedInit.cursor.isEmpty()) cursor = decodedInit.cursor;
+            if (!decodedInit.internalExt.isEmpty()) internalExt = decodedInit.internalExt;
+            if (!decodedInit.pushServer.isEmpty() && decodedInit.pushServer.startsWith("wss://")) {
+                targetWsBase = decodedInit.pushServer;
+            }
+            if (!decodedInit.routeParams.isEmpty()) {
+                routeParams = decodedInit.routeParams;
+            }
+            if (decodedInit.heartbeatDurationMs > 0L) {
+                heartbeatMs = decodedInit.heartbeatDurationMs;
+            }
+            lastRttMs = initFetch.rttMs;
+
+            synchronized (mLock) {
+                if (isStaleGeneration(gen)) return;
+                mCursor = cursor;
+                mInternalExt = internalExt;
+                mSessionCookies = new LinkedHashMap<>(cookies);
+            }
+
+            boolean liveEnded = emitDecodedEvents(gen, decodedInit);
+            if (liveEnded || isStaleGeneration(gen)) return;
+        }
+
         String wsUrl = TikTokWebSocketTransport.buildWebSocketUrl(
-                TikTokWebSocketTransport.DIRECT_WS_BASE_URL,
+                targetWsBase,
                 roomId,
                 true,
-                10_000L,
+                heartbeatMs,
                 true,
-                0L,
+                lastRttMs,
                 cursor,
                 internalExt,
-                null
+                routeParams
         );
 
         TikTokWebSocketTransport ws = new TikTokWebSocketTransport();
@@ -376,7 +444,7 @@ public final class TikTokLiveConnector {
             mActiveWs = ws;
         }
 
-        ws.connect(wsUrl, cookies, 10_000L, new TikTokWebSocketTransport.Listener() {
+        ws.connect(wsUrl, cookies, heartbeatMs, new TikTokWebSocketTransport.Listener() {
             @Override
             public void onConnected(int httpStatus) {
                 synchronized (mLock) {
@@ -435,6 +503,7 @@ public final class TikTokLiveConnector {
 
     private void startEulerFallback(long gen, @NonNull String initialMessage) {
         final String roomId;
+        final String username;
         final String cursor;
         final String internalExt;
         final String apiKey;
@@ -444,18 +513,21 @@ public final class TikTokLiveConnector {
             closeActiveWsLocked();
             cancelPendingTaskLocked();
             roomId = mRoomId;
+            username = mUsername;
             cursor = mCursor;
             internalExt = mInternalExt;
             apiKey = mEulerApiKey;
+            mReconnectAttempt = 0;
             setStateLocked("connecting_euler", "euler", initialMessage);
         }
 
-        mWorker.execute(() -> executeEulerFetchStep(gen, roomId, cursor, internalExt, apiKey, false));
+        mWorker.execute(() -> executeEulerFetchStep(gen, roomId, username, cursor, internalExt, apiKey, false));
     }
 
     private void executeEulerFetchStep(
             long gen,
             @NonNull String roomId,
+            @NonNull String username,
             @NonNull String cursor,
             @NonNull String internalExt,
             @NonNull String apiKey,
@@ -465,6 +537,7 @@ public final class TikTokLiveConnector {
 
         EulerStreamTransport.FetchResult res = EulerStreamTransport.fetch(
                 roomId,
+                username,
                 cursor,
                 internalExt,
                 apiKey
@@ -530,7 +603,7 @@ public final class TikTokLiveConnector {
             final String keySnapshot = mEulerApiKey;
             mPendingTask = mScheduler.schedule(
                     () -> mWorker.execute(() ->
-                            executeEulerFetchStep(gen, roomId, nextCursor, nextExt, keySnapshot, true)),
+                            executeEulerFetchStep(gen, roomId, username, nextCursor, nextExt, keySnapshot, true)),
                     intervalMs,
                     TimeUnit.MILLISECONDS
             );
@@ -661,6 +734,7 @@ public final class TikTokLiveConnector {
                 synchronized (mLock) {
                     if (totalLikes > mTotalLikeCount) {
                         mTotalLikeCount = totalLikes;
+                        stateStatsUpdated = true;
                     }
                 }
             } else if ("WebcastControlMessage".equals(method)) {
@@ -721,6 +795,10 @@ public final class TikTokLiveConnector {
             cancelPendingTaskLocked();
 
             if (mReconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+                if (!useEuler && mAllowEulerFallback) {
+                    startEulerFallback(gen, "Koneksi langsung terputus berulang; beralih ke fallback EulerStream...");
+                    return;
+                }
                 mSessionGeneration.incrementAndGet();
                 mSessionCookies.clear();
                 mErrorCode = errorCode;
@@ -750,7 +828,7 @@ public final class TikTokLiveConnector {
                 } else if (useEuler) {
                     startEulerFallback(gen, "Menyambung ulang via EulerStream...");
                 } else {
-                    startDirectWebSocket(gen);
+                    mWorker.execute(() -> startDirectWebSocket(gen));
                 }
             }, delayMs, TimeUnit.MILLISECONDS);
         }

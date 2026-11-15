@@ -62,9 +62,20 @@ export type AudioPlaybackMode =
   | 'real_html5_audio'
   | 'pending_source';
 
+export interface SongRequestHistoryEntry {
+  id: string;
+  title: string;
+  artist: string;
+  requester: string;
+  status: 'playing' | 'completed' | 'skipped' | 'error';
+  timestamp: number;
+  errorMessage?: string;
+}
+
 export interface SongRequestState {
   currentTrack: SongRequestItem | null;
   queue: SongRequestItem[];
+  history: SongRequestHistoryEntry[];
   isPlaying: boolean;
   playbackStatus: SongPlaybackStatus;
   currentTimeSec: number;
@@ -138,10 +149,11 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-class SongRequestEngine {
+export class SongRequestEngine {
   private state: SongRequestState = {
     currentTrack: null,
     queue: [],
+    history: [],
     isPlaying: false,
     playbackStatus: 'idle',
     currentTimeSec: 0,
@@ -168,11 +180,16 @@ class SongRequestEngine {
 
   private listeners: Set<SongRequestListener> = new Set();
   private userLastRequestTime: Map<string, number> = new Map();
+  private processedEventIdSet: Set<string> = new Set();
+  private processedEventIdQueue: string[] = [];
   private audioElement: HTMLAudioElement | null = null;
   private activeObjectUrl: string | null = null;
   private nativePollTimer: ReturnType<typeof setInterval> | null = null;
   private nativeListenersAttached = false;
   private playbackGeneration = 0;
+  private handlingTrackEnd = false;
+  private lastEndedPlaybackGen = -1;
+  private lastRecordedPlayingKey = '';
   private busUnsubscribe: (() => void) | null = null;
 
   // Context supplied by App.tsx
@@ -206,6 +223,7 @@ class SongRequestEngine {
           Number.isFinite(audio.duration) && audio.duration > 0
             ? Math.round(audio.duration)
             : this.state.currentTrack.durationSec;
+        this.recordHistory(this.state.currentTrack, 'playing');
         this.updateState({
           isPlaying: true,
           playbackStatus: 'playing',
@@ -255,6 +273,9 @@ class SongRequestEngine {
         const msg = mediaErr
           ? `Gagal memutar audio (kode ${mediaErr.code}). Format atau sumber tidak didukung.`
           : 'Gagal mendekode aliran audio.';
+        if (this.state.currentTrack) {
+          this.recordHistory(this.state.currentTrack, 'error', msg);
+        }
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
@@ -319,6 +340,9 @@ class SongRequestEngine {
         break;
       case 'playing':
         this.startNativePositionPoll();
+        if (active) {
+          this.recordHistory(active, 'playing');
+        }
         this.updateState({
           isPlaying: true,
           playbackStatus: 'playing',
@@ -352,16 +376,21 @@ class SongRequestEngine {
           audioRoutedToStream: false,
         });
         break;
-      case 'error':
+      case 'error': {
         this.stopNativePositionPoll();
+        const errMsg = ev.errorMessage || 'Terjadi kesalahan pemutaran native Android.';
+        if (active) {
+          this.recordHistory(active, 'error', errMsg);
+        }
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
           audioPlaybackMode: 'idle',
           audioRoutedToStream: false,
-          lastError: ev.errorMessage || 'Terjadi kesalahan pemutaran native Android.',
+          lastError: errMsg,
         });
         break;
+      }
       default:
         break;
     }
@@ -408,6 +437,23 @@ class SongRequestEngine {
     }
   }
 
+  private isDuplicateChatEvent(eventId?: string): boolean {
+    const id = (eventId || '').trim();
+    if (!id) return false;
+    if (this.processedEventIdSet.has(id)) {
+      return true;
+    }
+    this.processedEventIdSet.add(id);
+    this.processedEventIdQueue.push(id);
+    if (this.processedEventIdQueue.length > 200) {
+      const oldest = this.processedEventIdQueue.shift();
+      if (oldest) {
+        this.processedEventIdSet.delete(oldest);
+      }
+    }
+    return false;
+  }
+
   // Subscribe to Mode A chat events on streamEventBus
   private startChatCommandListener() {
     if (this.busUnsubscribe) {
@@ -417,6 +463,7 @@ class SongRequestEngine {
       if (event.type !== 'chat') return;
       if (!this.state.policy.enabled) return;
       if (!isModeAOperatingMode(this.operatingMode)) return;
+      if (this.isDuplicateChatEvent(event.id)) return;
 
       const message = (event.detail || '').trim();
       if (!message.startsWith('!')) return;
@@ -806,6 +853,7 @@ class SongRequestEngine {
           ? 'Spotify'
           : 'Katalog';
       const errMsg = `Lagu "${item.title}" hanya metadata ${platformLabel} (tidak memiliki file audio yang dapat diputar otomatis).`;
+      this.recordHistory(item, 'error', errMsg);
       this.updateState({
         currentTrack: item,
         isPlaying: false,
@@ -829,6 +877,7 @@ class SongRequestEngine {
         const file = this.localFilesMap.get(item.localFileId);
         if (!file) {
           const msg = `File audio lokal "${item.title}" tidak ditemukan di sesi memori saat ini.`;
+          this.recordHistory(item, 'error', msg);
           this.updateState({
             currentTrack: item,
             isPlaying: false,
@@ -842,6 +891,7 @@ class SongRequestEngine {
         }
         if (file.size > MAX_NATIVE_BRIDGE_BYTES) {
           const msg = `File "${item.title}" melebihi batas transfer native 25 MB.`;
+          this.recordHistory(item, 'error', msg);
           this.updateState({
             currentTrack: item,
             isPlaying: false,
@@ -857,6 +907,7 @@ class SongRequestEngine {
           base64Audio = arrayBufferToBase64(buffer);
         } catch (err: any) {
           const msg = `Gagal membaca file audio lokal: ${err?.message || 'error'}`;
+          this.recordHistory(item, 'error', msg);
           this.updateState({
             currentTrack: item,
             isPlaying: false,
@@ -870,6 +921,7 @@ class SongRequestEngine {
 
       if (!base64Audio && !sourceUri) {
         const msg = `Sumber audio untuk "${item.title}" tidak tersedia.`;
+        this.recordHistory(item, 'error', msg);
         this.updateState({
           currentTrack: item,
           isPlaying: false,
@@ -904,12 +956,14 @@ class SongRequestEngine {
 
       if (gen !== this.playbackGeneration) return false;
       if (!res.success) {
+        const msg = res.message || 'Gagal memulai pemutaran di Android MediaPlayer.';
+        this.recordHistory(item, 'error', msg);
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
           audioPlaybackMode: 'idle',
           audioRoutedToStream: false,
-          lastError: res.message || 'Gagal memulai pemutaran di Android MediaPlayer.',
+          lastError: msg,
         });
         return false;
       }
@@ -921,6 +975,7 @@ class SongRequestEngine {
     // Web / Browser HTML5 Audio Path
     if (!this.audioElement) {
       const msg = 'HTML5 Audio tidak tersedia pada lingkungan ini.';
+      this.recordHistory(item, 'error', msg);
       this.updateState({
         currentTrack: item,
         isPlaying: false,
@@ -936,6 +991,7 @@ class SongRequestEngine {
       const file = this.localFilesMap.get(item.localFileId);
       if (!file) {
         const msg = `File audio lokal "${item.title}" tidak tersedia di memori browser.`;
+        this.recordHistory(item, 'error', msg);
         this.updateState({
           currentTrack: item,
           isPlaying: false,
@@ -956,6 +1012,7 @@ class SongRequestEngine {
 
     if (!playUrl) {
       const msg = `URL pemutaran untuk "${item.title}" tidak tersedia.`;
+      this.recordHistory(item, 'error', msg);
       this.updateState({
         currentTrack: item,
         isPlaying: false,
@@ -988,6 +1045,7 @@ class SongRequestEngine {
         Number.isFinite(this.audioElement.duration) && this.audioElement.duration > 0
           ? Math.round(this.audioElement.duration)
           : item.durationSec || 0;
+      this.recordHistory(item, 'playing');
       this.updateState({
         isPlaying: true,
         playbackStatus: 'playing',
@@ -1000,6 +1058,7 @@ class SongRequestEngine {
     } catch (err: any) {
       if (gen !== this.playbackGeneration) return false;
       const msg = err?.message || 'Pemutaran audio ditolak oleh browser atau format tidak didukung.';
+      this.recordHistory(item, 'error', msg);
       this.updateState({
         isPlaying: false,
         playbackStatus: 'error',
@@ -1032,8 +1091,12 @@ class SongRequestEngine {
   }
 
   public async handleSkipCommand(username: string = 'Streamer', isSimulation: boolean = false): Promise<boolean> {
+    const skippedTrack = this.state.currentTrack;
     this.playbackGeneration++;
     await this.stopActivePlaybackOnly();
+    if (skippedTrack) {
+      this.recordHistory(skippedTrack, 'skipped');
+    }
 
     if (this.state.queue.length === 0) {
       this.updateState({
@@ -1096,33 +1159,47 @@ class SongRequestEngine {
     }
   }
 
-  private async handleTrackEnded() {
+  public async handleTrackEnded() {
+    if (this.handlingTrackEnd) return;
+    if (this.lastEndedPlaybackGen === this.playbackGeneration) return;
+    this.handlingTrackEnd = true;
+    this.lastEndedPlaybackGen = this.playbackGeneration;
     this.stopNativePositionPoll();
-    if (this.state.queue.length > 0) {
-      const next = this.state.queue[0];
-      const remaining = this.state.queue.slice(1);
-      this.updateState({
-        queue: remaining,
-        currentTimeSec: 0,
-      });
-      const started = await this.playItem(next);
-      if (started) {
-        this.announce(`🎶 Otomatis memutar lagu berikutnya: "${next.title}" (@${next.requester})`);
-      } else {
-        this.announce(`⚠️ Gagal memutar lagu berikutnya "${next.title}": ${this.state.lastError || 'Error'}`);
+
+    try {
+      const completedTrack = this.state.currentTrack;
+      if (completedTrack) {
+        this.recordHistory(completedTrack, 'completed');
       }
-    } else {
-      await this.stopActivePlaybackOnly();
-      this.updateState({
-        currentTrack: null,
-        isPlaying: false,
-        playbackStatus: 'completed',
-        currentTimeSec: 0,
-        durationSec: 0,
-        audioPlaybackMode: 'idle',
-        audioRoutedToStream: false,
-      });
-      this.announce('Antrean Song Request selesai.');
+
+      if (this.state.queue.length > 0) {
+        const next = this.state.queue[0];
+        const remaining = this.state.queue.slice(1);
+        this.updateState({
+          queue: remaining,
+          currentTimeSec: 0,
+        });
+        const started = await this.playItem(next);
+        if (started) {
+          this.announce(`🎶 Otomatis memutar lagu berikutnya: "${next.title}" (@${next.requester})`);
+        } else {
+          this.announce(`⚠️ Gagal memutar lagu berikutnya "${next.title}": ${this.state.lastError || 'Error'}`);
+        }
+      } else {
+        await this.stopActivePlaybackOnly();
+        this.updateState({
+          currentTrack: null,
+          isPlaying: false,
+          playbackStatus: 'completed',
+          currentTimeSec: 0,
+          durationSec: 0,
+          audioPlaybackMode: 'idle',
+          audioRoutedToStream: false,
+        });
+        this.announce('Antrean Song Request selesai.');
+      }
+    } finally {
+      this.handlingTrackEnd = false;
     }
   }
 
@@ -1371,6 +1448,39 @@ class SongRequestEngine {
 
   public getState(): SongRequestState {
     return this.state;
+  }
+
+  private recordHistory(
+    item: SongRequestItem,
+    status: SongRequestHistoryEntry['status'],
+    errorMessage?: string
+  ) {
+    if (status === 'playing') {
+      const key = `${item.id}:${this.playbackGeneration}`;
+      if (this.lastRecordedPlayingKey === key) return;
+      this.lastRecordedPlayingKey = key;
+    }
+    const entry: SongRequestHistoryEntry = {
+      id: `${item.id}_${status}_${Date.now()}`,
+      title: item.title,
+      artist: item.artist,
+      requester: item.requester,
+      status,
+      timestamp: Date.now(),
+      ...(errorMessage ? { errorMessage } : {}),
+    };
+    this.updateState({
+      history: [entry, ...this.state.history.slice(0, 49)],
+    });
+  }
+
+  public destroy() {
+    this.stopNativePositionPoll();
+    if (this.busUnsubscribe) {
+      this.busUnsubscribe();
+      this.busUnsubscribe = null;
+    }
+    this.listeners.clear();
   }
 
   private updateState(partial: Partial<SongRequestState>) {

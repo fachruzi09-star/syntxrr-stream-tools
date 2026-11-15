@@ -141,6 +141,12 @@ public class NativeMicMonitor {
                 return false;
             }
 
+            if (isExternalAudioCaptureActive(-1)) {
+                updateAndDispatchState(mSessionGeneration.get(), Status.UNAVAILABLE, 0,
+                        "Mikrofon sedang digunakan oleh aplikasi lain (TikTok LIVE). Monitor dijeda agar audio LIVE tetap aman.");
+                return false;
+            }
+
             int minBufBytes = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, CHANNEL_CONFIG, AUDIO_FORMAT);
             if (minBufBytes <= 0) {
                 Log.w(TAG, "AudioRecord.getMinBufferSize gagal: " + minBufBytes);
@@ -421,6 +427,32 @@ public class NativeMicMonitor {
         return Math.max(0, Math.min(100, scaled));
     }
 
+    public boolean isExternalAudioCaptureActive(int ownSessionId) {
+        if (mAudioManager == null) {
+            return false;
+        }
+        try {
+            int mode = mAudioManager.getMode();
+            if (mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_IN_CALL) {
+                return true;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                List<AudioRecordingConfiguration> configs = mAudioManager.getActiveRecordingConfigurations();
+                if (configs != null) {
+                    for (AudioRecordingConfiguration config : configs) {
+                        if (config == null) continue;
+                        if (ownSessionId < 0 || config.getClientAudioSessionId() != ownSessionId) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal memeriksa capture audio eksternal: " + e.getMessage());
+        }
+        return false;
+    }
+
     private boolean evaluateInitialSilencedState(int audioSessionId) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mAudioManager == null) {
             return false;
@@ -457,14 +489,28 @@ public class NativeMicMonitor {
                     return;
                 }
 
+                boolean externalCaptureDetected = false;
                 boolean foundSession = false;
                 boolean silenced = false;
                 for (AudioRecordingConfiguration config : configs) {
-                    if (config != null && config.getClientAudioSessionId() == audioSessionId) {
+                    if (config == null) continue;
+                    if (config.getClientAudioSessionId() == audioSessionId) {
                         foundSession = true;
                         silenced = config.isClientSilenced();
-                        break;
+                    } else {
+                        externalCaptureDetected = true;
                     }
+                }
+
+                if (externalCaptureDetected) {
+                    mMainHandler.post(() -> {
+                        if (mRunning && mSessionGeneration.get() == generation) {
+                            stop();
+                            updateAndDispatchState(mSessionGeneration.get(), Status.UNAVAILABLE, 0,
+                                    "Mikrofon dipakai aplikasi lain (TikTok LIVE) — monitor dihentikan agar audio LIVE tetap aktif.");
+                        }
+                    });
+                    return;
                 }
 
                 if (!foundSession) {

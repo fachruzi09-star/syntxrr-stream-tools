@@ -103,6 +103,35 @@ public class NativeMusicPlayer {
     private float mVolume = 0.85f;
     private int mSessionGeneration = 0;
 
+    @Nullable
+    private static volatile NativeMusicPlayer sInstance;
+
+    @NonNull
+    public static NativeMusicPlayer getInstance(@NonNull Context context) {
+        NativeMusicPlayer current = sInstance;
+        if (current == null) {
+            synchronized (NativeMusicPlayer.class) {
+                current = sInstance;
+                if (current == null) {
+                    current = new NativeMusicPlayer(context.getApplicationContext());
+                    sInstance = current;
+                }
+            }
+        }
+        return current;
+    }
+
+    public static void releaseSharedIfCreated() {
+        NativeMusicPlayer current;
+        synchronized (NativeMusicPlayer.class) {
+            current = sInstance;
+            sInstance = null;
+        }
+        if (current != null) {
+            current.release();
+        }
+    }
+
     public NativeMusicPlayer(@NonNull Context context) {
         mAppContext = context.getApplicationContext();
         initMediaSession();
@@ -416,6 +445,11 @@ public class NativeMusicPlayer {
     }
 
     public void release() {
+        synchronized (NativeMusicPlayer.class) {
+            if (sInstance == this) {
+                sInstance = null;
+            }
+        }
         synchronized (mLock) {
             mSessionGeneration++;
             releaseMediaPlayerOnlyLocked();

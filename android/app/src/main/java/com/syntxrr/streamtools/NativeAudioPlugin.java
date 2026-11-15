@@ -67,42 +67,48 @@ public class NativeAudioPlugin extends Plugin {
         return mTtsManager;
     }
 
+    @Override
+    public void load() {
+        super.load();
+        getMusicPlayer();
+    }
+
     private synchronized NativeMusicPlayer getMusicPlayer() {
         if (mMusicPlayer == null) {
             Context appContext = getContext().getApplicationContext();
-            mMusicPlayer = new NativeMusicPlayer(appContext);
-            mMusicPlayer.setEventListener(new NativeMusicPlayer.OnMusicEventListener() {
-                @Override
-                public void onMusicState(
-                        String trackId,
-                        String status,
-                        boolean isPlaying,
-                        long positionMs,
-                        long durationMs,
-                        @Nullable String errorMessage
-                ) {
-                    JSObject data = new JSObject();
-                    data.put("trackId", trackId);
-                    data.put("status", status);
-                    data.put("isPlaying", isPlaying);
-                    data.put("positionMs", positionMs);
-                    data.put("durationMs", durationMs);
-                    if (errorMessage != null) {
-                        data.put("errorMessage", errorMessage);
-                    }
-                    data.put("timestamp", System.currentTimeMillis());
-                    notifyListeners("musicState", data);
-                }
-
-                @Override
-                public void onTransportCommand(String command) {
-                    JSObject data = new JSObject();
-                    data.put("command", command);
-                    data.put("timestamp", System.currentTimeMillis());
-                    notifyListeners("musicTransport", data);
-                }
-            });
+            mMusicPlayer = NativeMusicPlayer.getInstance(appContext);
         }
+        mMusicPlayer.setEventListener(new NativeMusicPlayer.OnMusicEventListener() {
+            @Override
+            public void onMusicState(
+                    String trackId,
+                    String status,
+                    boolean isPlaying,
+                    long positionMs,
+                    long durationMs,
+                    @Nullable String errorMessage
+            ) {
+                JSObject data = new JSObject();
+                data.put("trackId", trackId);
+                data.put("status", status);
+                data.put("isPlaying", isPlaying);
+                data.put("positionMs", positionMs);
+                data.put("durationMs", durationMs);
+                if (errorMessage != null) {
+                    data.put("errorMessage", errorMessage);
+                }
+                data.put("timestamp", System.currentTimeMillis());
+                notifyListeners("musicState", data);
+            }
+
+            @Override
+            public void onTransportCommand(String command) {
+                JSObject data = new JSObject();
+                data.put("command", command);
+                data.put("timestamp", System.currentTimeMillis());
+                notifyListeners("musicTransport", data);
+            }
+        });
         return mMusicPlayer;
     }
 
@@ -392,7 +398,10 @@ public class NativeAudioPlugin extends Plugin {
             mTtsManager = null;
         }
         if (mMusicPlayer != null) {
-            mMusicPlayer.release();
+            mMusicPlayer.setEventListener(null);
+            if (!CompanionService.isRunning()) {
+                mMusicPlayer.release();
+            }
             mMusicPlayer = null;
         }
         super.handleOnDestroy();
