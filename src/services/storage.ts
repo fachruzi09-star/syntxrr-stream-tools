@@ -13,6 +13,9 @@ import {
   IntegrationProvider,
   TTSConfig,
   StreamEvent,
+  TikTokAccountState,
+  normalizeOperatingMode,
+  normalizeUnitVolume,
 } from '../types';
 import { DEFAULT_TTS_CONFIG } from './ttsService';
 
@@ -42,6 +45,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   audioAutoplayNext: true,
   tiktokUsername: '',
   tiktokConnected: false,
+  tiktokConnectionMethod: 'direct',
+  eulerStreamApiKey: '',
+  tiktokEulerFallbackEnabled: true,
   soundboardVolume: 0.85,
   // === SETTINGS FOUNDATION DEFAULTS ===
   // A. General
@@ -385,13 +391,71 @@ export const DEFAULT_MARKETPLACE_ITEMS: MarketplaceItem[] = [
   },
 ];
 
+export const DEFAULT_TIKTOK_ACCOUNT_STATE: TikTokAccountState = {
+  isLinked: false,
+  connectionMethod: 'direct',
+  fallbackEnabled: true,
+  accountLinkStatus: 'unlinked',
+};
+
+export function sanitizeTikTokAccountState(raw: unknown): TikTokAccountState {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ...DEFAULT_TIKTOK_ACCOUNT_STATE };
+  }
+  const obj = raw as Record<string, unknown>;
+  const openId =
+    typeof obj.openId === 'string' && obj.openId.trim() ? obj.openId.trim() : undefined;
+  const isLinked =
+    obj.isLinked === true && obj.accountLinkStatus === 'linked' && Boolean(openId);
+  const connectionMethod = obj.connectionMethod === 'euler' ? 'euler' : 'direct';
+  const fallbackEnabled = typeof obj.fallbackEnabled === 'boolean' ? obj.fallbackEnabled : true;
+  const rawStatus = obj.accountLinkStatus;
+  const accountLinkStatus: TikTokAccountState['accountLinkStatus'] = isLinked
+    ? 'linked'
+    : rawStatus === 'failed'
+    ? 'failed'
+    : 'unlinked'; // Jangan pernah memulihkan status 'linking' yang tertinggal saat startup
+
+  const grantedScopes = Array.isArray(obj.grantedScopes)
+    ? obj.grantedScopes.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    : undefined;
+  const hasProfileScope = !grantedScopes || grantedScopes.includes('user.info.profile');
+  const rawUsername = typeof obj.username === 'string' ? obj.username.trim().replace(/^@+/, '') : '';
+
+  return {
+    isLinked,
+    openId: isLinked ? openId : undefined,
+    username: isLinked && hasProfileScope && rawUsername ? rawUsername : undefined,
+    displayName:
+      isLinked && typeof obj.displayName === 'string' && obj.displayName.trim()
+        ? obj.displayName.trim()
+        : undefined,
+    avatarUrl:
+      isLinked && typeof obj.avatarUrl === 'string' && /^https?:\/\//i.test(obj.avatarUrl.trim())
+        ? obj.avatarUrl.trim()
+        : undefined,
+    connectionMethod,
+    fallbackEnabled,
+    accountLinkStatus,
+    lastSuccessfulAuthorization:
+      isLinked && typeof obj.lastSuccessfulAuthorization === 'number' && Number.isFinite(obj.lastSuccessfulAuthorization)
+        ? obj.lastSuccessfulAuthorization
+        : undefined,
+    grantedScopes: isLinked ? grantedScopes : undefined,
+    linkErrorMessage:
+      accountLinkStatus === 'failed' && typeof obj.linkErrorMessage === 'string'
+        ? obj.linkErrorMessage
+        : undefined,
+  };
+}
+
 // INITIAL INTEGRATIONS DIRECTORY
 export const DEFAULT_INTEGRATIONS: IntegrationProvider[] = [
   {
     id: 'tiktok',
     name: 'TikTok LIVE Companion',
     category: 'companion',
-    status: 'ACTIVE',
+    status: 'NOT_CONNECTED',
     description: 'Mode pendamping sesi live TikTok dengan floating overlay di atas aplikasi.',
     logo: '🎵',
     guideUrl: 'https://www.tiktok.com/live',
@@ -579,7 +643,12 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 // Kredensial sensitif tidak pernah ditulis ke file cadangan dan tidak
 // pernah dipulihkan dari file cadangan (milik pengguna/perangkat lain).
 // ============================================================
-export const CREDENTIAL_SETTING_KEYS = ['streamKey', 'youtubeApiKey', 'spotifyAccessToken'] as const;
+export const CREDENTIAL_SETTING_KEYS = [
+  'streamKey',
+  'youtubeApiKey',
+  'spotifyAccessToken',
+  'eulerStreamApiKey',
+] as const;
 export type CredentialSettingKey = (typeof CREDENTIAL_SETTING_KEYS)[number];
 
 const isCredentialSettingKey = (key: string): key is CredentialSettingKey =>
@@ -610,18 +679,44 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
     if (value === undefined || value === null) continue; // jangan menghapus nilai lokal
     merged[key] = value;
   }
+  if ('operatingMode' in merged) {
+    merged.operatingMode = normalizeOperatingMode(merged.operatingMode as string | undefined);
+  }
+  if ('audioVolume' in merged) {
+    merged.audioVolume = normalizeUnitVolume(merged.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85);
+  }
+  if ('soundboardVolume' in merged) {
+    merged.soundboardVolume = normalizeUnitVolume(merged.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85);
+  }
+  if ('micGain' in merged && typeof merged.micGain === 'number' && Number.isFinite(merged.micGain)) {
+    merged.micGain = Math.max(0, Math.min(200, Math.round(merged.micGain)));
+  }
   return merged as unknown as AppSettings;
+}
+
+function normalizeSettingsFields(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    operatingMode: normalizeOperatingMode(settings.operatingMode),
+    audioVolume: normalizeUnitVolume(settings.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85),
+    soundboardVolume: normalizeUnitVolume(settings.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85),
+    micGain:
+      typeof settings.micGain === 'number' && Number.isFinite(settings.micGain)
+        ? Math.max(0, Math.min(200, Math.round(settings.micGain)))
+        : (DEFAULT_SETTINGS.micGain ?? 100),
+  };
 }
 
 export const StorageService = {
   // SETTINGS
   async getSettings(): Promise<AppSettings> {
     const stored = await idbGet<AppSettings>('settings');
-    return stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+    const merged = stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+    return normalizeSettingsFields(merged);
   },
 
   async saveSettings(settings: AppSettings): Promise<void> {
-    await idbSet('settings', settings);
+    await idbSet('settings', normalizeSettingsFields(settings));
   },
 
   // PRESETS
@@ -765,14 +860,75 @@ export const StorageService = {
     await idbSet('integrations', integrations);
   },
 
+  // TIKTOK ACCOUNT LINKING STATE (disimpan lokal di perangkat, tidak ikut diekspor di backup)
+  async getTikTokAccount(): Promise<TikTokAccountState> {
+    const stored = await idbGet<unknown>('tiktok_account_state');
+    return sanitizeTikTokAccountState(stored);
+  },
+
+  async saveTikTokAccount(account: TikTokAccountState): Promise<TikTokAccountState> {
+    const sanitized = sanitizeTikTokAccountState(account);
+    await idbSet('tiktok_account_state', sanitized);
+    return sanitized;
+  },
+
+  async clearTikTokAccount(): Promise<TikTokAccountState> {
+    const current = await this.getTikTokAccount();
+    const cleared: TikTokAccountState = {
+      isLinked: false,
+      connectionMethod: current.connectionMethod,
+      fallbackEnabled: current.fallbackEnabled,
+      accountLinkStatus: 'unlinked',
+    };
+    await idbSet('tiktok_account_state', cleared);
+
+    const currentSettings = await this.getSettings();
+    const normalizedSettingsTarget = (currentSettings.tiktokUsername || '').trim().replace(/^@+/, '').toLowerCase();
+    const normalizedAccountUser = (current.username || '').trim().replace(/^@+/, '').toLowerCase();
+    const shouldClearTarget =
+      normalizedSettingsTarget !== '' &&
+      normalizedAccountUser !== '' &&
+      normalizedSettingsTarget === normalizedAccountUser;
+    const nextSettings = {
+      ...currentSettings,
+      ...(shouldClearTarget ? { tiktokUsername: '' } : {}),
+      tiktokConnected: false,
+      eulerStreamApiKey: '',
+    };
+    await this.saveSettings(nextSettings);
+
+    const preservedTarget = (nextSettings.tiktokUsername || '').trim().replace(/^@+/, '');
+    const currentIntegrations = await this.getIntegrations();
+    await this.saveIntegrations(
+      currentIntegrations.map((item) =>
+        item.id === 'tiktok'
+          ? {
+              ...item,
+              status: 'NOT_CONNECTED',
+              connectedUser: preservedTarget || undefined,
+            }
+          : item
+      )
+    );
+
+    return cleared;
+  },
+
   // TTS CONFIG
   async getTTSConfig(): Promise<TTSConfig> {
     const stored = await idbGet<TTSConfig>('tts_config');
-    return stored ? { ...DEFAULT_TTS_CONFIG, ...stored } : DEFAULT_TTS_CONFIG;
+    const merged = stored ? { ...DEFAULT_TTS_CONFIG, ...stored } : DEFAULT_TTS_CONFIG;
+    return {
+      ...merged,
+      volume: normalizeUnitVolume(merged.volume, DEFAULT_TTS_CONFIG.volume),
+    };
   },
 
   async saveTTSConfig(config: TTSConfig): Promise<void> {
-    await idbSet('tts_config', config);
+    await idbSet('tts_config', {
+      ...config,
+      volume: normalizeUnitVolume(config.volume, DEFAULT_TTS_CONFIG.volume),
+    });
   },
 
   // QUEUE & AUDIO (STAGE 2 PRESERVED)
@@ -911,6 +1067,7 @@ export const StorageService = {
     await this.saveSoundboard(DEFAULT_SOUNDBOARD);
     await this.saveMarketplace(DEFAULT_MARKETPLACE_ITEMS);
     await this.saveIntegrations(DEFAULT_INTEGRATIONS);
+    await idbSet('tiktok_account_state', DEFAULT_TIKTOK_ACCOUNT_STATE);
     await this.saveTTSConfig(DEFAULT_TTS_CONFIG);
     await this.saveUnifiedQueue([]);
     await this.saveLocalTracksMeta([]);

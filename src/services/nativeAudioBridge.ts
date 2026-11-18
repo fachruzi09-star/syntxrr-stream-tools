@@ -63,6 +63,60 @@ export interface TtsEventData {
   error?: string;
 }
 
+export type NativeMusicStatusValue =
+  | 'idle'
+  | 'preparing'
+  | 'playing'
+  | 'paused'
+  | 'completed'
+  | 'stopped'
+  | 'error';
+
+export interface PlayMusicTrackOptions {
+  trackId: string;
+  title: string;
+  artist: string;
+  sourceUri?: string;
+  base64Audio?: string;
+  mimeType?: string;
+  volume?: number; // 0.0 - 1.0
+}
+
+export interface PlayMusicTrackResult {
+  success: boolean;
+  trackId?: string;
+  status?: NativeMusicStatusValue;
+  isNative: boolean;
+  message?: string;
+}
+
+export interface MusicStateEvent {
+  trackId: string;
+  status: NativeMusicStatusValue;
+  isPlaying: boolean;
+  positionMs: number;
+  durationMs: number;
+  errorMessage?: string;
+  timestamp: number;
+}
+
+export interface MusicTransportEvent {
+  command: 'play' | 'pause' | 'next' | 'stop';
+  timestamp: number;
+}
+
+export interface MusicStatusResult {
+  trackId: string;
+  title: string;
+  artist: string;
+  status: NativeMusicStatusValue;
+  isPlaying: boolean;
+  positionMs: number;
+  durationMs: number;
+  errorMessage?: string;
+  isNative: boolean;
+}
+
 export interface NativeAudioPluginInterface {
   playSfx(options: PlaySfxOptions): Promise<{
     success: boolean;
@@ -103,9 +157,55 @@ export interface NativeAudioPluginInterface {
     ttsLanguage: string;
     masterVolume: number;
   }>;
+  playMusicTrack(options: PlayMusicTrackOptions): Promise<{
+    success: boolean;
+    trackId?: string;
+    status?: NativeMusicStatusValue;
+    message?: string;
+  }>;
+  pauseMusicTrack(): Promise<{
+    success: boolean;
+    status?: NativeMusicStatusValue;
+    isPlaying?: boolean;
+    positionMs?: number;
+    durationMs?: number;
+  }>;
+  resumeMusicTrack(): Promise<{
+    success: boolean;
+    status?: NativeMusicStatusValue;
+    isPlaying?: boolean;
+    positionMs?: number;
+    durationMs?: number;
+  }>;
+  stopMusicTrack(): Promise<{
+    success: boolean;
+    status?: NativeMusicStatusValue;
+  }>;
+  setMusicVolume(options: { volume: number }): Promise<{
+    success: boolean;
+    volume: number;
+  }>;
+  getMusicStatus(): Promise<{
+    trackId: string;
+    title: string;
+    artist: string;
+    status: NativeMusicStatusValue;
+    isPlaying: boolean;
+    positionMs: number;
+    durationMs: number;
+    errorMessage?: string;
+  }>;
   addListener(
     eventName: 'ttsStart' | 'ttsDone' | 'ttsError',
     listenerFunc: (data: TtsEventData) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'musicState',
+    listenerFunc: (data: MusicStateEvent) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'musicTransport',
+    listenerFunc: (data: MusicTransportEvent) => void
   ): Promise<PluginListenerHandle>;
 }
 
@@ -359,6 +459,173 @@ export async function onTtsError(
   }
 }
 
+export async function playMusicTrack(options: PlayMusicTrackOptions): Promise<PlayMusicTrackResult> {
+  if (!isNativeAndroid()) {
+    return {
+      success: false,
+      isNative: false,
+      message: 'NativeMediaPlayer hanya tersedia pada Android (APK).',
+    };
+  }
+  try {
+    const res = await NativeAudio.playMusicTrack(options);
+    return {
+      success: !!res?.success,
+      trackId: res?.trackId ?? options.trackId,
+      status: res?.status,
+      isNative: true,
+      message: res?.message,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      isNative: true,
+      status: 'error',
+      message: error?.message || 'Gagal memulai pemutar musik native.',
+    };
+  }
+}
+
+export async function pauseMusicTrack(): Promise<{
+  success: boolean;
+  isPlaying: boolean;
+  status: NativeMusicStatusValue;
+  positionMs: number;
+  durationMs: number;
+  isNative: boolean;
+}> {
+  if (!isNativeAndroid()) {
+    return { success: false, isPlaying: false, status: 'idle', positionMs: 0, durationMs: 0, isNative: false };
+  }
+  try {
+    const res = await NativeAudio.pauseMusicTrack();
+    return {
+      success: !!res?.success,
+      isPlaying: !!res?.isPlaying,
+      status: res?.status ?? 'paused',
+      positionMs: res?.positionMs ?? 0,
+      durationMs: res?.durationMs ?? 0,
+      isNative: true,
+    };
+  } catch {
+    return { success: false, isPlaying: false, status: 'error', positionMs: 0, durationMs: 0, isNative: true };
+  }
+}
+
+export async function resumeMusicTrack(): Promise<{
+  success: boolean;
+  isPlaying: boolean;
+  status: NativeMusicStatusValue;
+  positionMs: number;
+  durationMs: number;
+  isNative: boolean;
+}> {
+  if (!isNativeAndroid()) {
+    return { success: false, isPlaying: false, status: 'idle', positionMs: 0, durationMs: 0, isNative: false };
+  }
+  try {
+    const res = await NativeAudio.resumeMusicTrack();
+    return {
+      success: !!res?.success,
+      isPlaying: !!res?.isPlaying,
+      status: res?.status ?? 'playing',
+      positionMs: res?.positionMs ?? 0,
+      durationMs: res?.durationMs ?? 0,
+      isNative: true,
+    };
+  } catch {
+    return { success: false, isPlaying: false, status: 'error', positionMs: 0, durationMs: 0, isNative: true };
+  }
+}
+
+export async function stopMusicTrack(): Promise<{ success: boolean; isNative: boolean }> {
+  if (!isNativeAndroid()) {
+    return { success: true, isNative: false };
+  }
+  try {
+    const res = await NativeAudio.stopMusicTrack();
+    return { success: !!res?.success, isNative: true };
+  } catch {
+    return { success: false, isNative: true };
+  }
+}
+
+export async function setMusicVolume(volume: number): Promise<{ success: boolean; volume: number; isNative: boolean }> {
+  const clamped = Math.max(0, Math.min(1, volume));
+  if (!isNativeAndroid()) {
+    return { success: true, volume: clamped, isNative: false };
+  }
+  try {
+    const res = await NativeAudio.setMusicVolume({ volume: clamped });
+    return { success: !!res?.success, volume: res?.volume ?? clamped, isNative: true };
+  } catch {
+    return { success: false, volume: clamped, isNative: true };
+  }
+}
+
+export async function getMusicStatus(): Promise<MusicStatusResult> {
+  if (!isNativeAndroid()) {
+    return {
+      trackId: '',
+      title: '',
+      artist: '',
+      status: 'idle',
+      isPlaying: false,
+      positionMs: 0,
+      durationMs: 0,
+      isNative: false,
+    };
+  }
+  try {
+    const res = await NativeAudio.getMusicStatus();
+    return {
+      trackId: res?.trackId ?? '',
+      title: res?.title ?? '',
+      artist: res?.artist ?? '',
+      status: res?.status ?? 'idle',
+      isPlaying: !!res?.isPlaying,
+      positionMs: res?.positionMs ?? 0,
+      durationMs: res?.durationMs ?? 0,
+      errorMessage: res?.errorMessage,
+      isNative: true,
+    };
+  } catch (error: any) {
+    return {
+      trackId: '',
+      title: '',
+      artist: '',
+      status: 'error',
+      isPlaying: false,
+      positionMs: 0,
+      durationMs: 0,
+      errorMessage: error?.message || 'Gagal membaca status musik native.',
+      isNative: true,
+    };
+  }
+}
+
+export async function onMusicState(
+  callback: (data: MusicStateEvent) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    return await NativeAudio.addListener('musicState', callback);
+  } catch {
+    return null;
+  }
+}
+
+export async function onMusicTransport(
+  callback: (data: MusicTransportEvent) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    return await NativeAudio.addListener('musicTransport', callback);
+  } catch {
+    return null;
+  }
+}
+
 export const nativeAudioBridge = {
   isNativeAndroid,
   playSfx,
@@ -370,6 +637,14 @@ export const nativeAudioBridge = {
   onTtsStart,
   onTtsDone,
   onTtsError,
+  playMusicTrack,
+  pauseMusicTrack,
+  resumeMusicTrack,
+  stopMusicTrack,
+  setMusicVolume,
+  getMusicStatus,
+  onMusicState,
+  onMusicTransport,
 };
 
 export default nativeAudioBridge;

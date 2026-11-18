@@ -1,0 +1,55 @@
+name: Verify patched RootEncoder 2.8.1 fork
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-rootencoder:
+    name: Build and validate patched RootEncoder
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SYNTXRR repository
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned RootEncoder 2.8.1 source
+        uses: actions/checkout@v4
+        with:
+          repository: pedroSG94/RootEncoder
+          ref: cca548ab7942ab50d34dede272d5da90d46c6b67
+          path: rootencoder
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 12266719
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: platform-tools
+
+      - name: Install RootEncoder compile SDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build and verify patched RootEncoder
+        run: |
+          chmod +x android/rootencoder-patches/2.8.1/build_verified_fork.sh
+          bash android/rootencoder-patches/2.8.1/build_verified_fork.sh rootencoder
+
+      - name: Upload patched RootEncoder build outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SYNTXRR-RootEncoder-2.8.1-patched-AARs
+          path: rootencoder-build-output/*
+          if-no-files-found: warn
+          retention-days: 14

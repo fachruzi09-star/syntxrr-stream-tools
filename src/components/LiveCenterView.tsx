@@ -463,16 +463,20 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 <div>
                   <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1">
                     <span>Volume Suara TTS</span>
-                    <span className="font-mono text-blue-400">{Math.round(ttsConfig.volume * 100)}%</span>
+                    <span className="font-mono text-blue-400">
+                      {Math.round(Math.max(0, Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9)) * 100)}%
+                    </span>
                   </div>
                   <input
                     type="range"
                     min="0"
                     max="1"
                     step="0.05"
-                    value={ttsConfig.volume}
+                    value={Math.max(0, Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9))}
                     onChange={(e) => {
-                      const updated = { ...ttsConfig, volume: parseFloat(e.target.value) };
+                      const parsed = parseFloat(e.target.value);
+                      const clamped = Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0.9;
+                      const updated = { ...ttsConfig, volume: clamped };
                       onUpdateTTSConfig(updated);
                       ttsService.updateConfig(updated);
                     }}

@@ -1,4 +1,9 @@
-import { OperatingMode, AppSettings } from '../types';
+import {
+  OperatingMode,
+  AppSettings,
+  isModeAOperatingMode,
+  isModeBOperatingMode,
+} from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import {
   X,
@@ -65,9 +70,9 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Mode A */}
             <div
-              onClick={() => onSelectMode('MODE_A_OVERLAY')}
+              onClick={() => onSelectMode('MODE_A_TIKTOK_COMPANION')}
               className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
+                isModeAOperatingMode(currentMode)
                   ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-950/50 ring-1 ring-blue-500'
                   : 'bg-[#131f36] border-slate-800 hover:border-slate-700'
               }`}
@@ -76,7 +81,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                 <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
                   <Layers className="w-5 h-5" />
                 </div>
-                {(currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION') && (
+                {isModeAOperatingMode(currentMode) && (
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800">
                     <Check className="w-3 h-3" /> {t('mode.activeBadge', 'Mode Aktif')}
                   </span>
@@ -108,15 +113,15 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectMode('MODE_A_OVERLAY');
+                  onSelectMode('MODE_A_TIKTOK_COMPANION');
                 }}
                 className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
+                  isModeAOperatingMode(currentMode)
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
+                {isModeAOperatingMode(currentMode)
                   ? t('mode.modeA.selected', 'Mode A Terpilih')
                   : t('mode.modeA.select', 'Pilih Mode A')}
               </button>
@@ -124,9 +129,9 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
 
             {/* Mode B */}
             <div
-              onClick={() => onSelectMode('MODE_B_ENCODER')}
+              onClick={() => onSelectMode('MODE_B_STREAMING_ENCODER')}
               className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER'
+                isModeBOperatingMode(currentMode)
                   ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-950/50 ring-1 ring-blue-500'
                   : 'bg-[#131f36] border-slate-800 hover:border-slate-700'
               }`}
@@ -135,7 +140,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                 <div className="w-10 h-10 rounded-lg bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
                   <Radio className="w-5 h-5" />
                 </div>
-                {(currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER') && (
+                {isModeBOperatingMode(currentMode) && (
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-800">
                     <Check className="w-3 h-3" /> {t('mode.activeBadge', 'Mode Aktif')}
                   </span>
@@ -167,15 +172,15 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectMode('MODE_B_ENCODER');
+                  onSelectMode('MODE_B_STREAMING_ENCODER');
                 }}
                 className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER'
+                  isModeBOperatingMode(currentMode)
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {currentMode === 'MODE_B_ENCODER' || currentMode === 'MODE_B_STREAMING_ENCODER'
+                {isModeBOperatingMode(currentMode)
                   ? t('mode.modeB.selected', 'Mode B Terpilih')
                   : t('mode.modeB.select', 'Pilih Mode B')}
               </button>
@@ -187,7 +192,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <Monitor className="w-4 h-4 text-blue-400" />
-                {currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION'
+                {isModeAOperatingMode(currentMode)
                   ? t('mode.previewA', 'Pratinjau Mode A: Floating Overlay HUD')
                   : t('mode.previewB', 'Pratinjau Mode B: Compositor Pipeline RTMP 1080p')}
               </span>
@@ -196,7 +201,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
               </span>
             </div>
 
-            {currentMode === 'MODE_A_OVERLAY' || currentMode === 'MODE_A_TIKTOK_COMPANION' ? (
+            {isModeAOperatingMode(currentMode) ? (
               <div className="space-y-3">
                 <div className="p-3 rounded-lg bg-[#0e1626] border border-blue-900/40 text-xs text-slate-300 space-y-2">
                   <div className="flex items-center justify-between text-[11px] text-slate-400 border-b border-slate-800 pb-1.5">

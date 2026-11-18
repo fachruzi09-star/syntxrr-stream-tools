@@ -53,6 +53,10 @@ import {
 } from 'lucide-react';
 import {
   isNativeAndroid,
+  checkMicPermission,
+  requestMicPermission,
+  checkNotificationPermission,
+  requestNotificationPermission,
   checkOverlayPermission,
   requestOverlayPermission,
   showFloatingHud,
@@ -557,6 +561,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const next: Record<string, string> = {};
     const names: Array<'camera' | 'microphone'> = ['camera', 'microphone'];
     for (const name of names) {
+      if (name === 'microphone' && isNativeAndroid()) {
+        const micPerm = await checkMicPermission();
+        next.microphone = micPerm.granted ? 'granted' : 'prompt';
+        continue;
+      }
       try {
         if (navigator.permissions?.query) {
           const status = await navigator.permissions.query({ name: name as PermissionName });
@@ -568,9 +577,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         next[name] = isEnglish ? 'unable to check' : 'tidak dapat diperiksa';
       }
     }
-    next.notifications = typeof Notification !== 'undefined'
-      ? Notification.permission
-      : (isEnglish ? 'unavailable' : 'tidak tersedia');
+    if (isNativeAndroid()) {
+      const notifPerm = await checkNotificationPermission();
+      next.notifications = notifPerm.granted
+        ? 'granted'
+        : notifPerm.message
+          ? (isEnglish ? `unable to check — ${notifPerm.message}` : `tidak dapat diperiksa — ${notifPerm.message}`)
+          : 'prompt';
+    } else {
+      next.notifications = typeof Notification !== 'undefined'
+        ? Notification.permission
+        : (isEnglish ? 'unavailable' : 'tidak tersedia');
+    }
     setPermissionState(next);
   }, [isEnglish]);
 
@@ -581,6 +599,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const requestMediaPermission = async (kind: 'camera' | 'microphone') => {
     setPermissionBusy(kind);
     try {
+      if (kind === 'microphone' && isNativeAndroid()) {
+        const result = await requestMicPermission();
+        setPermissionState((prev) => ({
+          ...prev,
+          microphone: result.granted
+            ? 'granted'
+            : (isEnglish
+                ? (result.message ? `denied — ${result.message}` : 'denied')
+                : (result.message ? `ditolak — ${result.message}` : 'ditolak')),
+        }));
+        if (result.granted) {
+          void refreshMicDevices();
+        }
+        return;
+      }
       if (!navigator.mediaDevices?.getUserMedia) {
         setPermissionState((prev) => ({ ...prev, [kind]: isEnglish ? 'unavailable' : 'tidak tersedia' }));
         return;
@@ -600,16 +633,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const requestNotification = async () => {
-    if (typeof Notification === 'undefined') {
-      setPermissionState((prev) => ({ ...prev, notifications: isEnglish ? 'unavailable' : 'tidak tersedia' }));
-      return;
-    }
+    setPermissionBusy('notifications');
     try {
-      await Notification.requestPermission();
-    } catch {
-      /* diabaikan: status akan dibaca ulang di bawah */
+      if (isNativeAndroid()) {
+        const result = await requestNotificationPermission();
+        setPermissionState((prev) => ({
+          ...prev,
+          notifications: result.granted
+            ? 'granted'
+            : (isEnglish
+                ? (result.message ? `denied — ${result.message}` : 'denied')
+                : (result.message ? `ditolak — ${result.message}` : 'ditolak')),
+        }));
+        return;
+      }
+      if (typeof Notification === 'undefined') {
+        setPermissionState((prev) => ({ ...prev, notifications: isEnglish ? 'unavailable' : 'tidak tersedia' }));
+        return;
+      }
+      try {
+        await Notification.requestPermission();
+      } catch {
+        /* diabaikan: status akan dibaca ulang di bawah */
+      }
+      await refreshPermissions();
+    } finally {
+      setPermissionBusy(null);
     }
-    await refreshPermissions();
   };
 
   const refreshOverlayPermission = useCallback(async () => {
@@ -1737,9 +1787,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={() => void requestNotification()}
-                className="px-2.5 py-1 rounded-lg bg-[#080c16] border border-slate-700 text-[10px] text-slate-200 hover:border-blue-500"
+                disabled={permissionBusy === 'notifications'}
+                className="px-2.5 py-1 rounded-lg bg-[#080c16] border border-slate-700 text-[10px] text-slate-200 hover:border-blue-500 disabled:opacity-50"
               >
-                {t('settings.permissions.request', 'Minta Izin')}
+                {permissionBusy === 'notifications'
+                  ? (isEnglish ? 'Requesting…' : 'Meminta…')
+                  : t('settings.permissions.request', 'Minta Izin')}
               </button>
             </div>
 

@@ -2,34 +2,42 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   AppSettings,
   OperatingMode,
+  isModeAOperatingMode,
   StudioPreset,
   NavigationTab,
   IntegrationProvider,
+  TikTokAccountState,
+  TikTokConnectorStatus,
+  ModeASessionMode,
 } from '../types';
+import {
+  buildModeAHonestStatus,
+  isValidTikTokTargetUsername,
+  resolveTikTokTargetUsername,
+} from '../services/tiktokLiveConnector';
 import { useTranslation } from '../i18n/I18nContext';
 import {
   Radio,
   Tv,
-  Monitor,
   ArrowRight,
   Layers,
-  Sparkles,
   Camera,
   Mic,
   Cpu,
-  Battery,
   Thermometer,
   ShieldAlert,
   CheckCircle2,
   AlertTriangle,
   Play,
-  Share2,
+  Square,
   ExternalLink,
   Sliders,
   Eye,
   EyeOff,
   Loader2,
   Smartphone,
+  Link2,
+  X,
 } from 'lucide-react';
 import {
   isNativeAndroid,
@@ -45,28 +53,71 @@ interface DashboardViewProps {
   settings: AppSettings;
   activePreset: StudioPreset | null;
   integrations: IntegrationProvider[];
+  tiktokAccount?: TikTokAccountState;
+  tiktokStatus?: TikTokConnectorStatus;
+  companionRunning?: boolean;
+  modeASessionMode?: ModeASessionMode;
+  onStartModeAWithConnection?: () => Promise<void> | void;
+  onStartModeAWithoutConnection?: () => Promise<void> | void;
+  onStopModeASession?: () => Promise<void> | void;
+  onOpenTikTokConnection?: () => void;
   onSelectMode: (mode: OperatingMode) => void;
   onNavigate: (nav: NavigationTab) => void;
   onOpenModeModal: () => void;
 }
 
+const DEFAULT_ACCOUNT: TikTokAccountState = {
+  isLinked: false,
+  connectionMethod: 'direct',
+  fallbackEnabled: true,
+  accountLinkStatus: 'unlinked',
+};
+
+const DEFAULT_STATUS: TikTokConnectorStatus = {
+  state: 'disconnected',
+  transport: 'none',
+  connectionMethod: 'direct',
+  roomStatus: 'unknown',
+  username: '',
+  roomId: '',
+  viewerCount: 0,
+  totalLikeCount: 0,
+  message: 'Belum terhubung ke TikTok LIVE.',
+  updatedAt: 0,
+};
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   settings,
   activePreset,
   integrations,
+  tiktokAccount = DEFAULT_ACCOUNT,
+  tiktokStatus = DEFAULT_STATUS,
+  companionRunning = false,
+  modeASessionMode = 'inactive',
+  onStartModeAWithConnection,
+  onStartModeAWithoutConnection,
+  onStopModeASession,
+  onOpenTikTokConnection,
   onSelectMode,
   onNavigate,
   onOpenModeModal,
 }) => {
   const { t, isEnglish } = useTranslation();
 
-  const isModeA =
-    settings.operatingMode === 'MODE_A_TIKTOK_COMPANION' ||
-    settings.operatingMode === 'MODE_A_OVERLAY';
+  const isModeA = isModeAOperatingMode(settings.operatingMode);
+  const targetUsername = resolveTikTokTargetUsername(settings, tiktokAccount);
+  const hasValidTargetUsername = isValidTikTokTargetUsername(targetUsername);
+  const honestStatus = buildModeAHonestStatus({
+    account: tiktokAccount,
+    connector: tiktokStatus,
+    companionRunning,
+    sessionMode: modeASessionMode,
+  });
 
-  const connectedCount = integrations.filter((i) => i.status === 'ACTIVE').length;
-  const elementsCount = activePreset?.elements.length || 0;
   const visibleElementsCount = activePreset?.elements.filter((e) => e.visible).length || 0;
+  const [startSessionDialog, setStartSessionDialog] = useState<'unlinked' | 'linked' | null>(null);
+  const [isSessionActionPending, setIsSessionActionPending] = useState(false);
+  const [sessionValidationError, setSessionValidationError] = useState<string | null>(null);
 
   // Native Floating HUD State (Phase 4.3C)
   const [isHudVisible, setIsHudVisible] = useState(false);
@@ -152,8 +203,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         return;
       }
 
-      // 2. Call showFloatingHud
-      const res = await showFloatingHud();
+      // 2. Call showFloatingHud with saved appearance preferences
+      const res = await showFloatingHud({
+        sizeDp: settings.hudButtonSize ?? 48,
+        opacity: settings.hudOpacity ?? 92,
+        position: settings.hudPosition === 'left' ? 'left' : 'right',
+      });
       if (res.success || res.isVisible) {
         setIsHudVisible(true);
         setHudFeedback({
@@ -217,8 +272,198 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
+  const handlePressStartSession = () => {
+    setSessionValidationError(null);
+    if (hasValidTargetUsername) {
+      setStartSessionDialog('linked');
+    } else {
+      setStartSessionDialog('unlinked');
+    }
+  };
+
+  const handleConfirmConnectAndStart = async () => {
+    setStartSessionDialog(null);
+    if (!hasValidTargetUsername) {
+      setSessionValidationError(
+        'Target @username TikTok belum diisi atau tidak valid. Atur target username di halaman Koneksi terlebih dahulu.'
+      );
+      return;
+    }
+    setSessionValidationError(null);
+    setIsSessionActionPending(true);
+    try {
+      await onStartModeAWithConnection?.();
+      await refreshHudStatus();
+    } finally {
+      setIsSessionActionPending(false);
+    }
+  };
+
+  const handleConfirmStartWithoutConnection = async () => {
+    setStartSessionDialog(null);
+    setSessionValidationError(null);
+    setIsSessionActionPending(true);
+    try {
+      await onStartModeAWithoutConnection?.();
+      await refreshHudStatus();
+    } finally {
+      setIsSessionActionPending(false);
+    }
+  };
+
+  const handleStopSession = async () => {
+    setIsSessionActionPending(true);
+    try {
+      await onStopModeASession?.();
+      await refreshHudStatus();
+    } finally {
+      setIsSessionActionPending(false);
+    }
+  };
+
+  const isLiveTransportConnected =
+    tiktokStatus.state === 'connected_direct' || tiktokStatus.state === 'connected_euler';
+  const heroBroadcastDotColor = isLiveTransportConnected
+    ? 'bg-emerald-400'
+    : tiktokStatus.state === 'error'
+    ? 'bg-rose-400'
+    : 'bg-amber-400';
+  const heroBroadcastTextColor = isLiveTransportConnected
+    ? 'text-emerald-300'
+    : tiktokStatus.state === 'error'
+    ? 'text-rose-300'
+    : 'text-amber-300';
+  const heroBroadcastLabel = isModeA
+    ? isLiveTransportConnected
+      ? honestStatus.eventTransport.label
+      : modeASessionMode === 'without_live_connection'
+      ? 'Tanpa Koneksi LIVE'
+      : tiktokStatus.state === 'waiting_for_live'
+      ? 'Menunggu LIVE'
+      : tiktokStatus.state === 'resolving_room' ||
+        tiktokStatus.state === 'connecting_direct' ||
+        tiktokStatus.state === 'connecting_euler' ||
+        tiktokStatus.state === 'reconnecting'
+      ? honestStatus.eventTransport.label
+      : t('dash.statusNotConnected')
+    : t('dash.statusNotConnected');
+
   return (
     <div className="space-y-6 pb-20 md:pb-8">
+      {/* Dialog Mulai Sesi Mode A — Kondisi A (Target Username Belum Diatur) */}
+      {startSessionDialog === 'unlinked' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mode-a-unlinked-title"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div className="bg-[#0e172a] border border-slate-700 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <h3 id="mode-a-unlinked-title" className="text-base font-bold text-white">
+                  Target username LIVE belum diatur
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStartSessionDialog(null)}
+                className="text-slate-400 hover:text-white p-1"
+                aria-label="Tutup dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Overlay tetap tampil, tetapi gift, chat, dan follow tidak akan masuk sebelum target <span className="font-mono text-white">@username</span> LIVE TikTok diisi di Koneksi (tanpa perlu login OAuth).
+            </p>
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setStartSessionDialog(null);
+                  onOpenTikTokConnection?.();
+                }}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-600/25"
+              >
+                <Link2 className="w-4 h-4" />
+                <span>Atur Target di Koneksi</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmStartWithoutConnection()}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold"
+              >
+                Mulai tanpa koneksi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dialog Mulai Sesi Mode A — Kondisi B (Target Username Siap) */}
+      {startSessionDialog === 'linked' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mode-a-linked-title"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div className="bg-[#0e172a] border border-blue-500/40 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 id="mode-a-linked-title" className="text-base font-bold text-white">
+                  Siap memulai sesi Mode A?
+                </h3>
+                <div className="text-xs text-blue-300 mt-0.5 font-mono">
+                  Target LIVE: @{targetUsername}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStartSessionDialog(null)}
+                className="text-slate-400 hover:text-white p-1"
+                aria-label="Tutup dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => void handleConfirmConnectAndStart()}
+                className="w-full text-left p-3.5 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white transition shadow-lg shadow-blue-600/25 space-y-1"
+              >
+                <div className="text-xs font-bold flex items-center gap-1.5">
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Sambungkan &amp; mulai</span>
+                </div>
+                <p className="text-[11px] text-blue-100 leading-relaxed">
+                  Hubungkan SYNTXRR ke room LIVE publik @{targetUsername}. Kalau belum LIVE, koneksi akan menunggu sampai LIVE dimulai.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleConfirmStartWithoutConnection()}
+                className="w-full text-left p-3.5 rounded-xl bg-[#080c16] hover:bg-slate-800/80 border border-slate-700 text-slate-200 transition space-y-1"
+              >
+                <div className="text-xs font-bold">Mulai tanpa koneksi</div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Overlay tetap aktif tanpa menerima event LIVE.
+                </p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero / Studio Header Card */}
       <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0e1626] via-[#111c30] to-[#0a1120] border border-blue-950/80 p-5 md:p-6 shadow-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -239,13 +484,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Quick Hardware & Broadcast Readiness strip */}
           <div className="flex flex-wrap items-center gap-2 self-start md:self-auto shrink-0">
             <div className="px-3 py-2 rounded-xl bg-[#080c16]/90 border border-slate-800 flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+              <div className={`w-2.5 h-2.5 rounded-full ${heroBroadcastDotColor}`} />
               <div className="text-left">
                 <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
                   {t('dash.broadcastStatus')}
                 </div>
-                <div className="text-xs font-bold text-amber-300">
-                  {t('dash.statusNotConnected')}
+                <div className={`text-xs font-bold ${heroBroadcastTextColor}`}>
+                  {heroBroadcastLabel}
                 </div>
               </div>
             </div>
@@ -499,6 +744,121 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               )}
             </div>
+          </div>
+
+          {/* Alur Mulai Sesi Mode A + 4 Status Jujur */}
+          <div className="p-4 rounded-xl bg-[#080c16]/90 border border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
+                  <span>Sesi Mode A &amp; Status Koneksi</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
+                      hasValidTargetUsername
+                        ? 'bg-blue-950/70 text-blue-300 border-blue-700/60'
+                        : 'bg-slate-900 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    {hasValidTargetUsername ? `Target: @${targetUsername}` : 'Target: Belum diatur'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Status akun, target LIVE publik, sesi companion, room LIVE, dan transport event dilaporkan terpisah secara jujur.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {!companionRunning && modeASessionMode === 'inactive' ? (
+                  <button
+                    type="button"
+                    disabled={isSessionActionPending}
+                    onClick={handlePressStartSession}
+                    className="py-2.5 px-4 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 active:scale-[0.98]"
+                  >
+                    {isSessionActionPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Play className="w-4 h-4" />
+                    )}
+                    <span>Mulai Sesi</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isSessionActionPending}
+                    onClick={() => void handleStopSession()}
+                    className="py-2.5 px-4 rounded-xl bg-rose-900/70 hover:bg-rose-800/80 border border-rose-600 text-rose-100 text-xs font-bold flex items-center gap-2 active:scale-[0.98]"
+                  >
+                    {isSessionActionPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5" />
+                    )}
+                    <span>Hentikan Sesi</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => onOpenTikTokConnection?.()}
+                  className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <Link2 className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Atur TikTok</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-[11px]">
+              <div className="p-2.5 rounded-lg bg-[#0e172a] border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase">Target LIVE</div>
+                <div className="font-bold text-white mt-0.5 font-mono truncate">
+                  {hasValidTargetUsername ? `@${targetUsername}` : 'Belum diatur'}
+                </div>
+                <div className="text-[10px] text-slate-400 truncate">
+                  {tiktokAccount.isLinked ? `OAuth: ${honestStatus.accountLinked.label}` : 'OAuth opsional'}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-[#0e172a] border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase">Mode A Session</div>
+                <div className="font-bold text-white mt-0.5">{honestStatus.modeASession.label}</div>
+                <div className="text-[10px] text-slate-400 truncate">{honestStatus.modeASession.detail}</div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-[#0e172a] border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase">Room Status</div>
+                <div className="font-bold text-white mt-0.5">{honestStatus.roomStatus.label}</div>
+                <div className="text-[10px] text-slate-400">
+                  {tiktokAccount.connectionMethod === 'euler' ? 'Via EulerStream' : 'Direct TikTok'}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-[#0e172a] border border-slate-800">
+                <div className="text-[10px] text-slate-400 uppercase">Event Transport</div>
+                <div className="font-bold text-white mt-0.5">{honestStatus.eventTransport.label}</div>
+                <div className="text-[10px] text-slate-400 truncate">{honestStatus.eventTransport.detail}</div>
+              </div>
+            </div>
+
+            {sessionValidationError && (
+              <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-700/60 text-[11px] text-rose-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{sessionValidationError}</span>
+              </div>
+            )}
+
+            {modeASessionMode === 'without_live_connection' && (
+              <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Sesi Mode A aktif tanpa koneksi LIVE: event LIVE (chat, gift, follow) belum tersedia. Elemen overlay lokal tetap dapat digunakan.
+                </span>
+              </div>
+            )}
+
+            {tiktokStatus.state === 'error' && (
+              <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-700/50 text-[11px] text-rose-200">
+                <span className="font-bold">Status Transport: </span>
+                <span>{tiktokStatus.message}</span>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons Row */}

@@ -8,6 +8,7 @@ import {
   SpotifySearchResult,
 } from '../types';
 import { audioEngine, AudioEngineState } from '../services/localAudioEngine';
+import { songRequestEngine, type SongRequestState } from '../services/songRequestEngine';
 import { LocalAudioPlayer } from './music/LocalAudioPlayer';
 import { YouTubeConnector } from './music/YouTubeConnector';
 import { SpotifyConnector } from './music/SpotifyConnector';
@@ -28,6 +29,8 @@ import {
   ExternalLink,
   ShieldCheck,
   Info,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 
 interface MusicCenterViewProps {
@@ -53,6 +56,7 @@ interface MusicCenterViewProps {
   settings: AppSettings;
   onNavigateToSettings: () => void;
   onUpdateSpotifyToken: (token: string) => void;
+  songRequestState?: SongRequestState;
 }
 
 type ActiveTab = 'local_audio' | 'youtube' | 'spotify' | 'queue' | 'viewer_portal';
@@ -77,21 +81,29 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   settings,
   onNavigateToSettings,
   onUpdateSpotifyToken,
+  songRequestState,
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('queue');
   const [audioState, setAudioState] = useState<AudioEngineState>(audioEngine.getState());
+  const [notice, setNotice] = useState<{ text: string; tone: 'warn' | 'error' } | null>(null);
 
   useEffect(() => {
     const unsub = audioEngine.subscribe(setAudioState);
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   // Handle adding from YouTube
   const handleAddYouTubeResult = (item: YouTubeSearchResult) => {
     // Check duplicate
     const exists = unifiedQueue.some((q) => q.externalUrl === item.videoUrl || q.title.toLowerCase() === item.title.toLowerCase());
     if (exists) {
-      alert(`"${item.title}" is already in the queue!`);
+      setNotice({ text: `"${item.title}" sudah ada di dalam antrean.`, tone: 'warn' });
       return;
     }
 
@@ -115,7 +127,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   const handleAddSpotifyResult = (item: SpotifySearchResult) => {
     const exists = unifiedQueue.some((q) => q.externalUrl === item.spotifyUrl || q.title.toLowerCase() === item.title.toLowerCase());
     if (exists) {
-      alert(`"${item.title}" is already in the queue!`);
+      setNotice({ text: `"${item.title}" sudah ada di dalam antrean.`, tone: 'warn' });
       return;
     }
 
@@ -140,7 +152,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   const handleAddLocalToQueue = (track: LocalAudioTrackMeta) => {
     const exists = unifiedQueue.some((q) => q.localFileKey === track.id || (q.title === track.title && q.source === 'local'));
     if (exists) {
-      alert(`"${track.title}" is already in the queue!`);
+      setNotice({ text: `"${track.title}" sudah ada di dalam antrean.`, tone: 'warn' });
       return;
     }
 
@@ -189,6 +201,9 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
     const file = localFilesMap.get(trackId);
 
     if (file) {
+      if (songRequestState?.currentTrack || songRequestEngine.getState().isPlaying) {
+        await songRequestEngine.stop();
+      }
       await audioEngine.loadAndPlayFile(item.id, item.title, item.artist, file);
       // Mark as playing in queue
       const updated = unifiedQueue.map((q) => ({
@@ -197,20 +212,28 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
       }));
       onUpdateUnifiedQueue(updated);
     } else {
-      alert(`Local file for "${item.title}" is not available in the current browser session. Re-select the file under Local Audio.`);
+      setNotice({
+        text: `File lokal untuk "${item.title}" belum dimuat di sesi saat ini. Pilih ulang file lewat tab Local Audio Engine.`,
+        tone: 'error',
+      });
     }
   };
 
   // Determine current Now Playing display
   const activeQueuePlaying = unifiedQueue.find((q) => q.status === 'playing');
-  const displayTitle = audioState.currentTrackId
+  const isSongRequestActive = Boolean(songRequestState?.currentTrack);
+  const displayTitle = isSongRequestActive
+    ? songRequestState!.currentTrack!.title
+    : audioState.currentTrackId
     ? audioState.title
     : activeQueuePlaying?.title || nowPlayingSong?.title || 'No Active Track';
-  const displayArtist = audioState.currentTrackId
+  const displayArtist = isSongRequestActive
+    ? songRequestState!.currentTrack!.artist
+    : audioState.currentTrackId
     ? audioState.artist
     : activeQueuePlaying?.artist || nowPlayingSong?.artist || 'Select a track to start';
-  const isLocalEngineActive = Boolean(audioState.currentTrackId);
-  const isPlayingNow = audioState.isPlaying || isPlaying;
+  const isLocalEngineActive = Boolean(audioState.currentTrackId) && !isSongRequestActive;
+  const isPlayingNow = isSongRequestActive ? !!songRequestState?.isPlaying : (audioState.isPlaying || isPlaying);
 
   const pendingCount = unifiedQueue.filter((q) => q.status === 'pending').length;
 
@@ -259,6 +282,30 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
         </div>
       </div>
 
+      {notice && (
+        <div
+          role="status"
+          className={`flex items-start justify-between gap-3 px-4 py-3 rounded-xl border text-xs ${
+            notice.tone === 'error'
+              ? 'bg-rose-950/60 border-rose-800 text-rose-200'
+              : 'bg-amber-950/60 border-amber-800 text-amber-200'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{notice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="p-1 rounded-md hover:bg-white/10 transition-colors shrink-0"
+            aria-label="Tutup pemberitahuan"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Now Playing Studio Showcase Card */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1626] border border-blue-950/80 shadow-xl space-y-4">
         <div className="flex items-center justify-between">
@@ -267,7 +314,11 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
             Now Playing on Stream
           </span>
           <span className="text-[11px] font-mono text-slate-400">
-            {isLocalEngineActive
+            {isSongRequestActive
+              ? songRequestState?.audioPlaybackMode === 'native_android_media'
+                ? 'Source: Song Request (Native Android)'
+                : `Source: Song Request (${songRequestState?.playbackStatus || 'idle'})`
+              : isLocalEngineActive
               ? 'Source: Local Device Audio'
               : activeQueuePlaying?.source
               ? `Source: ${activeQueuePlaying.source.toUpperCase()}`
@@ -342,10 +393,29 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
           </div>
         </div>
 
+        {/* Song Request Error / Status Notice */}
+        {(songRequestState?.lastError || songRequestState?.playbackStatus === 'preparing') && (
+          <div
+            className={`px-3 py-2 rounded-xl border text-xs ${
+              songRequestState?.lastError
+                ? 'bg-rose-950/50 border-rose-800/70 text-rose-300'
+                : 'bg-blue-950/40 border-blue-800/60 text-blue-300'
+            }`}
+          >
+            {songRequestState?.lastError || 'Memuat dan menyiapkan pemutaran lagu...'}
+          </div>
+        )}
+
         {/* Global Player Controls Bar */}
         <div className="flex items-center justify-between border-t border-slate-800/80 pt-3">
           <div className="text-xs text-slate-400">
-            {isLocalEngineActive ? (
+            {isSongRequestActive ? (
+              <span className={isPlayingNow ? 'text-emerald-400 font-semibold' : 'text-amber-300 font-semibold'}>
+                {songRequestState?.audioPlaybackMode === 'native_android_media'
+                  ? `Native Media (${songRequestState?.playbackStatus})`
+                  : `Song Request (${songRequestState?.playbackStatus})`}
+              </span>
+            ) : isLocalEngineActive ? (
               <span className="text-emerald-400 font-semibold">HTML5 Engine Active</span>
             ) : (
               <span>Queue Standby</span>
@@ -363,7 +433,9 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
 
             <button
               onClick={() => {
-                if (isLocalEngineActive) {
+                if (isSongRequestActive) {
+                  onTogglePlay();
+                } else if (isLocalEngineActive) {
                   audioEngine.togglePlay();
                 } else {
                   onTogglePlay();

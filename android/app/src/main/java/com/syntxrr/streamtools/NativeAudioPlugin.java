@@ -22,6 +22,8 @@ public class NativeAudioPlugin extends Plugin {
     private NativeSoundPoolManager mSoundPoolManager;
     @Nullable
     private NativeTtsManager mTtsManager;
+    @Nullable
+    private NativeMusicPlayer mMusicPlayer;
 
     private synchronized NativeSoundPoolManager getSoundPoolManager() {
         if (mSoundPoolManager == null) {
@@ -63,6 +65,51 @@ public class NativeAudioPlugin extends Plugin {
             });
         }
         return mTtsManager;
+    }
+
+    @Override
+    public void load() {
+        super.load();
+        getMusicPlayer();
+    }
+
+    private synchronized NativeMusicPlayer getMusicPlayer() {
+        if (mMusicPlayer == null) {
+            Context appContext = getContext().getApplicationContext();
+            mMusicPlayer = NativeMusicPlayer.getInstance(appContext);
+        }
+        mMusicPlayer.setEventListener(new NativeMusicPlayer.OnMusicEventListener() {
+            @Override
+            public void onMusicState(
+                    String trackId,
+                    String status,
+                    boolean isPlaying,
+                    long positionMs,
+                    long durationMs,
+                    @Nullable String errorMessage
+            ) {
+                JSObject data = new JSObject();
+                data.put("trackId", trackId);
+                data.put("status", status);
+                data.put("isPlaying", isPlaying);
+                data.put("positionMs", positionMs);
+                data.put("durationMs", durationMs);
+                if (errorMessage != null) {
+                    data.put("errorMessage", errorMessage);
+                }
+                data.put("timestamp", System.currentTimeMillis());
+                notifyListeners("musicState", data);
+            }
+
+            @Override
+            public void onTransportCommand(String command) {
+                JSObject data = new JSObject();
+                data.put("command", command);
+                data.put("timestamp", System.currentTimeMillis());
+                notifyListeners("musicTransport", data);
+            }
+        });
+        return mMusicPlayer;
     }
 
     @PluginMethod
@@ -227,6 +274,119 @@ public class NativeAudioPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    @PluginMethod
+    public void playMusicTrack(PluginCall call) {
+        String trackId = call.getString("trackId");
+        if (trackId == null || trackId.trim().isEmpty()) {
+            call.reject("trackId wajib disertakan.");
+            return;
+        }
+        String title = call.getString("title", "Unknown Title");
+        String artist = call.getString("artist", "Unknown Artist");
+        String sourceUri = call.getString("sourceUri");
+        String base64Audio = call.getString("base64Audio");
+        String mimeType = call.getString("mimeType", "audio/mpeg");
+        Double volumeObj = call.getDouble("volume", 0.85);
+        float volume = volumeObj != null ? volumeObj.floatValue() : 0.85f;
+
+        NativeMusicPlayer player = getMusicPlayer();
+        boolean accepted;
+        if (base64Audio != null && !base64Audio.trim().isEmpty()) {
+            accepted = player.playBase64(trackId.trim(), title, artist, base64Audio, mimeType, volume);
+        } else if (sourceUri != null && !sourceUri.trim().isEmpty()) {
+            accepted = player.playUri(trackId.trim(), title, artist, sourceUri.trim(), volume);
+        } else {
+            JSObject ret = new JSObject();
+            ret.put("success", false);
+            ret.put("message", "Sumber audio (sourceUri atau base64Audio) tidak tersedia.");
+            call.resolve(ret);
+            return;
+        }
+
+        NativeMusicPlayer.MusicSnapshot snap = player.getStatus();
+        JSObject ret = new JSObject();
+        ret.put("success", accepted);
+        ret.put("trackId", snap.trackId);
+        ret.put("status", snap.status);
+        if (snap.errorMessage != null) {
+            ret.put("message", snap.errorMessage);
+        } else {
+            ret.put("message", accepted ? "Memuat pemutaran musik native." : "Gagal memulai musik native.");
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void pauseMusicTrack(PluginCall call) {
+        NativeMusicPlayer player = getMusicPlayer();
+        boolean paused = player.pause();
+        NativeMusicPlayer.MusicSnapshot snap = player.getStatus();
+        JSObject ret = new JSObject();
+        ret.put("success", paused);
+        ret.put("status", snap.status);
+        ret.put("isPlaying", snap.isPlaying);
+        ret.put("positionMs", snap.positionMs);
+        ret.put("durationMs", snap.durationMs);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void resumeMusicTrack(PluginCall call) {
+        NativeMusicPlayer player = getMusicPlayer();
+        boolean resumed = player.resume();
+        NativeMusicPlayer.MusicSnapshot snap = player.getStatus();
+        JSObject ret = new JSObject();
+        ret.put("success", resumed);
+        ret.put("status", snap.status);
+        ret.put("isPlaying", snap.isPlaying);
+        ret.put("positionMs", snap.positionMs);
+        ret.put("durationMs", snap.durationMs);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void stopMusicTrack(PluginCall call) {
+        NativeMusicPlayer player = getMusicPlayer();
+        player.stop();
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        ret.put("status", "stopped");
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void setMusicVolume(PluginCall call) {
+        Double volumeObj = call.getDouble("volume");
+        if (volumeObj == null) {
+            call.reject("Parameter volume (0.0 - 1.0) wajib disertakan.");
+            return;
+        }
+        NativeMusicPlayer player = getMusicPlayer();
+        float applied = player.setVolume(volumeObj.floatValue());
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        ret.put("volume", applied);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getMusicStatus(PluginCall call) {
+        NativeMusicPlayer player = getMusicPlayer();
+        NativeMusicPlayer.MusicSnapshot snap = player.getStatus();
+        JSObject ret = new JSObject();
+        ret.put("trackId", snap.trackId);
+        ret.put("title", snap.title);
+        ret.put("artist", snap.artist);
+        ret.put("status", snap.status);
+        ret.put("isPlaying", snap.isPlaying);
+        ret.put("positionMs", snap.positionMs);
+        ret.put("durationMs", snap.durationMs);
+        if (snap.errorMessage != null) {
+            ret.put("errorMessage", snap.errorMessage);
+        }
+        call.resolve(ret);
+    }
+
     @Override
     protected void handleOnDestroy() {
         if (mSoundPoolManager != null) {
@@ -236,6 +396,13 @@ public class NativeAudioPlugin extends Plugin {
         if (mTtsManager != null) {
             mTtsManager.shutdown();
             mTtsManager = null;
+        }
+        if (mMusicPlayer != null) {
+            mMusicPlayer.setEventListener(null);
+            if (!CompanionService.isRunning()) {
+                mMusicPlayer.release();
+            }
+            mMusicPlayer = null;
         }
         super.handleOnDestroy();
     }

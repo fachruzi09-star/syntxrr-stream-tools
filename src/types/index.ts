@@ -2,6 +2,38 @@ import { FeatureStatus } from '../theme/designSystem';
 
 export type OperatingMode = 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER' | 'MODE_A_OVERLAY' | 'MODE_B_ENCODER';
 
+export type CanonicalOperatingMode = 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER';
+
+export function isModeAOperatingMode(mode: OperatingMode | string | undefined | null): boolean {
+  return mode === 'MODE_A_TIKTOK_COMPANION' || mode === 'MODE_A_OVERLAY';
+}
+
+export function isModeBOperatingMode(mode: OperatingMode | string | undefined | null): boolean {
+  return mode === 'MODE_B_STREAMING_ENCODER' || mode === 'MODE_B_ENCODER';
+}
+
+export function normalizeOperatingMode(mode: OperatingMode | string | undefined | null): CanonicalOperatingMode {
+  return isModeBOperatingMode(mode) ? 'MODE_B_STREAMING_ENCODER' : 'MODE_A_TIKTOK_COMPANION';
+}
+
+export function normalizeUnitVolume(value: unknown, fallback: number = 0.85): number {
+  const safeFallback = Number.isFinite(fallback) ? Math.max(0, Math.min(1, fallback)) : 0.85;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return safeFallback;
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.max(0, Math.min(1, normalized));
+}
+
+export function unitVolumeToPercent(unit: unknown, fallbackUnit: number = 0.85): number {
+  return Math.round(normalizeUnitVolume(unit, fallbackUnit) * 100);
+}
+
+export function percentToUnitVolume(percent: unknown, fallbackUnit: number = 0.85): number {
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) {
+    return normalizeUnitVolume(fallbackUnit, 0.85);
+  }
+  return Math.max(0, Math.min(1, percent / 100));
+}
+
 export type CanvasOrientation = '9:16' | '16:9' | '1:1';
 
 export type ResolutionTarget = '720p' | '1080p' | '1440p';
@@ -56,6 +88,9 @@ export interface AppSettings {
   // Mode A TikTok Companion
   tiktokUsername?: string;
   tiktokConnected?: boolean;
+  tiktokConnectionMethod?: TikTokConnectionMethod;
+  eulerStreamApiKey?: string;
+  tiktokEulerFallbackEnabled?: boolean;
   // Soundboard & Audio routing
   soundboardVolume?: number;
 
@@ -170,14 +205,72 @@ export type StreamEventType =
   | 'viewer'
   | 'custom';
 
+export type TikTokConnectionState =
+  | 'disconnected'
+  | 'resolving_room'
+  | 'connecting_direct'
+  | 'connected_direct'
+  | 'connecting_euler'
+  | 'connected_euler'
+  | 'reconnecting'
+  | 'waiting_for_live'
+  | 'error';
+
+export type TikTokTransportMode = 'none' | 'direct_ws' | 'euler';
+
+export type TikTokConnectionMethod = 'direct' | 'euler';
+
+export type TikTokAccountLinkStatus = 'unlinked' | 'linking' | 'linked' | 'failed';
+
+export type TikTokRoomStatus = 'unknown' | 'not_live' | 'live' | 'not_found' | 'unreadable';
+
+export type ModeASessionMode = 'inactive' | 'with_live_connector' | 'without_live_connection';
+
+export interface TikTokAccountState {
+  isLinked: boolean;
+  openId?: string;
+  username?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  connectionMethod: TikTokConnectionMethod;
+  fallbackEnabled: boolean;
+  accountLinkStatus: TikTokAccountLinkStatus;
+  lastSuccessfulAuthorization?: number;
+  grantedScopes?: string[];
+  linkErrorMessage?: string;
+}
+
+export interface TikTokConnectorStatus {
+  state: TikTokConnectionState;
+  transport: TikTokTransportMode;
+  connectionMethod?: TikTokConnectionMethod;
+  roomStatus?: TikTokRoomStatus;
+  username: string;
+  roomId: string;
+  viewerCount: number;
+  totalLikeCount: number;
+  message: string;
+  errorCode?: string;
+  updatedAt: number;
+}
+
 export interface StreamEvent {
   id: string;
   type: StreamEventType;
   username: string;
   userAvatar?: string;
+  userId?: string;
   detail: string;
   amount?: number;
   currency?: string;
+  giftId?: string;
+  giftName?: string;
+  repeatCount?: number;
+  diamondCount?: number;
+  giftImage?: string;
+  likeCount?: number;
+  totalLikeCount?: number;
+  viewerCount?: number;
   timestamp: number;
   isSimulation?: boolean;
 }

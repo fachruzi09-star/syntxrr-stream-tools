@@ -15,6 +15,7 @@ import type {
   HudStateModel,
   HudStatusTone,
 } from './nativeCompanionBridge';
+import type { ModeASessionMode, TikTokConnectionState } from '../types';
 
 /** Batas buffer event di memori agar HUD ringan. */
 export const HUD_EVENT_BUFFER_LIMIT = 60;
@@ -86,8 +87,34 @@ export function filterHudEvents(events: HudChatEntry[], tab: HudChatTab): HudCha
  * - event asli masih segar -> terhubung
  */
 export function hudEventSourceStatus(
-  events: HudChatEntry[]
+  events: HudChatEntry[],
+  connectionState?: TikTokConnectionState,
+  modeASessionMode?: ModeASessionMode
 ): { text: string; tone: HudStatusTone } {
+  if (modeASessionMode === 'without_live_connection') {
+    return status('Tanpa koneksi LIVE', 'off');
+  }
+  if (connectionState === 'connected_direct') {
+    return status('Terhubung (Direct)', 'ok');
+  }
+  if (connectionState === 'connected_euler') {
+    return status('Terhubung (Euler)', 'ok');
+  }
+  if (
+    connectionState === 'resolving_room' ||
+    connectionState === 'connecting_direct' ||
+    connectionState === 'connecting_euler' ||
+    connectionState === 'reconnecting'
+  ) {
+    return status('Menghubungkan', 'warn');
+  }
+  if (connectionState === 'waiting_for_live') {
+    return status('Menunggu LIVE', 'warn');
+  }
+  if (connectionState === 'error') {
+    return status('Gagal terhubung', 'off');
+  }
+
   if (events.length === 0) return status('Belum terhubung', 'off');
 
   const newest = events.reduce((acc, item) => (item.timestamp > acc.timestamp ? item : acc), events[0]);
@@ -96,20 +123,48 @@ export function hudEventSourceStatus(
   return status('Terhubung', 'ok');
 }
 
-export function buildChatModel(
-  events: HudChatEntry[],
-  tab: HudChatTab,
-  paused: boolean,
-  unreadCount: number
-): HudStateModel {
-  const filtered = filterHudEvents(events, tab);
-  const sourceStatus = hudEventSourceStatus(events);
-
-  const rows: HudRowModel[] = filtered.map((event) => ({
+function mapEventsToRows(events: HudChatEntry[], tab: HudChatTab): HudRowModel[] {
+  return filterHudEvents(events, tab).map((event) => ({
     label: event.username,
     sub: event.detail,
     trailing: formatClock(event.timestamp),
   }));
+}
+
+function chatEmptyTextForTab(tab: HudChatTab, modeASessionMode?: ModeASessionMode): string {
+  if (modeASessionMode === 'without_live_connection') {
+    return 'Mode A aktif tanpa koneksi LIVE. Event LIVE belum tersedia.';
+  }
+  return tab === 'chat'
+    ? 'Belum ada chat. Panel tetap mengumpulkan event selama sumber aktif.'
+    : `Belum ada event ${tab}.`;
+}
+
+export function buildChatModel(
+  events: HudChatEntry[],
+  tab: HudChatTab,
+  paused: boolean,
+  unreadCount: number,
+  connectionState?: TikTokConnectionState,
+  modeASessionMode?: ModeASessionMode
+): HudStateModel {
+  const sourceStatus = hudEventSourceStatus(events, connectionState, modeASessionMode);
+
+  const rowsByTab: Record<HudChatTab, HudRowModel[]> = {
+    chat: mapEventsToRows(events, 'chat'),
+    gift: mapEventsToRows(events, 'gift'),
+    like: mapEventsToRows(events, 'like'),
+    follow: mapEventsToRows(events, 'follow'),
+  };
+
+  const emptyTextByTab: Record<HudChatTab, string> = {
+    chat: chatEmptyTextForTab('chat', modeASessionMode),
+    gift: chatEmptyTextForTab('gift', modeASessionMode),
+    like: chatEmptyTextForTab('like', modeASessionMode),
+    follow: chatEmptyTextForTab('follow', modeASessionMode),
+  };
+
+  const rows = rowsByTab[tab] ?? [];
 
   return {
     panel: 'chat',
@@ -120,11 +175,10 @@ export function buildChatModel(
     tabs: TAB_DEFS,
     activeTab: tab,
     rows,
+    rowsByTab,
+    emptyTextByTab,
     listHeightDp: 164,
-    emptyText:
-      tab === 'chat'
-        ? 'Belum ada chat. Panel tetap mengumpulkan event selama sumber aktif.'
-        : `Belum ada event ${tab}.`,
+    emptyText: emptyTextByTab[tab] ?? chatEmptyTextForTab(tab, modeASessionMode),
   };
 }
 
@@ -148,18 +202,19 @@ export function buildSoundboardModel(
     })),
   };
 
+  const clampPct = (v: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(v) ? v : 0)));
   const sliders: HudSliderModel[] = [
     {
       id: 'soundboardVolume',
       label: 'Volume efek',
-      value: Math.round(soundboardVolume * 100),
+      value: clampPct(soundboardVolume * 100),
       max: 100,
       action: 'soundboard.volume',
     },
     {
       id: 'ttsVolume',
       label: 'Volume TTS',
-      value: Math.round(ttsVolume * 100),
+      value: clampPct(ttsVolume * 100),
       max: 100,
       action: 'tts.volume',
     },
@@ -182,10 +237,21 @@ export function buildMusicModel(options: {
   volume: number;
   queue: HudQueueEntry[];
   requestSourceConnected: boolean;
+  playbackStatus?: 'idle' | 'preparing' | 'playing' | 'paused' | 'completed' | 'stopped' | 'error';
+  errorMessage?: string | null;
 }): HudStateModel {
-  const { nowPlaying, isPlaying, muted, volume, queue, requestSourceConnected } = options;
+  const {
+    nowPlaying,
+    isPlaying,
+    muted,
+    volume,
+    queue,
+    requestSourceConnected,
+    playbackStatus,
+    errorMessage,
+  } = options;
 
-  // Hanya Play/Pause, Next, dan Mute. Next tetap hanya untuk streamer.
+  // Hanya Play/Pause, Next, dan Mute.
   const buttons: HudButtonModel[] = [
     { label: isPlaying ? 'Pause' : 'Play', action: 'music.toggle', active: isPlaying },
     { label: 'Next', action: 'music.next' },
@@ -194,13 +260,32 @@ export function buildMusicModel(options: {
 
   const rows: HudRowModel[] = [];
 
+  const trailingLabel = nowPlaying
+    ? isPlaying
+      ? 'Memutar'
+      : playbackStatus === 'preparing'
+      ? 'Memuat'
+      : playbackStatus === 'error'
+      ? 'Gagal'
+      : 'Dijeda'
+    : '';
+
   rows.push({
     label: nowPlaying ? nowPlaying.title : 'Tidak ada lagu aktif',
     sub: nowPlaying
       ? [nowPlaying.artist, muted ? 'Mute' : undefined].filter(Boolean).join(' · ')
-      : 'Pilih lagu dari Music',
-    trailing: nowPlaying ? (isPlaying ? 'Memutar' : 'Dijeda') : '',
+      : errorMessage
+      ? errorMessage
+      : 'Ketik !play <judul> di chat atau pilih dari Music',
+    trailing: trailingLabel,
   });
+
+  if (errorMessage && nowPlaying) {
+    rows.push({
+      label: 'Info pemutaran',
+      sub: errorMessage,
+    });
+  }
 
   queue.slice(0, 3).forEach((item, index) => {
     rows.push({
@@ -213,17 +298,22 @@ export function buildMusicModel(options: {
     {
       id: 'audioVolume',
       label: 'Volume musik',
-      value: Math.round(volume),
+      value: Math.max(0, Math.min(100, Math.round(Number.isFinite(volume) ? volume : 85))),
       max: 100,
       action: 'music.volume',
     },
   ];
 
-  const statusInfo = nowPlaying
-    ? isPlaying
-      ? status('Memutar', 'ok')
-      : status('Dijeda', 'warn')
-    : status('Tidak ada lagu', 'off');
+  const statusInfo =
+    playbackStatus === 'error'
+      ? status('Gagal putar', 'warn')
+      : playbackStatus === 'preparing'
+      ? status('Memuat lagu', 'warn')
+      : nowPlaying
+      ? isPlaying
+        ? status('Memutar', 'ok')
+        : status('Dijeda', 'warn')
+      : status('Tidak ada lagu', 'off');
 
   return {
     panel: 'music',
@@ -235,7 +325,7 @@ export function buildMusicModel(options: {
     listHeightDp: 128,
     emptyText: requestSourceConnected
       ? 'Antrean kosong.'
-      : 'Antrean kosong. Perintah !play menunggu sumber event TikTok aktif.',
+      : 'Antrean kosong. Perintah !play & !next menunggu sumber event TikTok aktif.',
   };
 }
 
@@ -249,7 +339,7 @@ export function buildMixerModel(options: {
   const { available, metering, muted, level, reason } = options;
 
   const buttons: HudButtonModel[] = [
-    { label: muted ? 'Unmute mic' : 'Mute mic', action: 'mic.mute', active: muted },
+    { label: muted ? 'Unmute monitor' : 'Mute monitor', action: 'mic.mute', active: muted },
   ];
 
   const rows: HudRowModel[] = [];

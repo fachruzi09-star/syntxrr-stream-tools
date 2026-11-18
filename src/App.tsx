@@ -9,6 +9,12 @@ import {
   AlertEvent,
   AlertType,
   OperatingMode,
+  isModeAOperatingMode,
+  isModeBOperatingMode,
+  normalizeOperatingMode,
+  normalizeUnitVolume,
+  unitVolumeToPercent,
+  percentToUnitVolume,
   CanvasOrientation,
   UnifiedQueueItem,
   LocalAudioTrackMeta,
@@ -18,6 +24,10 @@ import {
   MarketplaceItem,
   IntegrationProvider,
   TTSConfig,
+  TikTokConnectorStatus,
+  ModeASessionMode,
+  TikTokAccountState,
+  TikTokConnectionMethod,
 } from './types';
 import {
   StorageService,
@@ -31,13 +41,31 @@ import {
   DEFAULT_SOUNDBOARD,
   DEFAULT_MARKETPLACE_ITEMS,
   DEFAULT_INTEGRATIONS,
+  DEFAULT_TIKTOK_ACCOUNT_STATE,
 } from './services/storage';
 import { triggerHaptic } from './services/haptics';
-import { audioEngine } from './services/localAudioEngine';
+import { audioEngine, type AudioEngineState } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
 import { dispatchSoundboard } from './services/soundboardDispatcher';
 import { ttsService, DEFAULT_TTS_CONFIG } from './services/ttsService';
 import { streamEventBus } from './services/eventBus';
+import {
+  songRequestEngine,
+  type SongRequestItem,
+  type SongRequestState,
+} from './services/songRequestEngine';
+import {
+  tiktokLiveConnector,
+  buildModeAHonestStatus,
+  isValidTikTokTargetUsername,
+  normalizeTikTokTargetUsername,
+  resolveTikTokTargetUsername,
+} from './services/tiktokLiveConnector';
+import {
+  applyVerifiedProfileToAccountState,
+  handleTikTokAuthCallbackUrl,
+  startTikTokOAuthLogin,
+} from './services/tiktokAuthService';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { NavigationDrawerModal } from './components/NavigationDrawerModal';
@@ -58,12 +86,14 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import {
+  checkOverlayPermission,
   hideFloatingHud,
   onFloatingHudClick,
   onHudCommand,
   onHudPanelChanged,
   onHudResync,
   pushHudState,
+  showFloatingHud,
   startCompanion,
   stopCompanion,
   isCompanionRunning,
@@ -81,8 +111,6 @@ import {
   hudEventSourceStatus,
 } from './services/hudController';
 import type { HudChatEntry } from './services/hudController';
-import { micMonitor } from './services/micMonitor';
-import type { MicMonitorState } from './services/micMonitor';
 import { applyTheme } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 
@@ -120,11 +148,30 @@ export default function App() {
   // Marketplace & Integrations State
   const [marketplaceItems, setMarketplaceItems] = useState<MarketplaceItem[]>(DEFAULT_MARKETPLACE_ITEMS);
   const [integrations, setIntegrations] = useState<IntegrationProvider[]>(DEFAULT_INTEGRATIONS);
+  const [tiktokStatus, setTiktokStatus] = useState<TikTokConnectorStatus>(() =>
+    tiktokLiveConnector.getStatus()
+  );
+  const [tiktokAccount, setTiktokAccount] = useState<TikTokAccountState>(
+    DEFAULT_TIKTOK_ACCOUNT_STATE
+  );
+  const [modeASessionMode, setModeASessionMode] = useState<ModeASessionMode>('inactive');
+  const [openTikTokSettingsNonce, setOpenTikTokSettingsNonce] = useState(0);
+  const tiktokAccountRef = useRef<TikTokAccountState>(DEFAULT_TIKTOK_ACCOUNT_STATE);
+  const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    tiktokAccountRef.current = tiktokAccount;
+  }, [tiktokAccount]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Music Center State (HTML5 local audio + Queue + Song Requests)
   const [songRequests, setSongRequests] = useState<SongRequest[]>(DEFAULT_SONG_REQUESTS);
-  const [nowPlayingSong, setNowPlayingSong] = useState<SongRequest | null>(DEFAULT_SONG_REQUESTS[0]);
-  const [isPlayingMusic, setIsPlayingMusic] = useState(false);
+  const [nowPlayingSong, setNowPlayingSong] = useState<SongRequest | null>(null);
+  const [audioEngineState, setAudioEngineState] = useState<AudioEngineState>(audioEngine.getState());
+  const [srState, setSrState] = useState<SongRequestState>(songRequestEngine.getState());
   const [unifiedQueue, setUnifiedQueue] = useState<UnifiedQueueItem[]>([]);
   const [localTracksMeta, setLocalTracksMeta] = useState<LocalAudioTrackMeta[]>([]);
   const [localFilesMap, setLocalFilesMap] = useState<Map<string, File>>(new Map());
@@ -156,6 +203,7 @@ export default function App() {
           savedActiveSceneId,
           savedAlertSettings,
           savedAlertHistory,
+          savedTikTokAccount,
         ] = await Promise.all([
           StorageService.getSettings(),
           StorageService.getPresets(),
@@ -172,6 +220,7 @@ export default function App() {
           StorageService.getActiveSceneId(),
           StorageService.getAlertSettings(),
           StorageService.getAlertHistory(),
+          StorageService.getTikTokAccount(),
         ]);
 
         setSettings(savedSettings);
@@ -187,23 +236,45 @@ export default function App() {
         );
         setSoundboardItems(hydratedSoundboard);
         setMarketplaceItems(savedMarketplace);
-        setIntegrations(savedIntegrations);
+        setTiktokAccount(savedTikTokAccount);
+        const liveNow = tiktokLiveConnector.isConnected();
+        const savedTargetUser = resolveTikTokTargetUsername(savedSettings, savedTikTokAccount);
+        setIntegrations(
+          savedIntegrations.map((item) =>
+            item.id === 'tiktok'
+              ? {
+                  ...item,
+                  status: liveNow ? 'ACTIVE' : 'NOT_CONNECTED',
+                  connectedUser: liveNow
+                    ? tiktokLiveConnector.getStatus().username || savedTargetUser || undefined
+                    : savedTargetUser ||
+                      (savedTikTokAccount.isLinked
+                        ? savedTikTokAccount.displayName || savedTikTokAccount.openId
+                        : undefined),
+                }
+              : item
+          )
+        );
         setTTSConfig(savedTTSConfig);
         ttsService.updateConfig(savedTTSConfig);
         setUnifiedQueue(savedQueue);
         setLocalTracksMeta(savedLocalMeta);
         setSongRequests(savedRequests);
-        const currentPlaying = savedRequests.find((r) => r.status === 'playing') || savedRequests[0] || null;
-        setNowPlayingSong(currentPlaying);
         setScenes(savedScenes);
         setActiveSceneId(savedActiveSceneId);
         setAlertSettings(savedAlertSettings);
         setAlertHistory(savedAlertHistory);
 
-        // Apply audio volume
-        if (savedSettings.audioVolume !== undefined) {
-          audioEngine.setVolume(savedSettings.audioVolume);
-        }
+        // Apply audio volumes (canonical 0.0-1.0)
+        const initialVolumeUnit = normalizeUnitVolume(savedSettings.audioVolume, 0.85);
+        audioEngine.setVolume(initialVolumeUnit);
+        songRequestEngine.configureContext({
+          operatingMode: savedSettings.operatingMode,
+          youtubeApiKey: savedSettings.youtubeApiKey || '',
+          spotifyAccessToken: savedSettings.spotifyAccessToken || '',
+          volumeUnit: initialVolumeUnit,
+        });
+        soundboardEngine.setVolume(normalizeUnitVolume(savedSettings.soundboardVolume, 0.85));
 
         // Apply saved theme immediately on startup
         applyTheme(savedSettings.theme || 'navy_dark');
@@ -245,10 +316,34 @@ export default function App() {
     previousSoundboardUrls.current.clear();
   }, []);
 
-  // Synchronize music player playback state and automatic track progression
+  // Subscribe to Song Request Engine state
   useEffect(() => {
-    const unsub = audioEngine.subscribe((audioState) => {
-      setIsPlayingMusic(audioState.isPlaying);
+    return songRequestEngine.subscribe(setSrState);
+  }, []);
+
+  // Keep Song Request Engine context & local audio library synchronized
+  useEffect(() => {
+    songRequestEngine.configureContext({
+      operatingMode: settings.operatingMode,
+      youtubeApiKey: settings.youtubeApiKey || '',
+      spotifyAccessToken: settings.spotifyAccessToken || '',
+      volumeUnit: normalizeUnitVolume(settings.audioVolume, 0.85),
+    });
+  }, [
+    settings.operatingMode,
+    settings.youtubeApiKey,
+    settings.spotifyAccessToken,
+    settings.audioVolume,
+  ]);
+
+  useEffect(() => {
+    songRequestEngine.registerLocalLibrary(localTracksMeta, localFilesMap);
+  }, [localTracksMeta, localFilesMap]);
+
+  // Synchronize manual audioEngine playback state and automatic track progression
+  useEffect(() => {
+    const unsub = audioEngine.subscribe((state) => {
+      setAudioEngineState(state);
     });
     audioEngine.setOnEnded(() => {
       void handleNextTrack();
@@ -257,15 +352,44 @@ export default function App() {
       unsub();
       audioEngine.setOnEnded(null);
     };
-  }, [unifiedQueue]);
+  }, [unifiedQueue, srState.currentTrack, srState.queue]);
+
+  const handleDismissAlert = useCallback(() => {
+    setActiveFloatingAlert(null);
+  }, []);
 
   // Subscribe to Stream Event Bus to display floating overlay alerts
   useEffect(() => {
+    const mapStreamEventToAlertType = (eventType: string): AlertType => {
+      switch (eventType) {
+        case 'gift':
+          return 'gift';
+        case 'donation':
+          return 'donation';
+        case 'follow':
+        case 'follower':
+          return 'follow';
+        case 'like':
+          return 'like';
+        case 'share':
+          return 'share';
+        case 'sub':
+          return 'sub';
+        case 'chat':
+        case 'chat_event':
+        case 'join':
+        case 'viewer':
+        case 'custom':
+        default:
+          return 'chat_event';
+      }
+    };
+
     const unsubscribe = streamEventBus.subscribe((streamEvent) => {
-      // Map stream event to floating alert banner
+      // Map stream event to floating alert banner using canonical `message` property
       const alert: AlertEvent = {
         id: streamEvent.id,
-        type: streamEvent.type === 'gift' ? 'gift' : streamEvent.type === 'donation' ? 'donation' : 'follow',
+        type: mapStreamEventToAlertType(streamEvent.type),
         username: streamEvent.username,
         message: streamEvent.detail,
         amount: streamEvent.amount,
@@ -274,7 +398,6 @@ export default function App() {
         formattedTime: new Date(streamEvent.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setActiveFloatingAlert(alert);
-      setTimeout(() => setActiveFloatingAlert(null), 5000);
     });
 
     return () => unsubscribe();
@@ -318,7 +441,8 @@ export default function App() {
       const slot = Number(event.key);
       if (!Number.isInteger(slot) || slot < 1 || slot > 4) return;
 
-      void dispatchSoundboard(slot, soundboardItems, settings.soundboardVolume ?? 0.85).then((result) => {
+      const sbVolume = normalizeUnitVolume(settings.soundboardVolume, 0.85);
+      void dispatchSoundboard(slot, soundboardItems, sbVolume).then((result) => {
         switch (result.status) {
           case 'played':
             return;
@@ -375,12 +499,9 @@ export default function App() {
 
   // Mode Selection
   const handleSelectMode = async (mode: OperatingMode) => {
-    const isCurrentModeA =
-      settings.operatingMode === 'MODE_A_TIKTOK_COMPANION' ||
-      settings.operatingMode === 'MODE_A_OVERLAY';
-    const isTargetModeB =
-      mode === 'MODE_B_STREAMING_ENCODER' ||
-      mode === 'MODE_B_ENCODER';
+    const normalizedMode = normalizeOperatingMode(mode);
+    const isCurrentModeA = isModeAOperatingMode(settings.operatingMode);
+    const isTargetModeB = isModeBOperatingMode(normalizedMode);
 
     if (isCurrentModeA && isTargetModeB) {
       try {
@@ -390,7 +511,7 @@ export default function App() {
       }
     }
 
-    const updated = { ...settings, operatingMode: mode };
+    const updated = { ...settings, operatingMode: normalizedMode };
     setSettings(updated);
     await StorageService.saveSettings(updated);
   };
@@ -544,28 +665,367 @@ export default function App() {
     await StorageService.saveIntegrations(newIntegrations);
   };
 
-  // Music Player Controls (HTML5 Audio & Hybrid Queue)
+  // Sinkronisasi status konektor TikTok LIVE Mode A yang sebenarnya (tanpa status palsu).
+  useEffect(() => {
+    const unsubscribe = tiktokLiveConnector.subscribe((nextStatus) => {
+      setTiktokStatus(nextStatus);
+      const trulyConnected =
+        nextStatus.state === 'connected_direct' || nextStatus.state === 'connected_euler';
+      setIntegrations((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          if (item.id !== 'tiktok') return item;
+          const desiredStatus = trulyConnected ? 'ACTIVE' : 'NOT_CONNECTED';
+          const configuredTarget = resolveTikTokTargetUsername(
+            settingsRef.current,
+            tiktokAccountRef.current
+          );
+          const linkedLabel = tiktokAccountRef.current.isLinked
+            ? tiktokAccountRef.current.username ||
+              tiktokAccountRef.current.displayName ||
+              tiktokAccountRef.current.openId
+            : undefined;
+          const desiredUser = nextStatus.username || configuredTarget || linkedLabel;
+          if (item.status !== desiredStatus || item.connectedUser !== desiredUser) {
+            changed = true;
+            return {
+              ...item,
+              status: desiredStatus as IntegrationProvider['status'],
+              connectedUser: desiredUser,
+            };
+          }
+          return item;
+        });
+        return changed ? next : prev;
+      });
+    });
+
+    if (Capacitor.getPlatform() === 'android') {
+      void tiktokLiveConnector.syncFromNative();
+    }
+
+    return () => unsubscribe();
+  }, []);
+
+  // Proses callback OAuth PKCE TikTok (deep link Android atau postMessage popup Web).
+  const processTikTokOAuthCallback = useCallback(async (callbackUrl: string) => {
+    setTiktokAccount((prev) => ({
+      ...prev,
+      accountLinkStatus: 'linking',
+      linkErrorMessage: undefined,
+    }));
+
+    const result = await handleTikTokAuthCallbackUrl(callbackUrl);
+    const current = tiktokAccountRef.current;
+
+    if (result.success) {
+      const nextAccount = await StorageService.saveTikTokAccount(
+        applyVerifiedProfileToAccountState(current, result.profile)
+      );
+      setTiktokAccount(nextAccount);
+
+      const nextSettings: AppSettings = {
+        ...settingsRef.current,
+        tiktokUsername: resolveTikTokTargetUsername(settingsRef.current, nextAccount),
+      };
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
+      await writeSettingsToStorage(nextSettings);
+      return;
+    }
+
+    const failedAccount = await StorageService.saveTikTokAccount({
+      ...current,
+      isLinked: false,
+      openId: undefined,
+      username: undefined,
+      displayName: undefined,
+      avatarUrl: undefined,
+      grantedScopes: undefined,
+      accountLinkStatus: 'failed',
+      linkErrorMessage: result.message,
+    });
+    setTiktokAccount(failedAccount);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const urlListenerPromise = CapApp.addListener('appUrlOpen', ({ url }) => {
+      if (disposed || !url) return;
+      if (url.includes('state=') && (url.includes('code=') || url.includes('error='))) {
+        void processTikTokOAuthCallback(url);
+      }
+    });
+
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (disposed) return;
+      const isAllowedOrigin =
+        event.origin === window.location.origin ||
+        event.origin.endsWith('.run.app') ||
+        event.origin.startsWith('http://localhost');
+      if (!isAllowedOrigin) return;
+      const payload = event.data as { type?: string; url?: string } | null;
+      if (payload?.type === 'TIKTOK_OAUTH_CALLBACK' && typeof payload.url === 'string') {
+        void processTikTokOAuthCallback(payload.url);
+      }
+    };
+    window.addEventListener('message', handleWindowMessage);
+
+    return () => {
+      disposed = true;
+      void urlListenerPromise.then((handle) => handle.remove()).catch(() => {});
+      window.removeEventListener('message', handleWindowMessage);
+    };
+  }, [processTikTokOAuthCallback]);
+
+  const handleLoginTikTok = async () => {
+    setTiktokAccount((prev) => ({
+      ...prev,
+      accountLinkStatus: 'linking',
+      linkErrorMessage: undefined,
+    }));
+
+    const startRes = await startTikTokOAuthLogin();
+    if (!startRes.started) {
+      const failedAccount = await StorageService.saveTikTokAccount({
+        ...tiktokAccountRef.current,
+        isLinked: false,
+        accountLinkStatus: 'failed',
+        linkErrorMessage: startRes.message,
+      });
+      setTiktokAccount(failedAccount);
+    }
+  };
+
+  const handleSaveTikTokTargetUsername = async (rawUsername: string) => {
+    const trimmed = (rawUsername || '').trim();
+    const normalized = trimmed === '' ? '' : normalizeTikTokTargetUsername(trimmed);
+    if (normalized !== '' && !isValidTikTokTargetUsername(normalized)) {
+      return;
+    }
+
+    const nextSettings: AppSettings = {
+      ...settingsRef.current,
+      tiktokUsername: normalized,
+    };
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    await writeSettingsToStorage(nextSettings);
+
+    const resolvedPreview = resolveTikTokTargetUsername(nextSettings, tiktokAccountRef.current);
+    setIntegrations((prev) =>
+      prev.map((item) =>
+        item.id === 'tiktok'
+          ? {
+              ...item,
+              connectedUser: tiktokLiveConnector.isConnected()
+                ? tiktokLiveConnector.getStatus().username || resolvedPreview || undefined
+                : resolvedPreview || undefined,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleUnlinkTikTok = async () => {
+    await tiktokLiveConnector.disconnect();
+    const cleared = await StorageService.clearTikTokAccount();
+    tiktokAccountRef.current = cleared;
+    setTiktokAccount(cleared);
+
+    const persistedSettings = await StorageService.getSettings();
+    settingsRef.current = persistedSettings;
+    setSettings(persistedSettings);
+
+    const remainingTarget = resolveTikTokTargetUsername(persistedSettings, cleared);
+    setIntegrations((prev) =>
+      prev.map((item) =>
+        item.id === 'tiktok'
+          ? {
+              ...item,
+              status: 'NOT_CONNECTED',
+              connectedUser: remainingTarget || undefined,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleUpdateTikTokConnectionPrefs = async (prefs: {
+    connectionMethod: TikTokConnectionMethod;
+    fallbackEnabled: boolean;
+    eulerApiKey?: string;
+    clearEulerApiKey?: boolean;
+  }) => {
+    const savedAccount = await StorageService.saveTikTokAccount({
+      ...tiktokAccountRef.current,
+      connectionMethod: prefs.connectionMethod,
+      fallbackEnabled: prefs.fallbackEnabled,
+    });
+    setTiktokAccount(savedAccount);
+
+    const nextSettings: AppSettings = {
+      ...settingsRef.current,
+      tiktokConnectionMethod: prefs.connectionMethod,
+      tiktokEulerFallbackEnabled: prefs.fallbackEnabled,
+      ...(prefs.clearEulerApiKey
+        ? { eulerStreamApiKey: '' }
+        : prefs.eulerApiKey !== undefined
+        ? { eulerStreamApiKey: prefs.eulerApiKey }
+        : {}),
+    };
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    await writeSettingsToStorage(nextSettings);
+  };
+
+  const handleConnectTikTok = async (
+    username: string,
+    eulerApiKey?: string,
+    allowEulerFallback?: boolean,
+    connectionMethod?: TikTokConnectionMethod
+  ) => {
+    const normalized = normalizeTikTokTargetUsername(username);
+    if (!isValidTikTokTargetUsername(normalized)) {
+      return;
+    }
+
+    await tiktokLiveConnector.connect({
+      username: normalized,
+      eulerApiKey: eulerApiKey ?? settingsRef.current.eulerStreamApiKey,
+      allowEulerFallback:
+        allowEulerFallback ??
+        tiktokAccountRef.current.fallbackEnabled ??
+        settingsRef.current.tiktokEulerFallbackEnabled ??
+        true,
+      connectionMethod:
+        connectionMethod ??
+        tiktokAccountRef.current.connectionMethod ??
+        settingsRef.current.tiktokConnectionMethod ??
+        'direct',
+    });
+  };
+
+  const handleDisconnectTikTok = async () => {
+    await tiktokLiveConnector.disconnect();
+  };
+
+  const handleOpenTikTokConnection = () => {
+    setOpenTikTokSettingsNonce((n) => n + 1);
+    handleNavigate('integrations');
+  };
+
+  const mapSrItemToUnifiedQueueItem = (
+    item: SongRequestItem,
+    status: 'playing' | 'approved'
+  ): UnifiedQueueItem => ({
+    id: item.id,
+    title: item.title,
+    artist: item.artist,
+    source:
+      item.sourceType === 'local_file'
+        ? 'local'
+        : item.sourceType === 'youtube_metadata'
+        ? 'youtube'
+        : item.sourceType === 'spotify_metadata'
+        ? 'spotify'
+        : 'viewer_request',
+    externalUrl: item.externalUrl,
+    thumbnailUrl: item.thumbnailUrl,
+    duration: item.durationSec,
+    requesterName: item.requester,
+    platform: item.platform || 'TikTok',
+    addedAt: item.requestedAt,
+    status,
+    notes: item.notes,
+    localFileKey: item.localFileId,
+  });
+
+  const srActiveIds = new Set<string>([
+    ...(srState.currentTrack ? [srState.currentTrack.id] : []),
+    ...srState.queue.map((item) => item.id),
+  ]);
+
+  const combinedUnifiedQueue: UnifiedQueueItem[] = [
+    ...(srState.currentTrack
+      ? [mapSrItemToUnifiedQueueItem(srState.currentTrack, 'playing')]
+      : []),
+    ...srState.queue.map((item) => mapSrItemToUnifiedQueueItem(item, 'approved')),
+    ...unifiedQueue.filter((item) => !srActiveIds.has(item.id)),
+  ];
+
+  const effectiveNowPlayingSong: SongRequest | null = srState.currentTrack
+    ? {
+        id: srState.currentTrack.id,
+        title: srState.currentTrack.title,
+        artist: srState.currentTrack.artist,
+        duration: srState.durationSec || srState.currentTrack.durationSec,
+        requesterName: srState.currentTrack.requester,
+        platform: srState.currentTrack.platform || 'TikTok',
+        status: srState.isPlaying ? 'playing' : 'queued',
+        requestedAt: srState.currentTrack.requestedAt,
+        source:
+          srState.currentTrack.sourceType === 'local_file'
+            ? 'local'
+            : srState.currentTrack.sourceType === 'youtube_metadata'
+            ? 'youtube'
+            : srState.currentTrack.sourceType === 'spotify_metadata'
+            ? 'spotify'
+            : 'viewer_request',
+        externalUrl: srState.currentTrack.externalUrl,
+        thumbnailUrl: srState.currentTrack.thumbnailUrl,
+      }
+    : audioEngineState.currentTrackId
+    ? {
+        id: audioEngineState.currentTrackId,
+        title: audioEngineState.title,
+        artist: audioEngineState.artist,
+        duration: Math.round(audioEngineState.duration || 0),
+        requesterName: nowPlayingSong?.requesterName || 'Streamer',
+        platform: nowPlayingSong?.platform || 'Local',
+        status: audioEngineState.isPlaying ? 'playing' : 'queued',
+        requestedAt: nowPlayingSong?.requestedAt || Date.now(),
+      }
+    : nowPlayingSong;
+
+  const effectiveIsPlayingMusic = srState.currentTrack
+    ? srState.isPlaying
+    : audioEngineState.isPlaying;
+
+  // Music Player Controls (Mode A SongRequestEngine + HTML5 LocalAudioEngine)
   const handleTogglePlayMusic = () => {
+    if (srState.currentTrack || srState.queue.length > 0) {
+      if (audioEngine.getState().isPlaying) {
+        audioEngine.pause();
+      }
+      void songRequestEngine.togglePlayPause();
+      return;
+    }
+
     const audioState = audioEngine.getState();
     if (audioState.isPlaying) {
       audioEngine.pause();
-      setIsPlayingMusic(false);
+    } else if (audioState.currentTrackId) {
+      void audioEngine.play();
     } else {
-      if (audioState.currentTrackId) {
-        void audioEngine.play();
-        setIsPlayingMusic(true);
-      } else {
-        const activeSong = unifiedQueue.find((s) => s.status === 'playing') || unifiedQueue[0];
-        if (activeSong && activeSong.externalUrl) {
-          void audioEngine.loadAndPlayUrl(activeSong.id, activeSong.title, activeSong.artist, activeSong.externalUrl);
-        } else {
-          setIsPlayingMusic((prev) => !prev);
+      const activeSong = unifiedQueue.find((s) => s.status === 'playing') || unifiedQueue[0];
+      if (activeSong?.localFileKey) {
+        const file = localFilesMap.get(activeSong.localFileKey);
+        if (file) {
+          void audioEngine.loadAndPlayFile(activeSong.id, activeSong.title, activeSong.artist, file);
         }
+      } else if (activeSong?.externalUrl) {
+        void audioEngine.loadAndPlayUrl(activeSong.id, activeSong.title, activeSong.artist, activeSong.externalUrl);
       }
     }
   };
 
   const handleNextTrack = async () => {
+    if (srState.currentTrack || srState.queue.length > 0) {
+      await songRequestEngine.skipTrack('Streamer');
+      return;
+    }
+
     const queued = unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending');
     if (queued.length > 0) {
       const nextItem = queued[0];
@@ -588,13 +1048,15 @@ export default function App() {
         requestedAt: nextItem.addedAt,
       };
       setNowPlayingSong(legacyItem);
-      if (nextItem.externalUrl) {
+      if (nextItem.localFileKey && localFilesMap.has(nextItem.localFileKey)) {
+        const file = localFilesMap.get(nextItem.localFileKey)!;
+        await audioEngine.loadAndPlayFile(nextItem.id, nextItem.title, nextItem.artist, file);
+      } else if (nextItem.externalUrl && nextItem.source === 'local') {
         await audioEngine.loadAndPlayUrl(nextItem.id, nextItem.title, nextItem.artist, nextItem.externalUrl);
       }
-      setIsPlayingMusic(true);
     } else {
       audioEngine.pause();
-      setIsPlayingMusic(false);
+      setNowPlayingSong(null);
     }
   };
 
@@ -621,10 +1083,12 @@ export default function App() {
         requestedAt: prevItem.addedAt,
       };
       setNowPlayingSong(legacyItem);
-      if (prevItem.externalUrl) {
+      if (prevItem.localFileKey && localFilesMap.has(prevItem.localFileKey)) {
+        const file = localFilesMap.get(prevItem.localFileKey)!;
+        await audioEngine.loadAndPlayFile(prevItem.id, prevItem.title, prevItem.artist, file);
+      } else if (prevItem.externalUrl && prevItem.source === 'local') {
         await audioEngine.loadAndPlayUrl(prevItem.id, prevItem.title, prevItem.artist, prevItem.externalUrl);
       }
-      setIsPlayingMusic(true);
     }
   };
 
@@ -637,6 +1101,15 @@ export default function App() {
     const updated = [...songRequests, newSong];
     setSongRequests(updated);
     await StorageService.saveSongRequests(updated);
+
+    if (isModeAOperatingMode(settings.operatingMode) && newRequest.title?.trim()) {
+      await songRequestEngine.handlePlayCommand(
+        newRequest.requesterName || 'Streamer',
+        newRequest.title.trim(),
+        false
+      );
+      return;
+    }
 
     const queueItem: UnifiedQueueItem = {
       id: newSong.id,
@@ -654,18 +1127,11 @@ export default function App() {
     await StorageService.saveUnifiedQueue(updatedQueue);
   };
 
-  // Handler terbaru untuk listener yang dipasang sekali (menghindari closure basi).
-  const addSongRequestRef = useRef(handleAddSongRequest);
-  useEffect(() => {
-    addSongRequestRef.current = handleAddSongRequest;
-  });
-
   /**
    * Buffer event LIVE untuk panel Chat HUD.
    * - terbatas di memori (HUD_EVENT_BUFFER_LIMIT), terbaru lebih dulu
    * - identitas event unik agar tidak duplikat saat reconnect
-   * - perintah viewer "!play <judul>" menambah antrean lagu yang sama dengan Music
-   *   ("!next" sengaja TIDAK didukung: Next hanya untuk streamer)
+   * - perintah !play / !next Mode A diproses oleh songRequestEngine.
    */
   useEffect(() => {
     type BusEvent = ReturnType<typeof streamEventBus.getHistory>[number];
@@ -693,31 +1159,19 @@ export default function App() {
 
     return streamEventBus.subscribe((streamEvent) => {
       pushEvent(streamEvent);
-
-      if (streamEvent.type !== 'chat') return;
-      const match = /^!play\s+(.+)$/i.exec(streamEvent.detail.trim());
-      if (!match) return;
-      const title = match[1].trim().slice(0, 120);
-      if (!title) return;
-
-      void addSongRequestRef.current({
-        title,
-        artist: 'Song Request',
-        duration: 180,
-        requesterName: streamEvent.username || 'Viewer',
-        platform: 'TikTok',
-        status: 'queued',
-        source: 'viewer_request',
-      });
     });
   }, []);
 
   const handleDeleteSongRequest = async (id: string) => {
     const updated = songRequests.filter((s) => s.id !== id);
     setSongRequests(updated);
+    if (srState.currentTrack?.id === id) {
+      await songRequestEngine.stop();
+    } else if (srState.queue.some((q) => q.id === id)) {
+      songRequestEngine.removeQueueItem(id);
+    }
     if (nowPlayingSong?.id === id) {
-      const nextSong = updated[0] || null;
-      setNowPlayingSong(nextSong);
+      setNowPlayingSong(null);
     }
     await StorageService.saveSongRequests(updated);
 
@@ -734,7 +1188,6 @@ export default function App() {
     });
     setSongRequests(updated);
     setNowPlayingSong(song);
-    setIsPlayingMusic(true);
     await StorageService.saveSongRequests(updated);
   };
 
@@ -812,9 +1265,31 @@ export default function App() {
     await StorageService.saveLocalTracksMeta(updated);
   };
 
-  const handleUpdateUnifiedQueue = async (queue: UnifiedQueueItem[]) => {
-    setUnifiedQueue(queue);
-    await StorageService.saveUnifiedQueue(queue);
+  const handleUpdateUnifiedQueue = async (nextQueue: UnifiedQueueItem[]) => {
+    const currentSrId = srState.currentTrack?.id;
+    const queuedSrMap = new Map(srState.queue.map((item) => [item.id, item]));
+
+    if (currentSrId && !nextQueue.some((item) => item.id === currentSrId)) {
+      await songRequestEngine.stop();
+    }
+
+    const updatedSrQueue: SongRequestItem[] = [];
+    const manualQueue: UnifiedQueueItem[] = [];
+    for (const item of nextQueue) {
+      if (item.id === currentSrId) {
+        continue;
+      }
+      const existingSr = queuedSrMap.get(item.id);
+      if (existingSr) {
+        updatedSrQueue.push(existingSr);
+      } else {
+        manualQueue.push(item);
+      }
+    }
+
+    songRequestEngine.setQueue(updatedSrQueue);
+    setUnifiedQueue(manualQueue);
+    await StorageService.saveUnifiedQueue(manualQueue);
   };
 
   const handleUpdateSpotifyToken = async (token: string) => {
@@ -898,7 +1373,6 @@ export default function App() {
   const [hudUnread, setHudUnread] = useState(0);
   const [hudPlayingSoundId, setHudPlayingSoundId] = useState<string | null>(null);
   const [musicMuted, setMusicMuted] = useState(false);
-  const [micState, setMicState] = useState<MicMonitorState>(micMonitor.getState());
 
   /**
    * Bubble native mengirim event "floatingHudClick" lewat bridge. Listener didaftarkan
@@ -937,13 +1411,32 @@ export default function App() {
   useEffect(() => {
     if (!isNativeAndroidPlatform) return;
     let cancelled = false;
-    void isCompanionRunning()
-      .then((res) => {
-        if (!cancelled) setCompanionRunning(!!res?.isRunning);
-      })
-      .catch(() => {});
+    const syncNativeSessionState = () => {
+      void isCompanionRunning()
+        .then((res) => {
+          if (cancelled) return;
+          const running = !!res?.isRunning;
+          setCompanionRunning(running);
+          setModeASessionMode((prev) => {
+            if (!running) return 'inactive';
+            if (tiktokLiveConnector.isActiveSession()) return 'with_live_connector';
+            return prev === 'inactive' ? 'without_live_connection' : prev;
+          });
+        })
+        .catch(() => {});
+    };
+
+    syncNativeSessionState();
+
+    const appStateListener = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive || cancelled) return;
+      syncNativeSessionState();
+      void tiktokLiveConnector.syncFromNative();
+    });
+
     return () => {
       cancelled = true;
+      void appStateListener.then((handle) => handle.remove()).catch(() => {});
     };
   }, [isNativeAndroidPlatform]);
 
@@ -956,22 +1449,107 @@ export default function App() {
   // Live Control dan Settings sengaja tidak lagi menjadi ikon HUD.
 
   /**
-   * Mixer HUD memakai handleUpdateSettings yang sudah men-debounce penulisan storage
-   * (300-500 ms), jadi slider tetap responsif tanpa menulis setiap piksel.
+   * Mixer FloatingHudPanel mengirim slider UI (0–100 untuk audio/soundboard, 0–200 untuk micGain).
+   * Nilai volume audio disimpan ke settings pada skala kanonik 0.0–1.0.
    */
-  const handleHudMixerChange = (key: HudMixerKey, value: number) => {
+  const handleHudMixerChange = (key: HudMixerKey, sliderValue: number) => {
     const next: AppSettings = { ...settings };
-    if (key === 'audioVolume') next.audioVolume = value;
-    else if (key === 'soundboardVolume') next.soundboardVolume = value;
-    else next.micGain = value;
+    if (key === 'audioVolume') {
+      const unit = percentToUnitVolume(sliderValue, 0.85);
+      next.audioVolume = unit;
+      if (!musicMuted) audioEngine.setVolume(unit);
+      songRequestEngine.setVolume(Math.round(unit * 100));
+    } else if (key === 'soundboardVolume') {
+      const unit = percentToUnitVolume(sliderValue, 0.85);
+      next.soundboardVolume = unit;
+      soundboardEngine.setVolume(unit);
+    } else {
+      const safeGain = Number.isFinite(sliderValue) ? sliderValue : (settings.micGain ?? 100);
+      next.micGain = Math.max(0, Math.min(200, Math.round(safeGain)));
+    }
     void handleUpdateSettings(next);
+  };
+
+  const maybeShowNativeFloatingHud = async () => {
+    if (!isNativeAndroidPlatform || settingsRef.current.hudEnabled === false) return;
+    const perm = await checkOverlayPermission();
+    if (!perm.granted) return;
+    await showFloatingHud({
+      sizeDp: settingsRef.current.hudButtonSize ?? 48,
+      opacity: settingsRef.current.hudOpacity ?? 92,
+      position: settingsRef.current.hudPosition === 'left' ? 'left' : 'right',
+    });
+  };
+
+  // Kondisi C: Sambungkan & mulai (Mode A dengan konektor TikTok LIVE).
+  const handleStartModeAWithConnection = async () => {
+    const acct = tiktokAccountRef.current;
+    const activeSettings = settingsRef.current;
+    const targetUsername = resolveTikTokTargetUsername(activeSettings, acct);
+    if (!isValidTikTokTargetUsername(targetUsername)) {
+      return;
+    }
+
+    if (isNativeAndroidPlatform) {
+      const res = await startCompanion();
+      setCompanionRunning(!!res?.isRunning);
+      if (res?.isRunning) {
+        setModeASessionMode('with_live_connector');
+        await maybeShowNativeFloatingHud();
+      }
+    } else {
+      setModeASessionMode('with_live_connector');
+    }
+
+    await tiktokLiveConnector.connect({
+      username: targetUsername,
+      connectionMethod: acct.connectionMethod ?? activeSettings.tiktokConnectionMethod ?? 'direct',
+      eulerApiKey: activeSettings.eulerStreamApiKey,
+      allowEulerFallback: acct.fallbackEnabled ?? activeSettings.tiktokEulerFallbackEnabled ?? true,
+    });
+  };
+
+  // Kondisi D: Mulai tanpa koneksi (overlay/companion tetap aktif tanpa memanggil konektor/WebSocket TikTok).
+  const handleStartModeAWithoutConnection = async () => {
+    if (tiktokLiveConnector.isActiveSession() || tiktokLiveConnector.isConnected()) {
+      await tiktokLiveConnector.disconnect();
+    }
+
+    if (isNativeAndroidPlatform) {
+      const res = await startCompanion();
+      setCompanionRunning(!!res?.isRunning);
+      setModeASessionMode(res?.isRunning ? 'without_live_connection' : 'inactive');
+      if (res?.isRunning) {
+        await maybeShowNativeFloatingHud();
+      }
+    } else {
+      setModeASessionMode('without_live_connection');
+    }
+  };
+
+  const handleStopModeASession = async () => {
+    await tiktokLiveConnector.disconnect();
+    await hideFloatingHud();
+    const res = await stopCompanion();
+    setCompanionRunning(!!res?.isRunning);
+    setModeASessionMode('inactive');
   };
 
   const handleToggleCompanion = async () => {
     try {
-      const res = companionRunning ? await stopCompanion() : await startCompanion();
+      if (companionRunning) {
+        await handleStopModeASession();
+        return;
+      }
+      const res = await startCompanion();
       setCompanionRunning(!!res?.isRunning);
-      if (!res?.success && res?.message) console.warn(res.message);
+      if (res?.isRunning) {
+        setModeASessionMode(
+          tiktokLiveConnector.isActiveSession() ? 'with_live_connector' : 'without_live_connection'
+        );
+      } else if (res?.message) {
+        console.warn(res.message);
+      }
     } catch (err) {
       console.warn('Gagal mengubah status Companion Service:', err);
     }
@@ -1042,8 +1620,11 @@ export default function App() {
         if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
       });
       previousSoundboardUrls.current.clear();
+      await tiktokLiveConnector.disconnect();
       await StorageService.resetToDefaults();
       setSettings(DEFAULT_SETTINGS);
+      setTiktokAccount(DEFAULT_TIKTOK_ACCOUNT_STATE);
+      setModeASessionMode('inactive');
       setPresets(DEFAULT_PRESETS);
       setActivePresetId(DEFAULT_PRESETS[0].id);
       setStudioElements(DEFAULT_STUDIO_ELEMENTS);
@@ -1057,27 +1638,21 @@ export default function App() {
   };
 
   const handleSimulateEventFromDeck = (type: string, detail: string, amount?: number) => {
-    const newEvent: AlertEvent = {
-      id: `deck_evt_${Date.now()}`,
-      type: (type as AlertType) || 'gift',
-      username: 'Viewer_Deck',
-      detail,
-      amount,
-      timestamp: Date.now(),
-      formattedTime: new Date().toLocaleTimeString('id-ID'),
-    };
-    setActiveFloatingAlert(newEvent);
+    const timestamp = Date.now();
+    const id = `deck_evt_${timestamp}`;
+    const eventType = type || 'gift';
     streamEventBus.emit({
-      id: newEvent.id,
-      type: newEvent.type as any,
-      username: newEvent.username,
-      detail: newEvent.detail || '',
-      amount: newEvent.amount,
-      timestamp: newEvent.timestamp,
+      id,
+      type: eventType as any,
+      username: 'Viewer_Deck',
+      detail: detail || '',
+      amount,
+      timestamp,
+      isSimulation: true,
     });
     if (ttsConfig.enabled) {
       ttsService.prime();
-      ttsService.speakEvent(newEvent.type, newEvent.username, newEvent.detail);
+      ttsService.speakEvent(eventType, 'Viewer_Deck', detail);
     }
   };
 
@@ -1099,25 +1674,16 @@ export default function App() {
   // Dinaikkan saat native meminta resync agar model panel dikirim ulang setelah app kembali foreground.
   const [hudResyncNonce, setHudResyncNonce] = useState(0);
 
-  const musicVolumeUnit = (() => {
-    const raw = settings.audioVolume ?? 0.85;
-    return raw <= 1 ? raw : raw / 100;
-  })();
-  const soundboardVolumeUnit = (() => {
-    const raw = settings.soundboardVolume ?? 0.85;
-    return raw <= 1 ? raw : raw / 100;
-  })();
-  const ttsVolumeUnit = (() => {
-    const raw = ttsConfig.volume ?? 0.9;
-    return raw <= 1 ? raw : raw / 100;
-  })();
+  const musicVolumeUnit = normalizeUnitVolume(settings.audioVolume, 0.85);
+  const soundboardVolumeUnit = normalizeUnitVolume(settings.soundboardVolume, 0.85);
+  const ttsVolumeUnit = normalizeUnitVolume(ttsConfig.volume, 0.9);
 
   /** Tap sound di HUD: memakai engine Soundboard yang sama, satu suara pada satu waktu. */
   const handleHudPlaySound = (soundId: string) => {
     const item = soundboardItems.find((sound) => sound.id === soundId);
     if (!item) return;
 
-    void dispatchSoundboard(item, soundboardItems, settings.soundboardVolume ?? 0.85).then((result) => {
+    void dispatchSoundboard(item, soundboardItems, soundboardVolumeUnit).then((result) => {
       if (result.status !== 'played') return;
 
       setHudPlayingSoundId(item.id);
@@ -1134,32 +1700,27 @@ export default function App() {
     setMusicMuted((prev) => {
       const next = !prev;
       audioEngine.setVolume(next ? 0 : musicVolumeUnit);
+      songRequestEngine.setMuted(next);
       return next;
     });
   };
 
   const handleHudMusicVolume = (percent: number) => {
-    const clamped = Math.max(0, Math.min(100, percent));
-    if (!musicMuted) audioEngine.setVolume(clamped / 100);
-    const raw = settings.audioVolume ?? 0.85;
-    handleHudMixerChange('audioVolume', raw <= 1 ? clamped / 100 : clamped);
+    const unit = percentToUnitVolume(percent, 0.85);
+    if (!musicMuted) audioEngine.setVolume(unit);
+    songRequestEngine.setVolume(Math.round(unit * 100));
+    void handleUpdateSettings({ ...settings, audioVolume: unit });
   };
 
   const handleHudSoundboardVolume = (percent: number) => {
-    const clamped = Math.max(0, Math.min(100, percent));
-    soundboardEngine.setVolume(clamped / 100);
-    const raw = settings.soundboardVolume ?? 0.85;
-    handleHudMixerChange('soundboardVolume', raw <= 1 ? clamped / 100 : clamped);
+    const unit = percentToUnitVolume(percent, 0.85);
+    soundboardEngine.setVolume(unit);
+    void handleUpdateSettings({ ...settings, soundboardVolume: unit });
   };
 
   const handleHudTtsVolume = (percent: number) => {
-    const clamped = Math.max(0, Math.min(100, percent));
-    const raw = ttsConfig.volume ?? 0.9;
-    void handleUpdateTTSConfig({ ...ttsConfig, volume: raw <= 1 ? clamped / 100 : clamped });
-  };
-
-  const handleHudToggleMicMute = () => {
-    micMonitor.setMuted(!micState.muted);
+    const unit = percentToUnitVolume(percent, 0.9);
+    void handleUpdateTTSConfig({ ...ttsConfig, volume: unit });
   };
 
   const hudCommandHandlersRef = useRef({
@@ -1170,7 +1731,6 @@ export default function App() {
     musicVolume: handleHudMusicVolume,
     soundboardVolume: handleHudSoundboardVolume,
     ttsVolume: handleHudTtsVolume,
-    micMute: handleHudToggleMicMute,
   });
 
   useEffect(() => {
@@ -1182,7 +1742,6 @@ export default function App() {
       musicVolume: handleHudMusicVolume,
       soundboardVolume: handleHudSoundboardVolume,
       ttsVolume: handleHudTtsVolume,
-      micMute: handleHudToggleMicMute,
     };
   });
 
@@ -1194,22 +1753,7 @@ export default function App() {
     hudEventsRef.current = hudEvents;
   }, [hudEvents]);
 
-  // Level mikrofon hanya diukur selama panel Audio Mixer terbuka.
-  useEffect(() => {
-    if (!isNativeAndroidPlatform) return;
-    return micMonitor.subscribe(setMicState);
-  }, [isNativeAndroidPlatform]);
-
-  useEffect(() => {
-    if (!isNativeAndroidPlatform) return;
-    if (hudPanel !== 'mixer') {
-      micMonitor.stop();
-      return;
-    }
-
-    void micMonitor.start();
-    return () => micMonitor.stop();
-  }, [hudPanel, isNativeAndroidPlatform]);
+  // Pemantauan level mikrofon dan mute/unmute Audio Mixer dijalankan langsung oleh NativeMicMonitor di Android.
 
   // Event native: panel yang dibuka/ditutup + perintah dari panel.
   useEffect(() => {
@@ -1272,7 +1816,7 @@ export default function App() {
           handlers.musicVolume(Number(value) || 0);
           return;
         case 'mic.mute':
-          handlers.micMute();
+          // Dieksekusi langsung oleh FloatingCompanionPlugin + NativeMicMonitor di sisi native.
           return;
         default:
           return;
@@ -1289,6 +1833,7 @@ export default function App() {
     void onHudResync(() => {
       if (disposed) return;
       hudLastModelRef.current = '';
+      void tiktokLiveConnector.syncFromNative();
       setHudResyncNonce((value) => value + 1);
     }).then((handle) => {
       if (!handle) return;
@@ -1309,7 +1854,14 @@ export default function App() {
     (panel: HudPanelId): HudStateModel => {
       const chatEvents = hudChatPaused ? hudPausedSnapshot ?? hudEvents : hudEvents;
       if (panel === 'chat') {
-        return buildChatModel(chatEvents, hudChatTab, hudChatPaused, hudUnread);
+        return buildChatModel(
+          chatEvents,
+          hudChatTab,
+          hudChatPaused,
+          hudUnread,
+          tiktokStatus.state,
+          modeASessionMode
+        );
       }
       if (panel === 'soundboard') {
         return buildSoundboardModel(
@@ -1326,29 +1878,35 @@ export default function App() {
         );
       }
       if (panel === 'music') {
+        const isLiveTransportConnected =
+          tiktokStatus.state === 'connected_direct' || tiktokStatus.state === 'connected_euler';
         return buildMusicModel({
-          nowPlaying: nowPlayingSong
-            ? { title: nowPlayingSong.title, artist: nowPlayingSong.artist }
+          nowPlaying: effectiveNowPlayingSong
+            ? { title: effectiveNowPlayingSong.title, artist: effectiveNowPlayingSong.artist }
             : null,
-          isPlaying: isPlayingMusic,
+          isPlaying: effectiveIsPlayingMusic,
           muted: musicMuted,
           volume: Math.round(musicVolumeUnit * 100),
-          queue: unifiedQueue
+          queue: combinedUnifiedQueue
             .filter(
               (item) =>
                 item.status === 'approved' || item.status === 'pending' || item.status === 'playing'
             )
+            .filter((item) => item.id !== effectiveNowPlayingSong?.id)
             .slice(0, 6)
             .map((item) => ({ id: item.id, title: item.title, artist: item.artist })),
-          requestSourceConnected: hudEventSourceStatus(hudEvents).tone === 'ok',
+          requestSourceConnected:
+            isLiveTransportConnected ||
+            hudEventSourceStatus(hudEvents, tiktokStatus.state, modeASessionMode).tone === 'ok',
+          playbackStatus: srState.currentTrack ? srState.playbackStatus : undefined,
+          errorMessage: srState.lastError,
         });
       }
       return buildMixerModel({
-        available: micState.available,
-        metering: micState.metering,
-        muted: micState.muted,
-        level: micState.level,
-        reason: micState.reason,
+        available: false,
+        metering: false,
+        muted: false,
+        level: 0,
       });
     },
     [
@@ -1357,16 +1915,20 @@ export default function App() {
       hudEvents,
       hudChatTab,
       hudUnread,
+      tiktokStatus.state,
+      modeASessionMode,
       soundboardItems,
       hudPlayingSoundId,
       soundboardVolumeUnit,
       ttsVolumeUnit,
-      nowPlayingSong,
-      isPlayingMusic,
+      effectiveNowPlayingSong,
+      effectiveIsPlayingMusic,
       musicMuted,
       musicVolumeUnit,
-      unifiedQueue,
-      micState,
+      combinedUnifiedQueue,
+      srState.playbackStatus,
+      srState.lastError,
+      srState.currentTrack,
     ]
   );
 
@@ -1374,15 +1936,16 @@ export default function App() {
   // panel mana pun tetap dapat digambar ketika WebView ditangguhkan Android di background.
   const sendHudSnapshot = useCallback(() => {
     if (!isNativeAndroidPlatform) return;
-    const snapshot = buildHudSnapshot({
+    const panels = {
       chat: buildHudModelFor('chat'),
       soundboard: buildHudModelFor('soundboard'),
       music: buildHudModelFor('music'),
       mixer: buildHudModelFor('mixer'),
-    });
-    const serialized = JSON.stringify(snapshot);
-    if (serialized === hudLastModelRef.current) return;
-    hudLastModelRef.current = serialized;
+    };
+    const serializedPanels = JSON.stringify(panels);
+    if (serializedPanels === hudLastModelRef.current) return;
+    hudLastModelRef.current = serializedPanels;
+    const snapshot = buildHudSnapshot(panels);
     void pushHudState(snapshot);
   }, [buildHudModelFor, isNativeAndroidPlatform]);
 
@@ -1429,7 +1992,33 @@ export default function App() {
     );
   }
 
-  const pendingRequestsCount = unifiedQueue.filter((s) => s.status === 'pending').length;
+  const pendingRequestsCount = combinedUnifiedQueue.filter((s) => s.status === 'pending' || s.status === 'approved').length;
+  const modeAHonestStatus = buildModeAHonestStatus({
+    account: tiktokAccount,
+    connector: tiktokStatus,
+    companionRunning,
+    sessionMode: modeASessionMode,
+  });
+
+  const headerStatusLabel = isModeAOperatingMode(settings.operatingMode)
+    ? companionRunning || modeASessionMode !== 'inactive'
+      ? `${modeAHonestStatus.modeASession.label} • ${modeAHonestStatus.eventTransport.label}`
+      : modeAHonestStatus.accountLinked.tone === 'ok'
+      ? `Akun: ${modeAHonestStatus.accountLinked.label} • Sesi Nonaktif`
+      : 'Sesi Mode A Nonaktif'
+    : 'Mode B Standby';
+
+  const headerStatusTone: 'ok' | 'warn' | 'error' | 'off' = isModeAOperatingMode(
+    settings.operatingMode
+  )
+    ? modeAHonestStatus.eventTransport.tone === 'ok'
+      ? 'ok'
+      : modeAHonestStatus.eventTransport.tone === 'error'
+      ? 'error'
+      : companionRunning || modeASessionMode !== 'inactive'
+      ? 'warn'
+      : 'off'
+    : 'off';
 
   return (
     <I18nProvider language={settings.language || 'id-ID'}>
@@ -1439,6 +2028,8 @@ export default function App() {
         activeNav={activeNav}
         operatingMode={settings.operatingMode}
         activePreset={activePreset}
+        honestStatusLabel={headerStatusLabel}
+        honestStatusTone={headerStatusTone}
         onNavigate={handleNavigate}
         onOpenModeModal={() => setIsModeModalOpen(true)}
         onOpenDrawer={() => setIsDrawerOpen(true)}
@@ -1447,7 +2038,7 @@ export default function App() {
       {/* Floating Alert Banner Overlay */}
       <AlertBannerOverlay
         currentAlert={activeFloatingAlert}
-        onDismiss={() => setActiveFloatingAlert(null)}
+        onDismiss={handleDismissAlert}
       />
 
       {/* Mode A / Mode B Launcher Preview Modal */}
@@ -1475,6 +2066,14 @@ export default function App() {
             settings={settings}
             activePreset={activePreset}
             integrations={integrations}
+            tiktokAccount={tiktokAccount}
+            tiktokStatus={tiktokStatus}
+            companionRunning={companionRunning}
+            modeASessionMode={modeASessionMode}
+            onStartModeAWithConnection={handleStartModeAWithConnection}
+            onStartModeAWithoutConnection={handleStartModeAWithoutConnection}
+            onStopModeASession={handleStopModeASession}
+            onOpenTikTokConnection={handleOpenTikTokConnection}
             onSelectMode={handleSelectMode}
             onNavigate={handleNavigate}
             onOpenModeModal={() => setIsModeModalOpen(true)}
@@ -1538,8 +2137,8 @@ export default function App() {
           <MusicCenterView
             // Stage 1 Backwards Compatible Props
             songRequests={songRequests}
-            nowPlayingSong={nowPlayingSong}
-            isPlaying={isPlayingMusic}
+            nowPlayingSong={effectiveNowPlayingSong}
+            isPlaying={effectiveIsPlayingMusic}
             onTogglePlay={handleTogglePlayMusic}
             onNextTrack={handleNextTrack}
             onPrevTrack={handlePrevTrack}
@@ -1548,7 +2147,7 @@ export default function App() {
             onLoadPresetPack={handleLoadPresetPack}
             onSetNowPlaying={handleSetNowPlaying}
             // Stage 2 Upgraded Props
-            unifiedQueue={unifiedQueue}
+            unifiedQueue={combinedUnifiedQueue}
             onUpdateUnifiedQueue={handleUpdateUnifiedQueue}
             localTracksMeta={localTracksMeta}
             localFilesMap={localFilesMap}
@@ -1557,6 +2156,7 @@ export default function App() {
             settings={settings}
             onNavigateToSettings={() => setActiveNav('settings')}
             onUpdateSpotifyToken={handleUpdateSpotifyToken}
+            songRequestState={srState}
           />
         )}
 
@@ -1572,6 +2172,19 @@ export default function App() {
           <IntegrationsView
             integrations={integrations}
             onUpdateIntegrations={handleUpdateIntegrations}
+            settings={settings}
+            onUpdateSettings={handleUpdateSettings}
+            tiktokStatus={tiktokStatus}
+            tiktokAccount={tiktokAccount}
+            companionRunning={companionRunning}
+            modeASessionMode={modeASessionMode}
+            openTikTokSettingsNonce={openTikTokSettingsNonce}
+            onSaveTikTokTargetUsername={handleSaveTikTokTargetUsername}
+            onLoginTikTok={handleLoginTikTok}
+            onUnlinkTikTok={handleUnlinkTikTok}
+            onUpdateTikTokConnectionPrefs={handleUpdateTikTokConnectionPrefs}
+            onConnectTikTok={handleConnectTikTok}
+            onDisconnectTikTok={handleDisconnectTikTok}
           />
         )}
 
@@ -1620,13 +2233,13 @@ export default function App() {
         alerts={alertHistory}
         sounds={soundboardItems}
         onPlaySound={handlePlaySoundFromDeck}
-        nowPlaying={nowPlayingSong}
-        isPlayingMusic={isPlayingMusic}
+        nowPlaying={effectiveNowPlayingSong}
+        isPlayingMusic={effectiveIsPlayingMusic}
         onTogglePlayMusic={handleTogglePlayMusic}
-        queueCount={unifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
-        masterVolume={settings.audioVolume ?? 60}
-        soundboardVolume={settings.soundboardVolume ?? 80}
-        micGain={settings.micGain ?? 100}
+        queueCount={combinedUnifiedQueue.filter((s) => s.status === 'approved' || s.status === 'pending').length}
+        masterVolume={unitVolumeToPercent(settings.audioVolume, 0.85)}
+        soundboardVolume={unitVolumeToPercent(settings.soundboardVolume, 0.85)}
+        micGain={Math.max(0, Math.min(200, Math.round(settings.micGain ?? 100)))}
         onMixerChange={handleHudMixerChange}
         operatingMode={settings.operatingMode}
         isNativeAndroid={isNativeAndroidPlatform}
