@@ -45,7 +45,7 @@ done
 (
   cd "$ROOTENCODER_DIR"
   bash ./gradlew --no-daemon --stacktrace \
-    :library:assembleRelease \
+    "${RELEASE_TASKS[@]}" \
     "${TEST_TASKS[@]}"
 )
 
