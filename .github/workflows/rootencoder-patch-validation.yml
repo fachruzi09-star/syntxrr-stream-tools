@@ -43,7 +43,7 @@ jobs:
       - name: Build and verify patched RootEncoder
         run: |
           chmod +x android/rootencoder-patches/2.8.1/build_verified_fork.sh
-          bash android/rootencoder-patches/2.8.1/build_verified_fork.sh
+          bash android/rootencoder-patches/2.8.1/build_verified_fork.sh rootencoder
 
       - name: Upload patched RootEncoder build outputs
         if: always()
