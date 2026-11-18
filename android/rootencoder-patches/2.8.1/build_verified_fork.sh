@@ -34,8 +34,11 @@ fi
 python3 "$PATCH_DIR/apply_verified_patch.py" "$ROOTENCODER_DIR" --apply
 
 MODULES=(common encoder rtmp rtsp srt udp whip library)
+RELEASE_TASKS=()
 TEST_TASKS=()
+
 for module in "${MODULES[@]}"; do
+  RELEASE_TASKS+=(":${module}:assembleRelease")
   TEST_TASKS+=(":${module}:testDebugUnitTest")
 done
 
