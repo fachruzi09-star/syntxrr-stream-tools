@@ -30,10 +30,17 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Install Android SDK and accept licenses
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 12266719
+          accept-android-sdk-licenses: true
+
+      - name: Install RootEncoder compile SDK
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Apply verified patch, build release AARs, and run module unit tests
         env:
