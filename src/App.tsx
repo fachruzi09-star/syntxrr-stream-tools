@@ -908,6 +908,23 @@ export default function App() {
     return true;
   };
 
+  const handleUpdateActivePresetMetadata = async (patch: Partial<StudioPreset>) => {
+    if (!(await guardModeBStructuralPresetAction())) return;
+    await flushStudioPersistence();
+    const latestElements = ensureUniqueElementIds(studioElements);
+    const updated = presets.map((preset) =>
+      preset.id === activePresetId
+        ? normalizeStudioPreset({
+            ...preset,
+            ...patch,
+            elements: latestElements,
+          })
+        : preset,
+    );
+    setPresets(updated);
+    await StorageService.savePresets(updated);
+  };
+
   // Canvas Orientation
   const handleOrientationChange = async (orientation: CanvasOrientation) => {
     if (isModeBMutationLocked) {
@@ -2766,6 +2783,8 @@ export default function App() {
             onSaveAsPreset={handleSaveCanvasAsPreset}
             presets={presets}
             activePresetId={activePresetId}
+            activePreset={activePreset}
+            onUpdateActivePreset={handleUpdateActivePresetMetadata}
             onSelectPreset={handleSelectPreset}
             onCreatePreset={handleCreatePreset}
             onDuplicatePreset={handleDuplicatePreset}

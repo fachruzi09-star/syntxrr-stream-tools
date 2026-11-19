@@ -29,6 +29,7 @@ import {
 import { canChangeActivePresetForSnapshot } from './modeBPresetSwitchPolicy';
 import { normalizeModeBPresetTransition } from './modeBPresetTransitionPolicy';
 import { normalizeModeBScreensaver } from './modeBScreensaverPolicy';
+import { applyPresetGroupStateToElements } from './presetModel';
 import { getStudioMediaAssetIdFromUri, normalizeModeBAudioSource } from './storage';
 
 export interface ModeBRtmpValidationResult {
@@ -135,6 +136,36 @@ export function normalizeElementsForModeBSnapshot(elements: StudioElement[]): St
     }
     return { ...elem, properties: props };
   });
+}
+
+function resolveModeBGroupedScene(
+  elements: StudioElement[],
+  preset: StudioPreset | null | undefined,
+): {
+  effectiveElements: StudioElement[];
+  screenCaptureGrouped: boolean;
+} {
+  const effectiveElements = preset
+    ? applyPresetGroupStateToElements({
+        elements,
+        groups: preset.groups,
+        superGroups: preset.superGroups,
+      })
+    : elements;
+
+  const screenCaptureIds = new Set(
+    effectiveElements
+      .filter((element) => element.type === 'screen_capture')
+      .map((element) => element.id),
+  );
+  const screenCaptureGrouped = (preset?.groups ?? []).some((group) =>
+    group.elementIds.some((elementId) => screenCaptureIds.has(elementId)),
+  );
+
+  return {
+    effectiveElements,
+    screenCaptureGrouped,
+  };
 }
 
 export interface ModeBNotificationCheckResult {
@@ -520,8 +551,15 @@ export async function prepareAndStartModeBStream(
   }
 
   try {
-    const normalizedElements = normalizeElementsForModeBSnapshot(elements);
-    const screenCaptureLayer = createModeBScreenCaptureLayer(normalizedElements, false);
+    const { effectiveElements, screenCaptureGrouped } = resolveModeBGroupedScene(
+      elements,
+      activePreset,
+    );
+    const normalizedElements = normalizeElementsForModeBSnapshot(effectiveElements);
+    const screenCaptureLayer = createModeBScreenCaptureLayer(
+      normalizedElements,
+      screenCaptureGrouped,
+    );
     const overlayElements = createModeBOverlaySnapshot(normalizedElements);
 
     const backgroundAssetId = activePreset?.backgroundUri
@@ -644,8 +682,15 @@ export async function applyLiveSceneChangeToModeB(
   }
 
   try {
-    const normalizedElements = normalizeElementsForModeBSnapshot(elements);
-    const screenCaptureLayer = createModeBScreenCaptureLayer(normalizedElements, false);
+    const { effectiveElements, screenCaptureGrouped } = resolveModeBGroupedScene(
+      elements,
+      targetPreset,
+    );
+    const normalizedElements = normalizeElementsForModeBSnapshot(effectiveElements);
+    const screenCaptureLayer = createModeBScreenCaptureLayer(
+      normalizedElements,
+      screenCaptureGrouped,
+    );
     const overlayElements = createModeBOverlaySnapshot(normalizedElements);
 
     const activeBackgroundAssetId =
@@ -671,7 +716,10 @@ export async function applyLiveSceneChangeToModeB(
     if (!transitionInResult.ok) throw new Error(transitionInResult.message);
 
     const hasTransition = Boolean(transitionOutResult.value || transitionInResult.value);
-    const sceneHasCamera = [...(activePreset?.elements ?? []), ...normalizedElements].some(
+    const effectiveActiveElements = activePreset
+      ? applyPresetGroupStateToElements(activePreset)
+      : [];
+    const sceneHasCamera = [...effectiveActiveElements, ...normalizedElements].some(
       (element) =>
         element.type === 'camera' &&
         element.visible !== false &&

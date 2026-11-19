@@ -6,6 +6,8 @@ import {
   StreamEventType,
   StreamEvent,
   StudioPreset,
+  StudioPresetGroup,
+  StudioPresetSuperGroup,
   PresetCategory,
   MarketplaceItem,
   MarketplaceCategory,
@@ -25,6 +27,14 @@ import {
   createStudioMediaAssetUri,
   getStudioMediaAssetIdFromUri,
 } from '../services/storage';
+import {
+  applyPresetGroupStateToElements,
+  createGroupForElements,
+  createSuperGroupForGroups,
+  getPresetGroupBounds,
+  transformPresetGroupElements,
+} from '../services/presetModel';
+import type { PresetGroupBounds } from '../services/presetModel';
 import type { ModeBStreamSnapshot } from '../services/nativeStreamingBridge';
 import {
   MODE_B_SCREENSAVER_DEFAULT_FADE_MS,
@@ -86,6 +96,7 @@ import {
   Box,
   Search,
   Download,
+  Move,
 } from 'lucide-react';
 
 interface StudioViewProps {
@@ -97,6 +108,8 @@ interface StudioViewProps {
   // Shared Presets System integration
   presets?: StudioPreset[];
   activePresetId?: string;
+  activePreset?: StudioPreset | null;
+  onUpdateActivePreset?: (patch: Partial<StudioPreset>) => void | Promise<void>;
   onSelectPreset?: (presetId: string) => void;
   onCreatePreset?: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => void;
   onDuplicatePreset?: (presetId: string) => void;
@@ -153,6 +166,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onSaveAsPreset,
   presets = [],
   activePresetId,
+  activePreset: activePresetProp,
+  onUpdateActivePreset,
   onSelectPreset,
   onCreatePreset,
   onDuplicatePreset,
@@ -168,8 +183,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onApplyLiveSceneToModeB,
   onUpdatePresetModeBSettings,
 }) => {
-  // Selected Element
+  // Selected Element & Group Selection
   const [selectedId, setSelectedId] = useState<string | null>(elements[0]?.id || null);
+  const [selectedLayerElementIds, setSelectedLayerElementIds] = useState<string[]>([]);
+  const [selectedLayerGroupIds, setSelectedLayerGroupIds] = useState<string[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   // Studio Sub-Sections: 'properties' | 'elements' | 'sources' | 'presets' | 'media' | 'layers' | 'simulator' | 'marketplace'
   const [activeSidePanel, setActiveSidePanel] = useState<
@@ -328,8 +346,30 @@ export const StudioView: React.FC<StudioViewProps> = ({
   elementsRef.current = elements;
   const isLiveDragRef = useRef(false);
   const preDragElementsRef = useRef<StudioElement[] | null>(null);
+  const groupTransformRef = useRef<{
+    mode: 'move' | 'resize' | null;
+    group: StudioPresetGroup | null;
+    pointerId: number | null;
+    handle: string | null;
+    startX: number;
+    startY: number;
+    startBounds: PresetGroupBounds | null;
+    lastBounds: PresetGroupBounds | null;
+    originalElements: StudioElement[];
+  }>({
+    mode: null,
+    group: null,
+    pointerId: null,
+    handle: null,
+    startX: 0,
+    startY: 0,
+    startBounds: null,
+    lastBounds: null,
+    originalElements: [],
+  });
 
   const selectedElement = elements.find((e) => e.id === selectedId) || null;
+  const previousPresetIdRef = useRef(activePresetId);
 
   useEffect(() => {
     activeCameraStreamsRef.current = activeCameraStreams;
@@ -368,13 +408,217 @@ export const StudioView: React.FC<StudioViewProps> = ({
     });
   }, [elements]);
 
-  const activePreset = presets.find((p) => p.id === activePresetId) || presets[0] || null;
+  const activePreset = activePresetProp ?? presets.find((p) => p.id === activePresetId) ?? presets[0] ?? null;
   const isModeBLive = Boolean(
     isModeBSelected && modeBStatus?.status === 'live' && modeBStatus?.isStreaming,
   );
   const isStrictModeBLocked = Boolean(
     isModeBSelected && isModeBMutationLocked && !isModeBLive,
   );
+
+  const activeGroups = activePreset?.groups || [];
+  const activeSuperGroups = activePreset?.superGroups || [];
+  const selectedGroup = activeGroups.find((group) => group.id === selectedGroupId) || null;
+  const selectedGroupBounds = selectedGroup ? getPresetGroupBounds(selectedGroup, elements) : null;
+  const isPresetGroupLocked = (group: StudioPresetGroup): boolean => {
+    const parent = activeSuperGroups.find((item) => item.groupIds.includes(group.id));
+    const children = group.elementIds.map((id) => elements.find((element) => element.id === id));
+    return Boolean(
+      isStrictModeBLocked ||
+        group.locked ||
+        parent?.locked ||
+        children.some((element) => !element || element.locked),
+    );
+  };
+  const selectedGroupIsLocked = selectedGroup ? isPresetGroupLocked(selectedGroup) : false;
+
+  const updatePresetStructure = (groups: StudioPresetGroup[], superGroups: StudioPresetSuperGroup[]) => {
+    if (!onUpdateActivePreset || isStrictModeBLocked) return;
+    return onUpdateActivePreset({ groups, superGroups });
+  };
+
+  const toggleLayerElementSelection = (elementId: string) => {
+    setSelectedLayerElementIds((previous) =>
+      previous.includes(elementId)
+        ? previous.filter((id) => id !== elementId)
+        : [...previous, elementId],
+    );
+  };
+
+  const toggleLayerGroupSelection = (groupId: string) => {
+    setSelectedLayerGroupIds((previous) =>
+      previous.includes(groupId)
+        ? previous.filter((id) => id !== groupId)
+        : [...previous, groupId],
+    );
+  };
+
+  const handleCreatePresetGroup = () => {
+    const selectedIds = selectedLayerElementIds.filter((id) =>
+      elements.some((element) => element.id === id),
+    );
+    if (selectedIds.length < 2 || !activePreset || !onUpdateActivePreset || isStrictModeBLocked) return;
+    const selectedSet = new Set(selectedIds);
+    const retainedGroups = activeGroups
+      .map((group) => ({
+        ...group,
+        elementIds: group.elementIds.filter((id) => !selectedSet.has(id)),
+      }))
+      .filter((group) => group.elementIds.length > 0);
+    const retainedGroupIds = new Set(retainedGroups.map((group) => group.id));
+    const nextSuperGroups = activeSuperGroups
+      .map((group) => ({
+        ...group,
+        groupIds: group.groupIds.filter((id) => retainedGroupIds.has(id)),
+      }))
+      .filter((group) => group.groupIds.length > 0);
+    const nextGroup = createGroupForElements(elements, selectedIds, `Grup ${activeGroups.length + 1}`);
+    const updateResult = updatePresetStructure([...retainedGroups, nextGroup], nextSuperGroups);
+    void Promise.resolve(updateResult)
+      .then(() => {
+        if (!isMountedRef.current) return;
+        setSelectedGroupId(nextGroup.id);
+        setSelectedId(null);
+      })
+      .catch((error) => {
+        console.error('Gagal menyimpan struktur Group:', error);
+      });
+    setSelectedLayerElementIds([]);
+    setSelectedLayerGroupIds([]);
+  };
+
+  const handleCreatePresetSuperGroup = () => {
+    const selectedIds = selectedLayerGroupIds.filter((id) =>
+      activeGroups.some((group) => group.id === id),
+    );
+    if (selectedIds.length < 2 || !activePreset || !onUpdateActivePreset || isStrictModeBLocked) return;
+    const selectedSet = new Set(selectedIds);
+    const retainedSuperGroups = activeSuperGroups
+      .map((group) => ({
+        ...group,
+        groupIds: group.groupIds.filter((id) => !selectedSet.has(id)),
+      }))
+      .filter((group) => group.groupIds.length > 0);
+    const nextSuperGroup = createSuperGroupForGroups(
+      activeGroups,
+      selectedIds,
+      `Supergroup ${activeSuperGroups.length + 1}`,
+    );
+    updatePresetStructure(activeGroups, [...retainedSuperGroups, nextSuperGroup]);
+    setSelectedLayerGroupIds([]);
+  };
+
+  const handleUngroupPresetGroup = (groupId: string) => {
+    if (selectedGroupId === groupId) setSelectedGroupId(null);
+    const nextGroups = activeGroups.filter((group) => group.id !== groupId);
+    const nextSuperGroups = activeSuperGroups
+      .map((group) => ({
+        ...group,
+        groupIds: group.groupIds.filter((id) => id !== groupId),
+      }))
+      .filter((group) => group.groupIds.length > 0);
+    updatePresetStructure(nextGroups, nextSuperGroups);
+  };
+
+  const handleUngroupPresetSuperGroup = (superGroupId: string) => {
+    updatePresetStructure(
+      activeGroups,
+      activeSuperGroups.filter((group) => group.id !== superGroupId),
+    );
+  };
+
+  const handleSetGroupVisibility = (groupId: string, visible: boolean) => {
+    updatePresetStructure(
+      activeGroups.map((group) => (group.id === groupId ? { ...group, visible } : group)),
+      activeSuperGroups,
+    );
+  };
+
+  const handleSetGroupLocked = (groupId: string, locked: boolean) => {
+    updatePresetStructure(
+      activeGroups.map((group) => (group.id === groupId ? { ...group, locked } : group)),
+      activeSuperGroups,
+    );
+  };
+
+  const handleSetSuperGroupVisibility = (superGroupId: string, visible: boolean) => {
+    updatePresetStructure(
+      activeGroups,
+      activeSuperGroups.map((group) =>
+        group.id === superGroupId ? { ...group, visible } : group,
+      ),
+    );
+  };
+
+  const handleSetSuperGroupLocked = (superGroupId: string, locked: boolean) => {
+    updatePresetStructure(
+      activeGroups,
+      activeSuperGroups.map((group) =>
+        group.id === superGroupId ? { ...group, locked } : group,
+      ),
+    );
+  };
+
+  const effectiveElements = applyPresetGroupStateToElements({
+    elements,
+    groups: activeGroups,
+    superGroups: activeSuperGroups,
+  });
+  const effectiveStateByElementId = new Map(
+    effectiveElements.map((element) => [element.id, element]),
+  );
+  const isElementHiddenByGroup = (elementId: string): boolean => {
+    const element = elements.find((item) => item.id === elementId);
+    return Boolean(
+      element && effectiveStateByElementId.get(elementId)?.visible === false && element.visible !== false,
+    );
+  };
+  const isElementLockedByGroup = (elementId: string): boolean => {
+    const group = activeGroups.find((item) => item.elementIds.includes(elementId));
+    if (group?.locked) return true;
+    return Boolean(
+      group && activeSuperGroups.find((item) => item.groupIds.includes(group.id))?.locked,
+    );
+  };
+
+  // A preset is a separate editing document: never carry selection or undo history across it.
+  useEffect(() => {
+    if (previousPresetIdRef.current === activePresetId) return;
+    previousPresetIdRef.current = activePresetId;
+    setSelectedId(elementsRef.current[0]?.id || null);
+    setSelectedLayerElementIds([]);
+    setSelectedLayerGroupIds([]);
+    setSelectedGroupId(null);
+    setHistory([]);
+    setRedoStack([]);
+    setActiveReactions({});
+    setZoomLevel(100);
+    setPanOffset({ x: 0, y: 0 });
+    setNewPresetModalOpen(false);
+    isLiveDragRef.current = false;
+    preDragElementsRef.current = null;
+    dragRef.current.isDragging = false;
+    dragRef.current.isResizing = false;
+    dragRef.current.elementId = null;
+    dragRef.current.pointerId = null;
+    groupTransformRef.current = {
+      mode: null,
+      group: null,
+      pointerId: null,
+      handle: null,
+      startX: 0,
+      startY: 0,
+      startBounds: null,
+      lastBounds: null,
+      originalElements: [],
+    };
+  }, [activePresetId]);
+
+  useEffect(() => {
+    if (selectedGroupId && !activeGroups.some((group) => group.id === selectedGroupId)) {
+      setSelectedGroupId(null);
+    }
+  }, [activeGroups, selectedGroupId]);
 
   // Hydrate persisted Studio media assets (images & MP4/video blobs) from IndexedDB cleanly
   useEffect(() => {
@@ -560,8 +804,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (isStrictModeBLocked) return;
     if (history.length === 0) return;
     const previous = history[history.length - 1];
-    setRedoStack((prev) => [...prev, elements]);
+    setRedoStack((prev) => [...prev, elementsRef.current]);
     setHistory((prev) => prev.slice(0, prev.length - 1));
+    elementsRef.current = previous;
     onUpdateElements(previous);
   };
 
@@ -569,14 +814,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (isStrictModeBLocked) return;
     if (redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1];
-    setHistory((prev) => [...prev, elements]);
+    setHistory((prev) => [...prev, elementsRef.current]);
     setRedoStack((prev) => prev.slice(0, prev.length - 1));
+    elementsRef.current = next;
     onUpdateElements(next);
   };
 
   const updateElementField = (id: string, field: keyof StudioElement, value: any) => {
-    if (isStrictModeBLocked) return;
-    const updated = elements.map((elem) => {
+    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
         return { ...elem, [field]: value };
       }
@@ -586,8 +832,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementProperty = (id: string, key: string, value: any) => {
-    if (isStrictModeBLocked) return;
-    const updated = elements.map((elem) => {
+    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
         const nextProperties = {
           ...elem.properties,
@@ -610,8 +856,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementTrigger = (id: string, partial: any) => {
-    if (isStrictModeBLocked) return;
-    const updated = elements.map((elem) => {
+    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
         return {
           ...elem,
@@ -1022,12 +1268,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
 
     commitElements([...elements, newElem]);
+    setSelectedGroupId(null);
     setSelectedId(newElem.id);
     setActiveSidePanel('properties');
   };
 
   const handleDuplicate = (id: string) => {
-    if (isStrictModeBLocked) return;
+    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
     const target = elements.find((e) => e.id === id);
     if (!target) return;
     const clone: StudioElement = {
@@ -1039,11 +1286,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       layer: elements.length + 1,
     };
     commitElements([...elements, clone]);
+    setSelectedGroupId(null);
     setSelectedId(clone.id);
   };
 
   const handleDelete = (id: string) => {
-    if (isStrictModeBLocked) return;
+    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
     if (activeCameraStreams[id]) {
       activeCameraStreams[id].getTracks().forEach((t) => t.stop());
       setActiveCameraStreams((prev) => {
@@ -1056,12 +1304,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const updated = elements.filter((e) => e.id !== id);
     commitElements(updated);
     if (selectedId === id) {
+      setSelectedGroupId(null);
       setSelectedId(updated[0]?.id || null);
     }
   };
 
   const handleMoveLayer = (id: string, direction: 'up' | 'down') => {
-    if (isStrictModeBLocked) return;
+    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
     const index = elements.findIndex((e) => e.id === id);
     if (index === -1) return;
     if (direction === 'up' && index === elements.length - 1) return;
@@ -1079,9 +1328,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // UNIFIED POINTER DRAG & RESIZE SYSTEM (FIXES HORIZONTAL & VERTICAL MOVEMENT)
   const handleElementPointerDown = (e: React.PointerEvent, elem: StudioElement) => {
-    if (elem.locked || isStrictModeBLocked) return;
+    if (elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
     if (e.button !== 0) return; // Only primary button
     e.stopPropagation();
+    setSelectedGroupId(null);
     setSelectedId(elem.id);
 
     const targetEl = e.currentTarget as HTMLElement;
@@ -1089,7 +1339,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       targetEl.setPointerCapture(e.pointerId);
     } catch (_) {}
 
-    preDragElementsRef.current = elements;
+    preDragElementsRef.current = elementsRef.current;
     dragRef.current = {
       isDragging: true,
       isResizing: false,
@@ -1106,9 +1356,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleResizePointerDown = (e: React.PointerEvent, elem: StudioElement, handle: string) => {
-    if (elem.locked || isStrictModeBLocked) return;
+    if (elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
     if (e.button !== 0) return;
     e.stopPropagation();
+    setSelectedGroupId(null);
     setSelectedId(elem.id);
 
     const targetEl = e.currentTarget as HTMLElement;
@@ -1116,7 +1367,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       targetEl.setPointerCapture(e.pointerId);
     } catch (_) {}
 
-    preDragElementsRef.current = elements;
+    preDragElementsRef.current = elementsRef.current;
     dragRef.current = {
       isDragging: false,
       isResizing: true,
@@ -1132,7 +1383,86 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
   };
 
+  const handleGroupPointerDown = (
+    e: React.PointerEvent,
+    group: StudioPresetGroup,
+    mode: 'move' | 'resize',
+    handle: string | null = null,
+  ) => {
+    if (e.button !== 0 || isPresetGroupLocked(group)) return;
+    const bounds = getPresetGroupBounds(group, elementsRef.current);
+    if (!bounds) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedGroupId(group.id);
+    setSelectedId(null);
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (_) {}
+
+    const originalElements = elementsRef.current;
+    preDragElementsRef.current = originalElements;
+    groupTransformRef.current = {
+      mode,
+      group,
+      pointerId: e.pointerId,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBounds: bounds,
+      lastBounds: bounds,
+      originalElements,
+    };
+  };
+
   const handlePointerMove = (e: React.PointerEvent) => {
+    const groupTransform = groupTransformRef.current;
+    if (groupTransform.mode && groupTransform.group && groupTransform.startBounds) {
+      if (!canvasRef.current || (groupTransform.pointerId !== null && e.pointerId !== groupTransform.pointerId)) return;
+      e.preventDefault();
+      const rect = canvasRef.current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const deltaX = ((e.clientX - groupTransform.startX) / rect.width) * 100;
+      const deltaY = ((e.clientY - groupTransform.startY) / rect.height) * 100;
+      const start = groupTransform.startBounds;
+      const target: PresetGroupBounds = { ...start };
+
+      if (groupTransform.mode === 'move') {
+        target.x = Math.round((start.x + deltaX) * 10) / 10;
+        target.y = Math.round((start.y + deltaY) * 10) / 10;
+      } else {
+        const handle = groupTransform.handle || 'bottom-right';
+        if (handle.includes('right')) {
+          target.width = Math.max(5, Math.round((start.width + deltaX) * 10) / 10);
+        }
+        if (handle.includes('bottom')) {
+          target.height = Math.max(3, Math.round((start.height + deltaY) * 10) / 10);
+        }
+        if (handle.includes('left')) {
+          target.width = Math.max(5, Math.round((start.width - deltaX) * 10) / 10);
+          target.x = Math.round((start.x + start.width - target.width) * 10) / 10;
+        }
+        if (handle.includes('top')) {
+          target.height = Math.max(3, Math.round((start.height - deltaY) * 10) / 10);
+          target.y = Math.round((start.y + start.height - target.height) * 10) / 10;
+        }
+      }
+
+      const updated = transformPresetGroupElements(
+        groupTransform.originalElements,
+        groupTransform.group,
+        groupTransform.originalElements,
+        start,
+        target,
+      );
+      elementsRef.current = updated;
+      onUpdateElements(updated);
+      groupTransform.lastBounds = target;
+      isLiveDragRef.current = true;
+      return;
+    }
+
     if (!canvasRef.current || !dragRef.current.elementId) return;
     if (!dragRef.current.isDragging && !dragRef.current.isResizing) return;
     if (dragRef.current.pointerId !== null && e.pointerId !== dragRef.current.pointerId) return;
@@ -1181,6 +1511,35 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    const groupTransform = groupTransformRef.current;
+    if (groupTransform.mode && groupTransform.pointerId !== null && e.pointerId === groupTransform.pointerId) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (_) {}
+      const didTransform = isLiveDragRef.current;
+      if (didTransform && preDragElementsRef.current) {
+        const savedSnapshot = preDragElementsRef.current;
+        setHistory((prev) => [...prev.slice(-15), savedSnapshot]);
+        setRedoStack([]);
+      }
+      isLiveDragRef.current = false;
+      preDragElementsRef.current = null;
+      // App-level preset normalization recalculates Group bounds from the updated child elements,
+      // including when this gesture is later undone or redone.
+      groupTransformRef.current = {
+        mode: null,
+        group: null,
+        pointerId: null,
+        handle: null,
+        startX: 0,
+        startY: 0,
+        startBounds: null,
+        lastBounds: null,
+        originalElements: [],
+      };
+      return;
+    }
+
     if (dragRef.current.pointerId !== null && e.pointerId === dragRef.current.pointerId) {
       try {
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
@@ -1329,6 +1688,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         },
       };
       commitElements([...elements, newElem]);
+      setSelectedGroupId(null);
       setSelectedId(newElem.id);
       setActiveSidePanel('properties');
     } else {
@@ -1353,13 +1713,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
         },
       };
       commitElements([...elements, newElem]);
+      setSelectedGroupId(null);
       setSelectedId(newElem.id);
       setActiveSidePanel('properties');
     }
   };
 
   const handleApplyMediaToSelectedElement = (url: string, assetId?: string) => {
-    if (!selectedElement || isStrictModeBLocked) return;
+    if (!selectedElement || isStrictModeBLocked || isElementLockedByGroup(selectedElement.id)) return;
     const assetUri = assetId ? createStudioMediaAssetUri(assetId) : undefined;
     const updated = elements.map((elem) => {
       if (elem.id !== selectedElement.id) return elem;
@@ -2462,7 +2823,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 overscrollBehaviorY: 'contain',
               }}
               className={`relative bg-[#020408] border-2 border-slate-800 rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()} overscroll-y-contain`}
-              onClick={() => setSelectedId(null)}
+              onClick={() => {
+                setSelectedId(null);
+                setSelectedGroupId(null);
+              }}
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
               <div className="absolute inset-x-2 top-2 h-7 border border-dashed border-blue-500/30 rounded flex items-center justify-center pointer-events-none">
@@ -2474,7 +2838,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
               {/* Elements Layer Rendering with UNIFIED POINTER EVENTS */}
               {elements.map((elem) => {
-                if (!elem.visible) return null;
+                if (!elem.visible || isElementHiddenByGroup(elem.id)) return null;
                 const isSelected = selectedId === elem.id;
 
                 return (
@@ -2506,7 +2870,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     {renderElementContent(elem)}
 
                     {/* Resize Handles on Selected Element (4 corners & 2 edges) */}
-                    {isSelected && !elem.locked && (
+                    {isSelected && !elem.locked && !isElementLockedByGroup(elem.id) && (
                       <>
                         {/* Bottom-Right Handle */}
                         <div
@@ -2548,6 +2912,54 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </div>
                 );
               })}
+
+              {selectedGroup && selectedGroupBounds && (
+                <div
+                  className="absolute border-2 border-amber-400/90 rounded-sm pointer-events-none"
+                  style={{
+                    left: `${selectedGroupBounds.x}%`,
+                    top: `${selectedGroupBounds.y}%`,
+                    width: `${selectedGroupBounds.width}%`,
+                    height: `${selectedGroupBounds.height}%`,
+                    zIndex: 10000,
+                  }}
+                >
+                  <div
+                    onPointerDown={(e) => handleGroupPointerDown(e, selectedGroup, 'move')}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ pointerEvents: 'auto', touchAction: 'none' }}
+                    className="absolute -top-6 left-0 px-2 py-1 rounded-t-md bg-amber-500 text-slate-950 text-[9px] font-bold whitespace-nowrap cursor-move select-none"
+                    title={selectedGroupIsLocked ? 'Grup terkunci; buka kunci untuk memindahkan' : 'Seret untuk memindahkan seluruh grup'}
+                  >
+                    <Move className="w-3 h-3 inline mr-1" />
+                    {selectedGroup.name}{selectedGroupIsLocked ? ' · TERKUNCI' : ' · PINDAHKAN'}
+                  </div>
+                  {!selectedGroupIsLocked && (
+                    <>
+                      {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => (
+                        <div
+                          key={handle}
+                          onPointerDown={(e) => handleGroupPointerDown(e, selectedGroup, 'resize', handle)}
+                          onPointerMove={handlePointerMove}
+                          onPointerUp={handlePointerUp}
+                          onPointerCancel={handlePointerUp}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ pointerEvents: 'auto', touchAction: 'none' }}
+                          className={`absolute w-3.5 h-3.5 bg-amber-400 border-2 border-white rounded-full shadow-md ${
+                            handle.includes('top') ? '-top-2' : '-bottom-2'
+                          } ${handle.includes('left') ? '-left-2' : '-right-2'} ${
+                            handle === 'top-left' || handle === 'bottom-right' ? 'cursor-nwse-resize' : 'cursor-nesw-resize'
+                          }`}
+                          title={`Ubah ukuran grup (${handle})`}
+                        />
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -4401,87 +4813,163 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           )}
 
-          {/* TAB 5: LAYERS LIST */}
+          {/* TAB 5: LAYERS LIST — element groups and super-groups */}
           {activeSidePanel === 'layers' && (
-            <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
               <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
-                <span>Daftar Lapisan Kanvas</span>
-                <span className="font-mono text-blue-400">{elements.length} item</span>
+                <span>Lapisan &amp; Grup Kanvas</span>
+                <span className="font-mono text-blue-400">{elements.length} elemen</span>
               </div>
 
-              {elements.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-400 bg-[#080c16] rounded-xl border border-slate-800">
-                  Tidak ada elemen pada canvas.
-                </div>
-              ) : (
-                elements.map((elem, idx) => {
-                  const isSelected = selectedId === elem.id;
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={isStrictModeBLocked || !onUpdateActivePreset || selectedLayerElementIds.length < 2}
+                  onClick={handleCreatePresetGroup}
+                  className="min-h-[40px] rounded-lg border border-blue-700/70 bg-blue-950/50 text-blue-200 text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Layers className="w-3.5 h-3.5 inline mr-1" /> Buat Grup ({selectedLayerElementIds.length})
+                </button>
+                <button
+                  type="button"
+                  disabled={isStrictModeBLocked || !onUpdateActivePreset || selectedLayerGroupIds.length < 2}
+                  onClick={handleCreatePresetSuperGroup}
+                  className="min-h-[40px] rounded-lg border border-indigo-700/70 bg-indigo-950/50 text-indigo-200 text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Box className="w-3.5 h-3.5 inline mr-1" /> Supergroup ({selectedLayerGroupIds.length})
+                </button>
+              </div>
 
-                  return (
-                    <div
-                      key={`${elem.id}_${idx}`}
-                      onClick={() => {
-                        setSelectedId(elem.id);
-                        setActiveSidePanel('properties');
-                      }}
-                      className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'bg-blue-950/60 border-blue-500 shadow-sm'
-                          : 'bg-[#080c16] border-slate-800 hover:bg-[#0e1626]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                            isSelected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
-                          }`}
-                        >
-                          {elem.type === 'camera' ? (
-                            <Camera className="w-3.5 h-3.5" />
-                          ) : elem.type === 'event_alert' ? (
-                            <Bell className="w-3.5 h-3.5" />
-                          ) : (
-                            <Tv className="w-3.5 h-3.5" />
-                          )}
+              {!activePreset && (
+                <div className="p-2 rounded-lg bg-amber-950/30 border border-amber-900/50 text-[10px] text-amber-200">
+                  Pilih preset aktif untuk mengelola struktur grup.
+                </div>
+              )}
+
+              {activeSuperGroups.length > 0 && (
+                <section className="space-y-2">
+                  <div className="text-[10px] uppercase tracking-wider text-indigo-300 font-bold">Supergroups</div>
+                  {activeSuperGroups.map((superGroup) => {
+                    const childGroups = activeGroups.filter((group) => superGroup.groupIds.includes(group.id));
+                    return (
+                      <div key={superGroup.id} className="p-2.5 rounded-xl border border-indigo-700/50 bg-indigo-950/20 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 text-xs font-bold text-indigo-100 truncate">{superGroup.name}</span>
+                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetSuperGroupVisibility(superGroup.id, !superGroup.visible)} className="p-1.5 rounded bg-slate-900 text-slate-300 disabled:opacity-40" title={superGroup.visible ? 'Sembunyikan supergroup' : 'Tampilkan supergroup'}>
+                            {superGroup.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                          </button>
+                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetSuperGroupLocked(superGroup.id, !superGroup.locked)} className={`p-1.5 rounded bg-slate-900 disabled:opacity-40 ${superGroup.locked ? 'text-amber-300' : 'text-slate-300'}`} title={superGroup.locked ? 'Buka kunci supergroup' : 'Kunci supergroup'}>
+                            {superGroup.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                          </button>
+                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleUngroupPresetSuperGroup(superGroup.id)} className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-rose-300 disabled:opacity-40" title="Lepas supergroup">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-white truncate">{elem.name}</div>
-                          <div className="text-[10px] text-slate-400">
-                            Layer #{elem.layer} · {elem.type}
-                          </div>
+                        <div className="flex flex-wrap gap-1">
+                          {childGroups.map((group) => (
+                            <span key={group.id} className="px-2 py-1 rounded-md bg-slate-950/70 border border-indigo-900/50 text-[9px] text-indigo-200">
+                              {group.name} · {group.elementIds.length}
+                            </span>
+                          ))}
+                          {childGroups.length === 0 && <span className="text-[10px] text-slate-500">Tidak ada grup anak</span>}
                         </div>
                       </div>
+                    );
+                  })}
+                </section>
+              )}
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            updateElementField(elem.id, 'visible', !elem.visible);
-                          }}
-                          className={`p-1.5 rounded-lg text-slate-400 hover:text-white ${
-                            !elem.visible ? 'text-slate-600' : ''
-                          }`}
-                        >
+              {activeGroups.length > 0 && (
+                <section className="space-y-2">
+                  <div className="text-[10px] uppercase tracking-wider text-blue-300 font-bold">Groups</div>
+                  {activeGroups.map((group) => {
+                    const childElements = group.elementIds.map((id) => elements.find((element) => element.id === id)).filter((element): element is StudioElement => Boolean(element));
+                    const isSelectedForSuperGroup = selectedLayerGroupIds.includes(group.id);
+                    return (
+                      <div key={group.id} className="rounded-xl border border-blue-800/50 bg-blue-950/20 overflow-hidden">
+                        <div className="p-2.5 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelectedForSuperGroup}
+                            onChange={() => toggleLayerGroupSelection(group.id)}
+                            aria-label={`Pilih ${group.name} untuk supergroup`}
+                            className="accent-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedGroupId(group.id); setSelectedId(null); }}
+                            className={`min-w-0 flex-1 text-left rounded-md px-1.5 py-1 ${selectedGroupId === group.id ? 'bg-amber-500/15 ring-1 ring-amber-400/60' : 'hover:bg-slate-900/70'}`}
+                            title="Pilih grup di canvas untuk memindahkan atau mengubah ukurannya"
+                          >
+                            <span className={`block text-xs font-bold truncate ${selectedGroupId === group.id ? 'text-amber-200' : 'text-blue-100'}`}>{group.name}</span>
+                            <span className="block text-[9px] text-slate-400">{childElements.length} elemen · {group.elementIds.length} referensi</span>
+                          </button>
+                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetGroupVisibility(group.id, !group.visible)} className="p-1.5 rounded bg-slate-900 text-slate-300 disabled:opacity-40" title={group.visible ? 'Sembunyikan grup' : 'Tampilkan grup'}>
+                            {group.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                          </button>
+                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetGroupLocked(group.id, !group.locked)} className={`p-1.5 rounded bg-slate-900 disabled:opacity-40 ${group.locked ? 'text-amber-300' : 'text-slate-300'}`} title={group.locked ? 'Buka kunci grup' : 'Kunci grup'}>
+                            {group.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                          </button>
+                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleUngroupPresetGroup(group.id)} className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-rose-300 disabled:opacity-40" title="Ungroup, elemen tetap ada">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="border-t border-blue-900/40 px-2 py-1.5 space-y-1">
+                          {childElements.map((elem) => (
+                            <div key={elem.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-900/70">
+                              <input
+                                type="checkbox"
+                                checked={selectedLayerElementIds.includes(elem.id)}
+                                onChange={() => toggleLayerElementSelection(elem.id)}
+                                aria-label={`Pilih elemen ${elem.name}`}
+                                className="accent-blue-500"
+                              />
+                              <button type="button" onClick={() => { setSelectedGroupId(null); setSelectedId(elem.id); setActiveSidePanel('properties'); }} className="min-w-0 flex-1 text-left">
+                                <span className="block text-[10px] text-slate-200 truncate">{elem.name}</span>
+                                <span className="block text-[9px] text-slate-500">Layer #{elem.layer} · {elem.type}</span>
+                              </button>
+                            </div>
+                          ))}
+                          {childElements.length === 0 && <div className="text-[10px] text-amber-300 px-1 py-1">Referensi elemen tidak tersedia</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
+
+              <section className="space-y-2">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Elemen Lepas</div>
+                {elements.filter((elem) => !activeGroups.some((group) => group.elementIds.includes(elem.id))).length === 0 ? (
+                  <div className="p-3 text-center text-[10px] text-slate-500 bg-[#080c16] rounded-xl border border-slate-800">Semua elemen sudah berada dalam grup.</div>
+                ) : (
+                  elements.filter((elem) => !activeGroups.some((group) => group.elementIds.includes(elem.id))).map((elem) => {
+                    const isSelected = selectedId === elem.id;
+                    const isLayerSelected = selectedLayerElementIds.includes(elem.id);
+                    return (
+                      <div key={elem.id} className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${isSelected ? 'bg-blue-950/60 border-blue-500' : 'bg-[#080c16] border-slate-800'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isLayerSelected}
+                          onChange={() => toggleLayerElementSelection(elem.id)}
+                          aria-label={`Pilih elemen ${elem.name} untuk grup`}
+                          className="accent-blue-500"
+                        />
+                        <button type="button" onClick={() => { setSelectedGroupId(null); setSelectedId(elem.id); setActiveSidePanel('properties'); }} className="min-w-0 flex-1 text-left">
+                          <span className="block text-xs font-bold text-white truncate">{elem.name}</span>
+                          <span className="block text-[10px] text-slate-400">Layer #{elem.layer} · {elem.type}</span>
+                        </button>
+                        <button type="button" onClick={() => updateElementField(elem.id, 'visible', !elem.visible)} className="p-1.5 rounded-lg text-slate-400 hover:text-white" title={elem.visible ? 'Sembunyikan' : 'Tampilkan'}>
                           {elem.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                         </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            updateElementField(elem.id, 'locked', !elem.locked);
-                          }}
-                          className={`p-1.5 rounded-lg text-slate-400 hover:text-white ${
-                            elem.locked ? 'text-amber-400' : ''
-                          }`}
-                        >
+                        <button type="button" onClick={() => updateElementField(elem.id, 'locked', !elem.locked)} className={`p-1.5 rounded-lg text-slate-400 hover:text-white ${elem.locked ? 'text-amber-400' : ''}`} title={elem.locked ? 'Buka kunci' : 'Kunci'}>
                           {elem.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                         </button>
                       </div>
-                    </div>
-                  );
-                })
-              )}
+                    );
+                  })
+                )}
+              </section>
             </div>
           )}
 
