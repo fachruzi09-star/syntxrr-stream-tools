@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(FloatingCompanionPlugin.class);
         registerPlugin(NativeAudioPlugin.class);
+        registerPlugin(NativeStreamingPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Allow background / programmatic audio playback without requiring touch gesture on document

@@ -14,6 +14,7 @@ import {
   TTSConfig,
   StreamEvent,
   TikTokAccountState,
+  ModeBAudioSource,
   normalizeOperatingMode,
   normalizeUnitVolume,
 } from '../types';
@@ -21,6 +22,38 @@ import { DEFAULT_TTS_CONFIG } from './ttsService';
 
 const DB_NAME = 'syntxrr_stream_tools_db';
 const DB_VERSION = 3; // Incremented for SYNTXRR STREAM Master Architecture
+
+export const STUDIO_MEDIA_URI_PREFIX = 'studio-media://';
+const VALID_STUDIO_MEDIA_ASSET_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
+export interface StoredStudioMediaAsset {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'audio';
+  mimeType: string;
+  sizeBytes: number;
+  addedAt: number;
+}
+
+export function createStudioMediaAssetUri(assetId: string): string | undefined {
+  const normalized = typeof assetId === 'string' ? assetId.trim() : '';
+  return VALID_STUDIO_MEDIA_ASSET_ID.test(normalized)
+    ? `${STUDIO_MEDIA_URI_PREFIX}${normalized}`
+    : undefined;
+}
+
+export function getStudioMediaAssetIdFromUri(uri: unknown): string | undefined {
+  if (typeof uri !== 'string' || !uri.startsWith(STUDIO_MEDIA_URI_PREFIX)) return undefined;
+  const assetId = uri.slice(STUDIO_MEDIA_URI_PREFIX.length).trim();
+  return VALID_STUDIO_MEDIA_ASSET_ID.test(assetId) ? assetId : undefined;
+}
+
+export function normalizeModeBAudioSource(value: unknown, fallback: ModeBAudioSource = 'mix'): ModeBAudioSource {
+  if (value === 'mix' || value === 'internal' || value === 'microphone') {
+    return value;
+  }
+  return fallback;
+}
 
 export const DEFAULT_SETTINGS: AppSettings = {
   operatingMode: 'MODE_A_TIKTOK_COMPANION',
@@ -30,7 +63,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'navy_dark',
   canvasOrientation: '9:16',
   rtmpServer: 'rtmp://live.twitch.tv/app',
-  streamKey: 'live_user_syntxrr_demo_key_secr',
+  streamKey: '',
+  modeBAudioSource: 'mix',
   videoBitrateKbps: 6000,
   audioBitrateKbps: 160,
   enableOverlayInPip: true,
@@ -570,10 +604,16 @@ export const DEFAULT_OVERLAY_CONFIG = DEFAULT_SCENES[0].overlayConfig;
 // IndexedDB Helper
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) {
+    const idbFactory =
+      typeof indexedDB !== 'undefined'
+        ? indexedDB
+        : typeof window !== 'undefined' && 'indexedDB' in window
+        ? window.indexedDB
+        : null;
+    if (!idbFactory) {
       return reject(new Error('IndexedDB tidak didukung'));
     }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = idbFactory.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -594,11 +634,18 @@ async function idbGet<T>(key: string): Promise<T | null> {
       const tx = db.transaction('store', 'readonly');
       const store = tx.objectStore('store');
       const request = store.get(key);
-      request.onsuccess = () => resolve(request.result ?? null);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        db.close();
+        resolve(request.result ?? null);
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
     });
   } catch {
     try {
+      if (typeof localStorage === 'undefined') return null;
       const item = localStorage.getItem(`syntxrr_${key}`);
       return item ? (JSON.parse(item) as T) : null;
     } catch {
@@ -620,22 +667,50 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
       const store = tx.objectStore('store');
       const request = store.put(value, key);
       request.onsuccess = () => {
-        if (!isBlob) {
+        db.close();
+        if (!isBlob && typeof localStorage !== 'undefined') {
           try {
             localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
           } catch {}
         }
         resolve();
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
     });
   } catch {
-    if (!isBlob) {
+    if (!isBlob && typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
       } catch {}
     }
   }
+}
+
+async function idbDelete(key: string): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('store', 'readwrite');
+      const request = tx.objectStore('store').delete(key);
+      request.onsuccess = () => {
+        db.close();
+        resolve();
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {}
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(`syntxrr_${key}`);
+    }
+  } catch {}
 }
 
 // ============================================================
@@ -682,6 +757,10 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
   if ('operatingMode' in merged) {
     merged.operatingMode = normalizeOperatingMode(merged.operatingMode as string | undefined);
   }
+  merged.modeBAudioSource = normalizeModeBAudioSource(
+    merged.modeBAudioSource,
+    normalizeModeBAudioSource(current.modeBAudioSource, 'mix'),
+  );
   if ('audioVolume' in merged) {
     merged.audioVolume = normalizeUnitVolume(merged.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85);
   }
@@ -698,6 +777,9 @@ function normalizeSettingsFields(settings: AppSettings): AppSettings {
   return {
     ...settings,
     operatingMode: normalizeOperatingMode(settings.operatingMode),
+    modeBAudioSource: normalizeModeBAudioSource(settings.modeBAudioSource, 'mix'),
+    streamKey: typeof settings.streamKey === 'string' ? settings.streamKey : '',
+    rtmpServer: typeof settings.rtmpServer === 'string' ? settings.rtmpServer : DEFAULT_SETTINGS.rtmpServer,
     audioVolume: normalizeUnitVolume(settings.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85),
     soundboardVolume: normalizeUnitVolume(settings.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85),
     micGain:
@@ -762,6 +844,117 @@ export const StorageService = {
   async saveStudioElements(elements: StudioElement[]): Promise<void> {
     const sanitized = ensureUniqueElementIds(elements);
     await idbSet('studio_elements', sanitized);
+  },
+
+  // STUDIO MEDIA ASSETS (Mode B local images / MP4 / audio stored as Blob in same DB)
+  async saveStudioMediaAsset(input: {
+    id?: string;
+    name: string;
+    type: 'image' | 'video' | 'audio';
+    mimeType: string;
+    blob: Blob;
+    addedAt?: number;
+  }): Promise<StoredStudioMediaAsset> {
+    if (!isBlobValue(input.blob) || input.blob.size <= 0) {
+      throw new Error('Berkas media Studio kosong atau tidak valid.');
+    }
+    const rawId = typeof input.id === 'string' ? input.id.trim() : '';
+    const id = VALID_STUDIO_MEDIA_ASSET_ID.test(rawId)
+      ? rawId
+      : `${input.type === 'video' ? 'vid' : input.type === 'audio' ? 'aud' : 'img'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const metadata: StoredStudioMediaAsset = {
+      id,
+      name: (input.name || id).trim().slice(0, 140),
+      type: input.type,
+      mimeType: (input.mimeType || input.blob.type || 'application/octet-stream').trim().toLowerCase(),
+      sizeBytes: input.blob.size,
+      addedAt: typeof input.addedAt === 'number' && Number.isFinite(input.addedAt) ? input.addedAt : Date.now(),
+    };
+    await idbSet(`studio_media_asset:${id}`, input.blob);
+    const currentIndex = (await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index')) || [];
+    const nextIndex = [
+      metadata,
+      ...(Array.isArray(currentIndex) ? currentIndex.filter((entry) => entry && entry.id !== id) : []),
+    ];
+    await idbSet('studio_media_assets_index', nextIndex);
+    return metadata;
+  },
+
+  async getStudioMediaAssets(): Promise<Array<StoredStudioMediaAsset & { blob: Blob }>> {
+    const index = await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index');
+    if (!Array.isArray(index) || index.length === 0) return [];
+    const results: Array<StoredStudioMediaAsset & { blob: Blob }> = [];
+    for (const metadata of index) {
+      if (
+        !metadata ||
+        !VALID_STUDIO_MEDIA_ASSET_ID.test(metadata.id) ||
+        (metadata.type !== 'image' && metadata.type !== 'video' && metadata.type !== 'audio')
+      ) {
+        continue;
+      }
+      const blob = await idbGet<Blob>(`studio_media_asset:${metadata.id}`);
+      if (isBlobValue(blob) && blob.size > 0) {
+        results.push({ ...metadata, blob });
+      }
+    }
+    return results;
+  },
+
+  /** Loads requested visual Studio media assets by ID in requested order without reading unrelated blobs. */
+  async getStudioMediaAssetsByIds(
+    ids: string[],
+  ): Promise<Array<Omit<StoredStudioMediaAsset, 'type'> & { type: 'image' | 'video'; blob: Blob }>> {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const orderedUniqueIds: string[] = [];
+    const seen = new Set<string>();
+    for (const rawId of ids) {
+      const normalized = typeof rawId === 'string' ? rawId.trim() : '';
+      if (!VALID_STUDIO_MEDIA_ASSET_ID.test(normalized) || seen.has(normalized)) continue;
+      seen.add(normalized);
+      orderedUniqueIds.push(normalized);
+    }
+    if (orderedUniqueIds.length === 0) return [];
+
+    const index = await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index');
+    if (!Array.isArray(index) || index.length === 0) return [];
+
+    const metadataById = new Map<
+      string,
+      Omit<StoredStudioMediaAsset, 'type'> & { type: 'image' | 'video' }
+    >();
+    for (const entry of index) {
+      if (
+        entry &&
+        typeof entry.id === 'string' &&
+        seen.has(entry.id) &&
+        (entry.type === 'image' || entry.type === 'video')
+      ) {
+        metadataById.set(entry.id, { ...entry, type: entry.type });
+      }
+    }
+
+    const results: Array<Omit<StoredStudioMediaAsset, 'type'> & { type: 'image' | 'video'; blob: Blob }> = [];
+    for (const id of orderedUniqueIds) {
+      const metadata = metadataById.get(id);
+      if (!metadata) continue;
+      const blob = await idbGet<Blob>(`studio_media_asset:${id}`);
+      if (isBlobValue(blob) && blob.size > 0) {
+        results.push({ ...metadata, blob });
+      }
+    }
+    return results;
+  },
+
+  async deleteStudioMediaAsset(id: string): Promise<void> {
+    if (!VALID_STUDIO_MEDIA_ASSET_ID.test(id)) return;
+    await idbDelete(`studio_media_asset:${id}`);
+    const currentIndex = (await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index')) || [];
+    if (Array.isArray(currentIndex)) {
+      await idbSet(
+        'studio_media_assets_index',
+        currentIndex.filter((entry) => entry && entry.id !== id),
+      );
+    }
   },
 
   // SOUNDBOARD

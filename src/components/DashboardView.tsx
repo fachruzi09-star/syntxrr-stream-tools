@@ -9,12 +9,19 @@ import {
   TikTokAccountState,
   TikTokConnectorStatus,
   ModeASessionMode,
+  ModeBAudioSource,
 } from '../types';
 import {
   buildModeAHonestStatus,
   isValidTikTokTargetUsername,
   resolveTikTokTargetUsername,
 } from '../services/tiktokLiveConnector';
+import type { ModeBStreamSnapshot } from '../services/nativeStreamingBridge';
+import {
+  isModeBSessionActive,
+  isModeBStoppableStatus,
+  validateModeBRtmpConfig,
+} from '../services/modeBController';
 import { useTranslation } from '../i18n/I18nContext';
 import {
   Radio,
@@ -57,6 +64,14 @@ interface DashboardViewProps {
   tiktokStatus?: TikTokConnectorStatus;
   companionRunning?: boolean;
   modeASessionMode?: ModeASessionMode;
+  modeBStatus?: ModeBStreamSnapshot;
+  isModeBActionPending?: boolean;
+  modeBNotificationWarning?: string | null;
+  onStartModeBStream?: () => Promise<void> | void;
+  onStopModeBStream?: () => Promise<void> | void;
+  onRequestModeBReshare?: () => Promise<void> | void;
+  onToggleModeBHostWait?: () => Promise<void> | void;
+  onUpdateSettings?: (settings: AppSettings) => Promise<boolean> | void;
   onStartModeAWithConnection?: () => Promise<void> | void;
   onStartModeAWithoutConnection?: () => Promise<void> | void;
   onStopModeASession?: () => Promise<void> | void;
@@ -86,6 +101,13 @@ const DEFAULT_STATUS: TikTokConnectorStatus = {
   updatedAt: 0,
 };
 
+const DEFAULT_MODE_B_STATUS: ModeBStreamSnapshot = {
+  status: 'idle',
+  message: 'Encoder Mode B siap dikonfigurasi.',
+  isStreaming: false,
+  bitrateKbps: 0,
+};
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   settings,
   activePreset,
@@ -94,6 +116,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   tiktokStatus = DEFAULT_STATUS,
   companionRunning = false,
   modeASessionMode = 'inactive',
+  modeBStatus = DEFAULT_MODE_B_STATUS,
+  isModeBActionPending = false,
+  modeBNotificationWarning = null,
+  onStartModeBStream,
+  onStopModeBStream,
+  onRequestModeBReshare,
+  onToggleModeBHostWait,
+  onUpdateSettings,
   onStartModeAWithConnection,
   onStartModeAWithoutConnection,
   onStopModeASession,
@@ -323,16 +353,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const isLiveTransportConnected =
     tiktokStatus.state === 'connected_direct' || tiktokStatus.state === 'connected_euler';
-  const heroBroadcastDotColor = isLiveTransportConnected
+  const modeBRtmpCheck = validateModeBRtmpConfig(settings.rtmpServer, settings.streamKey);
+  const modeBAudioSource: ModeBAudioSource =
+    settings.modeBAudioSource === 'internal' || settings.modeBAudioSource === 'microphone'
+      ? settings.modeBAudioSource
+      : 'mix';
+  const isModeBLiveVerified = modeBStatus.status === 'live' && modeBStatus.isStreaming;
+  const isModeBBusy = isModeBSessionActive(modeBStatus);
+
+  const heroBroadcastDotColor = isModeA
+    ? isLiveTransportConnected
+      ? 'bg-emerald-400'
+      : tiktokStatus.state === 'error'
+      ? 'bg-rose-400'
+      : 'bg-amber-400'
+    : isModeBLiveVerified
     ? 'bg-emerald-400'
-    : tiktokStatus.state === 'error'
+    : modeBStatus.status === 'error' || modeBStatus.status === 'capture_lost'
     ? 'bg-rose-400'
-    : 'bg-amber-400';
-  const heroBroadcastTextColor = isLiveTransportConnected
+    : isModeBBusy
+    ? 'bg-amber-400'
+    : 'bg-slate-500';
+
+  const heroBroadcastTextColor = isModeA
+    ? isLiveTransportConnected
+      ? 'text-emerald-300'
+      : tiktokStatus.state === 'error'
+      ? 'text-rose-300'
+      : 'text-amber-300'
+    : isModeBLiveVerified
     ? 'text-emerald-300'
-    : tiktokStatus.state === 'error'
+    : modeBStatus.status === 'error' || modeBStatus.status === 'capture_lost'
     ? 'text-rose-300'
-    : 'text-amber-300';
+    : isModeBBusy
+    ? 'text-amber-300'
+    : 'text-slate-300';
+
   const heroBroadcastLabel = isModeA
     ? isLiveTransportConnected
       ? honestStatus.eventTransport.label
@@ -346,7 +402,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         tiktokStatus.state === 'reconnecting'
       ? honestStatus.eventTransport.label
       : t('dash.statusNotConnected')
-    : t('dash.statusNotConnected');
+    : isModeBLiveVerified
+    ? `LIVE${modeBStatus.bitrateKbps > 0 ? ` · ${modeBStatus.bitrateKbps} kbps` : ''}`
+    : modeBStatus.status === 'host_wait'
+    ? 'LIVE · Layar Tunggu'
+    : modeBStatus.status === 'reshare_waiting'
+    ? 'LIVE · Menunggu Layar'
+    : modeBStatus.status === 'resharing'
+    ? 'Menyambungkan Layar…'
+    : modeBStatus.status === 'starting' || modeBStatus.status === 'connecting'
+    ? 'Memulai Encoder…'
+    : modeBStatus.status === 'stopping'
+    ? 'Menghentikan…'
+    : modeBStatus.status === 'capture_lost'
+    ? 'Capture Terputus'
+    : modeBStatus.status === 'error'
+    ? 'Encoder Error'
+    : modeBStatus.status === 'disconnected'
+    ? 'RTMP Terputus'
+    : modeBStatus.status === 'stopped'
+    ? 'Siaran Berhenti'
+    : 'Mode B Standby';
 
   return (
     <div className="space-y-6 pb-20 md:pb-8">
@@ -666,42 +742,210 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
             <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
               {isEnglish
-                ? 'Standalone broadcast encoder with RTMP/RTMPS output, screen capture (MediaProjection), camera, microphone, and direct overlay compositing into a 1080p stream.'
-                : 'Encoder siaran mandiri dengan input RTMP/RTMPS, penangkapan layar (MediaProjection), kamera, mikrofon, dan komposisi overlay langsung menjadi video stream 1080p.'}
+                ? 'Standalone native MediaProjection capture, H.264/AAC encoding, selectable audio source, and RTMP/RTMPS broadcast output.'
+                : 'Encoder siaran mandiri dengan capture layar native (MediaProjection), encoding H.264/AAC, pilihan sumber audio, dan output RTMP/RTMPS.'}
             </p>
 
             <div className="mt-4 pt-3 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-[11px]">
               <div>
                 <span className="text-slate-400">{isEnglish ? 'Encoder Pipe:' : 'Pipa Encoder:'}</span>
-                <span className="ml-1 text-sky-400 font-semibold font-mono">1080p H.264</span>
+                <span className="ml-1 text-sky-400 font-semibold font-mono">{settings.targetResolution} · {settings.frameRate} FPS</span>
               </div>
               <div>
-                <span className="text-slate-400">{isEnglish ? 'RAM Allocation:' : 'Alokasi RAM:'}</span>
-                <span className="ml-1 text-amber-400 font-semibold font-mono">~130 MB</span>
+                <span className="text-slate-400">{isEnglish ? 'Bitrate Target:' : 'Target Bitrate:'}</span>
+                <span className="ml-1 text-amber-400 font-semibold font-mono">{settings.videoBitrateKbps} kbps</span>
               </div>
             </div>
 
-            <div className="mt-4 flex gap-2">
+            {/* Sumber Audio Mode B & Status Real Encoder */}
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="mt-4 rounded-xl border border-slate-700/80 bg-[#080c16] p-3.5 space-y-3 cursor-default"
+            >
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-semibold text-slate-300">
+                  {isEnglish ? 'Broadcast Audio Source' : 'Sumber Audio Siaran Mode B'}
+                </div>
+                <div className="grid grid-cols-3 gap-1.5" role="group" aria-label={isEnglish ? 'Select Mode B audio source' : 'Pilih sumber audio Mode B'}>
+                  {[
+                    { value: 'mix' as const, label: isEnglish ? 'Mixed' : 'Campuran', detail: isEnglish ? 'System + Mic' : 'Sistem + Mic' },
+                    { value: 'internal' as const, label: isEnglish ? 'Internal' : 'Internal', detail: 'Android 10+' },
+                    { value: 'microphone' as const, label: isEnglish ? 'Microphone' : 'Mikrofon', detail: isEnglish ? 'Mic only' : 'Mic saja' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={modeBAudioSource === option.value}
+                      disabled={isModeBActionPending || isModeBBusy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onUpdateSettings?.({ ...settings, modeBAudioSource: option.value });
+                      }}
+                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors disabled:opacity-50 ${
+                        modeBAudioSource === option.value
+                          ? 'border-sky-500 bg-sky-950/60 text-sky-200'
+                          : 'border-slate-700 bg-slate-900/70 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span className="block text-[11px] font-bold">{option.label}</span>
+                      <span className="block text-[9px] mt-0.5 opacity-80">{option.detail}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] leading-relaxed text-slate-500">
+                  {isEnglish
+                    ? 'Internal audio requires Android 10+ and RECORD_AUDIO permission. Mixed captures both device playback and microphone where supported.'
+                    : 'Audio internal memerlukan Android 10+ dan izin RECORD_AUDIO. Campuran menangkap audio sistem dan mikrofon bila didukung perangkat.'}
+                </p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    {isEnglish ? 'Native Encoder Status' : 'Status Encoder Native'}
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wide ${
+                      isModeBLiveVerified || modeBStatus.status === 'host_wait'
+                        ? 'text-emerald-400'
+                        : modeBStatus.status === 'error' || modeBStatus.status === 'capture_lost'
+                        ? 'text-rose-400'
+                        : isModeBBusy
+                        ? 'text-amber-300'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {modeBStatus.status === 'live'
+                      ? 'LIVE'
+                      : modeBStatus.status === 'host_wait'
+                      ? 'LIVE · LAYAR TUNGGU'
+                      : modeBStatus.status === 'reshare_waiting'
+                      ? 'LIVE · MENUNGGU LAYAR'
+                      : modeBStatus.status === 'resharing'
+                      ? 'LIVE · MENYAMBUNGKAN LAYAR'
+                      : modeBStatus.status.replaceAll('_', ' ')}
+                    {modeBStatus.bitrateKbps > 0 ? ` · ${modeBStatus.bitrateKbps} kbps` : ''}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-slate-300" role="status" aria-live="polite">
+                  {modeBStatus.status === 'capture_lost'
+                    ? isEnglish
+                      ? 'Screen capture stopped by Android or user. RTMP session ended. Start again to grant fresh screen permission.'
+                      : modeBStatus.message || 'Capture layar dihentikan oleh sistem atau pengguna. Mulai ulang siaran untuk izin layar baru.'
+                    : modeBStatus.status === 'reshare_waiting'
+                    ? isEnglish
+                      ? 'RTMP session remains active. Tap Share Screen Again to restore video frames.'
+                      : 'Koneksi RTMP tetap aktif. Ketuk Bagikan Layar Lagi untuk memulihkan tampilan video.'
+                    : modeBStatus.message}
+                </p>
+              </div>
+
+              {!modeBRtmpCheck.valid && (
+                <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-200 flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>{modeBRtmpCheck.summaryError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('settings')}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-bold text-[10px] shrink-0"
+                  >
+                    Atur RTMP
+                  </button>
+                </div>
+              )}
+
+              {modeBNotificationWarning && (
+                <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>{modeBNotificationWarning}</span>
+                </div>
+              )}
+
+              {activePreset?.backgroundUri && (
+                <p className="text-[10px] leading-relaxed text-sky-300/90" role="note">
+                  Mode B menampilkan background lokal di bawah layer Tangkapan Layar. Pastikan elemen Tangkapan Layar berada pada layer paling bawah di Studio (Crop Fit &amp; rotasi 0°/90°/180°/270°).
+                </p>
+              )}
+            </div>
+
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="mt-4 flex flex-col sm:flex-row flex-wrap gap-2 cursor-default"
+            >
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectMode('MODE_B_STREAMING_ENCODER');
+                disabled={
+                  isModeBActionPending ||
+                  modeBStatus.status === 'live' ||
+                  modeBStatus.status === 'host_wait' ||
+                  ['starting', 'connecting', 'stopping', 'resharing'].includes(modeBStatus.status)
+                }
+                onClick={() => {
+                  if (
+                    modeBStatus.status === 'reshare_waiting' ||
+                    (modeBStatus.status === 'capture_lost' && modeBStatus.isStreaming)
+                  ) {
+                    void onRequestModeBReshare?.();
+                  } else {
+                    void onStartModeBStream?.();
+                  }
                 }}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  !isModeA
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
+                className="flex-1 min-w-[160px] py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {!isModeA ? (isEnglish ? 'Mode B Active' : 'Mode B Aktif') : (isEnglish ? 'Select Mode B' : 'Pilih Mode B')}
+                {isModeBActionPending ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Play className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isModeBActionPending
+                    ? 'Memproses…'
+                    : modeBStatus.status === 'live'
+                    ? 'Siaran LIVE Aktif'
+                    : modeBStatus.status === 'reshare_waiting'
+                    ? 'Bagikan Layar Lagi'
+                    : modeBStatus.status === 'resharing'
+                    ? 'Menyambungkan Layar…'
+                    : modeBStatus.status === 'capture_lost'
+                    ? 'Bagikan Layar Lagi & Mulai Ulang'
+                    : 'Mulai Siaran RTMP (Go Live)'}
+                </span>
               </button>
+
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNavigate('settings');
+                disabled={isModeBActionPending || !isModeBStoppableStatus(modeBStatus.status)}
+                onClick={() => {
+                  void onStopModeBStream?.();
                 }}
+                className="py-2.5 px-3.5 rounded-xl bg-rose-950/60 border border-rose-700/80 text-xs font-bold text-rose-100 hover:bg-rose-900/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Square className="w-3.5 h-3.5" />
+                <span>Hentikan</span>
+              </button>
+
+              {['live', 'host_wait'].includes(modeBStatus.status) && (
+                <button
+                  type="button"
+                  disabled={isModeBActionPending}
+                  onClick={() => {
+                    void onToggleModeBHostWait?.();
+                  }}
+                  className={`py-2.5 px-3.5 rounded-xl border text-xs font-semibold transition-colors disabled:opacity-40 ${
+                    modeBStatus.status === 'host_wait'
+                      ? 'bg-cyan-950/60 border-cyan-600 text-cyan-200 hover:bg-cyan-900/70'
+                      : 'bg-slate-900 border-slate-700 text-slate-200 hover:border-cyan-600 hover:text-cyan-200'
+                  }`}
+                >
+                  {modeBStatus.status === 'host_wait' ? 'Lanjutkan Tampilan LIVE' : 'Layar Tunggu Host'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onNavigate('settings')}
                 className="py-2.5 px-3 rounded-xl bg-[#080c16] border border-slate-700 text-xs font-semibold text-slate-200 hover:text-white transition-colors"
               >
                 RTMP Settings
@@ -1056,7 +1300,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
         <p className="leading-relaxed text-[11px] text-slate-300">
-          Izin <code>SYSTEM_ALERT_WINDOW</code> (Jendela Mengambang) diperlukan untuk Mode A (TikTok Companion). Izin <code>READ_MEDIA_AUDIO</code> dan <code>RECORD_AUDIO</code> diperlukan untuk pemutar lagu lokal dan penangkapan mikrofon siaran.
+          Izin <code>SYSTEM_ALERT_WINDOW</code> (Jendela Mengambang) diperlukan untuk Mode A (TikTok Companion). Izin <code>POST_NOTIFICATIONS</code> diperlukan Android 13+ untuk status foreground service Mode A dan Mode B. Izin <code>READ_MEDIA_AUDIO</code> dan <code>RECORD_AUDIO</code> diperlukan untuk audio lokal, capture audio internal/mikrofon, serta MediaProjection untuk Mode B.
         </p>
       </section>
     </div>
