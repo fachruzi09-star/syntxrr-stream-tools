@@ -18,7 +18,20 @@ import {
   SongRequestState,
   SongRequestTestPipelineResult,
 } from '../services/songRequestEngine';
-import { ensureUniqueElementIds, DEFAULT_MARKETPLACE_ITEMS } from '../services/storage';
+import {
+  ensureUniqueElementIds,
+  DEFAULT_MARKETPLACE_ITEMS,
+  StorageService,
+  createStudioMediaAssetUri,
+  getStudioMediaAssetIdFromUri,
+} from '../services/storage';
+import type { ModeBStreamSnapshot } from '../services/nativeStreamingBridge';
+import {
+  MODE_B_SCREENSAVER_DEFAULT_FADE_MS,
+  MODE_B_SCREENSAVER_DEFAULT_TEXT,
+  isSupportedScreensaverAssetSelection,
+  toStudioScreensaverSettings,
+} from '../services/modeBScreensaverPolicy';
 import { SOURCE_CATALOG } from './SourcesLibraryView';
 import {
   Tv,
@@ -93,6 +106,22 @@ interface StudioViewProps {
   // Production Hub Integration
   marketplaceItems?: MarketplaceItem[];
   onInstallMarketplaceElements?: (elements: StudioElement[]) => void;
+  // Mode B RTMP Encoder Integration
+  isModeBSelected?: boolean;
+  modeBStatus?: ModeBStreamSnapshot;
+  isModeBMutationLocked?: boolean;
+  isModeBActionPending?: boolean;
+  onApplyLiveSceneToModeB?: (
+    elementsOverride?: StudioElement[],
+    presetOverride?: StudioPreset | null,
+  ) => Promise<{ success: boolean; message: string }>;
+  onUpdatePresetModeBSettings?: (
+    presetId: string,
+    patch: Pick<
+      Partial<StudioPreset>,
+      'backgroundUri' | 'screensaver' | 'transitionIn' | 'transitionOut'
+    >,
+  ) => Promise<void> | void;
 }
 
 // Active trigger reaction state for canvas animation
@@ -107,9 +136,11 @@ interface ActiveElementReaction {
 // Local Media Item in Media Library
 interface LocalMediaItem {
   id: string;
+  assetId?: string;
+  mimeType?: string;
   name: string;
   type: 'image' | 'video';
-  url: string; // Data URL or Object URL
+  url: string; // Data URL, Object URL, or HTTPS URL
   sizeBytes?: number;
   addedAt: number;
 }
@@ -130,6 +161,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onRenamePreset,
   marketplaceItems = DEFAULT_MARKETPLACE_ITEMS,
   onInstallMarketplaceElements,
+  isModeBSelected = false,
+  modeBStatus,
+  isModeBMutationLocked = false,
+  isModeBActionPending = false,
+  onApplyLiveSceneToModeB,
+  onUpdatePresetModeBSettings,
 }) => {
   // Selected Element
   const [selectedId, setSelectedId] = useState<string | null>(elements[0]?.id || null);
@@ -245,9 +282,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
   ]);
   const [previewMediaUrl, setPreviewMediaUrl] = useState<string | null>(null);
   const [previewMediaType, setPreviewMediaType] = useState<'image' | 'video'>('image');
+  const [previewAssetId, setPreviewAssetId] = useState<string | undefined>(undefined);
   const [manualMediaUrlInput, setManualMediaUrlInput] = useState<string>('');
   const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
+  const [mediaModeBNotice, setMediaModeBNotice] = useState<string | null>(null);
+  const [modeBLiveApplyFeedback, setModeBLiveApplyFeedback] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
+  const createdObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -324,7 +368,55 @@ export const StudioView: React.FC<StudioViewProps> = ({
     });
   }, [elements]);
 
-  // Cleanup all remaining camera and screen tracks strictly on component unmount
+  const activePreset = presets.find((p) => p.id === activePresetId) || presets[0] || null;
+  const isModeBLive = Boolean(
+    isModeBSelected && modeBStatus?.status === 'live' && modeBStatus?.isStreaming,
+  );
+  const isStrictModeBLocked = Boolean(
+    isModeBSelected && isModeBMutationLocked && !isModeBLive,
+  );
+
+  // Hydrate persisted Studio media assets (images & MP4/video blobs) from IndexedDB cleanly
+  useEffect(() => {
+    let cancelled = false;
+    void StorageService.getStudioMediaAssets()
+      .then((assets) => {
+        if (cancelled || !assets.length) return;
+        const hydrated: LocalMediaItem[] = [];
+        for (const asset of assets) {
+          if (asset.type !== 'image' && asset.type !== 'video') continue;
+          let objUrl = createdObjectUrlsRef.current.get(asset.id);
+          if (!objUrl) {
+            objUrl = URL.createObjectURL(asset.blob);
+            createdObjectUrlsRef.current.set(asset.id, objUrl);
+          }
+          hydrated.push({
+            id: asset.id,
+            assetId: asset.id,
+            mimeType: asset.mimeType,
+            name: asset.name,
+            type: asset.type,
+            url: objUrl,
+            sizeBytes: asset.sizeBytes,
+            addedAt: asset.addedAt,
+          });
+        }
+        if (hydrated.length === 0) return;
+        setMediaLibrary((prev) => {
+          const seenIds = new Set(hydrated.map((item) => item.id));
+          return [...hydrated, ...prev.filter((item) => !seenIds.has(item.id))];
+        });
+      })
+      .catch((err) => {
+        console.warn('Gagal memuat pustaka media Studio dari penyimpanan lokal:', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Cleanup all remaining camera, screen tracks, and object URLs strictly on component unmount
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -335,6 +427,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (screenCaptureStreamRef.current) {
         screenCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
       }
+      createdObjectUrlsRef.current.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      });
+      createdObjectUrlsRef.current.clear();
     };
   }, []);
 
@@ -438,25 +536,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Record undo/redo history
   const commitElements = useCallback(
     (newElements: StudioElement[]) => {
+      if (isStrictModeBLocked) return;
       setHistory((prev) => [...prev.slice(-15), elements]);
       setRedoStack([]);
       onUpdateElements(ensureUniqueElementIds(newElements));
     },
-    [elements, onUpdateElements]
+    [elements, isStrictModeBLocked, onUpdateElements]
   );
 
   // Lightweight live update during drag: updates elements without pushing undo history
   const updateElementLive = useCallback(
     (id: string, updates: Partial<StudioElement>) => {
+      if (isStrictModeBLocked) return;
       const updated = elementsRef.current.map((elem) =>
         elem.id === id ? { ...elem, ...updates } : elem
       );
       onUpdateElements(updated);
     },
-    [onUpdateElements]
+    [isStrictModeBLocked, onUpdateElements]
   );
 
   const handleUndo = () => {
+    if (isStrictModeBLocked) return;
     if (history.length === 0) return;
     const previous = history[history.length - 1];
     setRedoStack((prev) => [...prev, elements]);
@@ -465,6 +566,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleRedo = () => {
+    if (isStrictModeBLocked) return;
     if (redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1];
     setHistory((prev) => [...prev, elements]);
@@ -473,6 +575,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementField = (id: string, field: keyof StudioElement, value: any) => {
+    if (isStrictModeBLocked) return;
     const updated = elements.map((elem) => {
       if (elem.id === id) {
         return { ...elem, [field]: value };
@@ -483,14 +586,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementProperty = (id: string, key: string, value: any) => {
+    if (isStrictModeBLocked) return;
     const updated = elements.map((elem) => {
       if (elem.id === id) {
+        const nextProperties = {
+          ...elem.properties,
+          [key]: value,
+        };
+        if (key === 'imageUrl' && typeof value === 'string' && !value.startsWith('studio-media://')) {
+          delete nextProperties.imageAssetId;
+        }
+        if (key === 'videoUrl' && typeof value === 'string' && !value.startsWith('studio-media://')) {
+          delete nextProperties.videoAssetId;
+        }
         return {
           ...elem,
-          properties: {
-            ...elem.properties,
-            [key]: value,
-          },
+          properties: nextProperties,
         };
       }
       return elem;
@@ -499,6 +610,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementTrigger = (id: string, partial: any) => {
+    if (isStrictModeBLocked) return;
     const updated = elements.map((elem) => {
       if (elem.id === id) {
         return {
@@ -713,6 +825,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Add Element with strictly mapped auto-triggers and defaults
   const handleAddQuickElement = (type: SourceType, defaultName: string) => {
+    if (isStrictModeBLocked) return;
     const uniqueId = `elem_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     let defaultWidth = 80;
     let defaultHeight = 12;
@@ -914,6 +1027,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleDuplicate = (id: string) => {
+    if (isStrictModeBLocked) return;
     const target = elements.find((e) => e.id === id);
     if (!target) return;
     const clone: StudioElement = {
@@ -929,6 +1043,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleDelete = (id: string) => {
+    if (isStrictModeBLocked) return;
     if (activeCameraStreams[id]) {
       activeCameraStreams[id].getTracks().forEach((t) => t.stop());
       setActiveCameraStreams((prev) => {
@@ -946,6 +1061,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleMoveLayer = (id: string, direction: 'up' | 'down') => {
+    if (isStrictModeBLocked) return;
     const index = elements.findIndex((e) => e.id === id);
     if (index === -1) return;
     if (direction === 'up' && index === elements.length - 1) return;
@@ -963,7 +1079,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // UNIFIED POINTER DRAG & RESIZE SYSTEM (FIXES HORIZONTAL & VERTICAL MOVEMENT)
   const handleElementPointerDown = (e: React.PointerEvent, elem: StudioElement) => {
-    if (elem.locked) return;
+    if (elem.locked || isStrictModeBLocked) return;
     if (e.button !== 0) return; // Only primary button
     e.stopPropagation();
     setSelectedId(elem.id);
@@ -990,7 +1106,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleResizePointerDown = (e: React.PointerEvent, elem: StudioElement, handle: string) => {
-    if (elem.locked) return;
+    if (elem.locked || isStrictModeBLocked) return;
     if (e.button !== 0) return;
     e.stopPropagation();
     setSelectedId(elem.id);
@@ -1083,10 +1199,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  // LOCAL MEDIA IMPORT HANDLERS (ACTUAL HTML5 FILE SELECTOR)
-  const handleLocalImageSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // LOCAL MEDIA IMPORT HANDLERS (PERSISTED TO INDEXEDDB FOR STUDIO & MODE B NATIVE)
+  const handleLocalImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setMediaUploadError(null);
+    setMediaModeBNotice(null);
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
@@ -1094,31 +1212,40 @@ export const StudioView: React.FC<StudioViewProps> = ({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const newItem: LocalMediaItem = {
-        id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    try {
+      const saved = await StorageService.saveStudioMediaAsset({
         name: file.name,
         type: 'image',
-        url: dataUrl,
-        sizeBytes: file.size,
-        addedAt: Date.now(),
+        mimeType: file.type,
+        blob: file,
+      });
+      const objUrl = URL.createObjectURL(file);
+      createdObjectUrlsRef.current.set(saved.id, objUrl);
+
+      const newItem: LocalMediaItem = {
+        id: saved.id,
+        assetId: saved.id,
+        mimeType: saved.mimeType,
+        name: saved.name,
+        type: 'image',
+        url: objUrl,
+        sizeBytes: saved.sizeBytes,
+        addedAt: saved.addedAt,
       };
-      setMediaLibrary((prev) => [newItem, ...prev]);
-      setPreviewMediaUrl(dataUrl);
+      setMediaLibrary((prev) => [newItem, ...prev.filter((item) => item.id !== saved.id)]);
+      setPreviewMediaUrl(objUrl);
       setPreviewMediaType('image');
-    };
-    reader.onerror = () => {
-      setMediaUploadError('Gagal membaca file gambar dari media penyimpanan.');
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+      setPreviewAssetId(saved.id);
+    } catch (err: any) {
+      setMediaUploadError(err?.message || 'Gagal menyimpan file gambar ke penyimpanan lokal.');
+    }
   };
 
-  const handleLocalVideoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLocalVideoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setMediaUploadError(null);
+    setMediaModeBNotice(null);
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     if (!file.type.startsWith('video/')) {
@@ -1126,22 +1253,61 @@ export const StudioView: React.FC<StudioViewProps> = ({
       return;
     }
 
-    const objUrl = URL.createObjectURL(file);
-    const newItem: LocalMediaItem = {
-      id: `vid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: file.name,
-      type: 'video',
-      url: objUrl,
-      sizeBytes: file.size,
-      addedAt: Date.now(),
-    };
-    setMediaLibrary((prev) => [newItem, ...prev]);
-    setPreviewMediaUrl(objUrl);
-    setPreviewMediaType('video');
-    e.target.value = '';
+    try {
+      const saved = await StorageService.saveStudioMediaAsset({
+        name: file.name,
+        type: 'video',
+        mimeType: file.type,
+        blob: file,
+      });
+      const objUrl = URL.createObjectURL(file);
+      createdObjectUrlsRef.current.set(saved.id, objUrl);
+
+      const newItem: LocalMediaItem = {
+        id: saved.id,
+        assetId: saved.id,
+        mimeType: saved.mimeType,
+        name: saved.name,
+        type: 'video',
+        url: objUrl,
+        sizeBytes: saved.sizeBytes,
+        addedAt: saved.addedAt,
+      };
+      setMediaLibrary((prev) => [newItem, ...prev.filter((item) => item.id !== saved.id)]);
+      setPreviewMediaUrl(objUrl);
+      setPreviewMediaType('video');
+      setPreviewAssetId(saved.id);
+
+      if (saved.mimeType !== 'video/mp4') {
+        setMediaModeBNotice(
+          'Video tersimpan untuk pratinjau Studio. Untuk output native Mode B, gunakan video berformat MP4 (video/mp4).',
+        );
+      }
+    } catch (err: any) {
+      setMediaUploadError(err?.message || 'Gagal menyimpan file video ke penyimpanan lokal.');
+    }
+  };
+
+  const handleDeleteLocalMediaAsset = async (item: LocalMediaItem) => {
+    if (isStrictModeBLocked || !item.assetId) return;
+    await StorageService.deleteStudioMediaAsset(item.assetId);
+    const cachedUrl = createdObjectUrlsRef.current.get(item.assetId);
+    if (cachedUrl) {
+      try {
+        URL.revokeObjectURL(cachedUrl);
+      } catch {}
+      createdObjectUrlsRef.current.delete(item.assetId);
+    }
+    setMediaLibrary((prev) => prev.filter((entry) => entry.id !== item.id));
+    if (previewAssetId === item.assetId) {
+      setPreviewMediaUrl(null);
+      setPreviewAssetId(undefined);
+    }
   };
 
   const handleAddMediaToCanvas = (item: LocalMediaItem) => {
+    if (isStrictModeBLocked) return;
+    const assetUri = item.assetId ? createStudioMediaAssetUri(item.assetId) : undefined;
     if (item.type === 'image') {
       const newElem: StudioElement = {
         id: `elem_image_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1157,7 +1323,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         opacity: 100,
         rotation: 0,
         properties: {
-          imageUrl: item.url,
+          imageUrl: assetUri || item.url,
+          ...(item.assetId ? { imageAssetId: item.assetId } : {}),
           borderRadius: 8,
         },
       };
@@ -1179,7 +1346,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         opacity: 100,
         rotation: 0,
         properties: {
-          videoUrl: item.url,
+          videoUrl: assetUri || item.url,
+          ...(item.assetId ? { videoAssetId: item.assetId } : {}),
           loop: true,
           muted: true,
         },
@@ -1190,13 +1358,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  const handleApplyMediaToSelectedElement = (url: string) => {
-    if (!selectedElement) return;
-    if (selectedElement.type === 'image' || selectedElement.type === 'sticker') {
-      updateElementProperty(selectedElement.id, 'imageUrl', url);
-    } else if (selectedElement.type === 'video') {
-      updateElementProperty(selectedElement.id, 'videoUrl', url);
-    }
+  const handleApplyMediaToSelectedElement = (url: string, assetId?: string) => {
+    if (!selectedElement || isStrictModeBLocked) return;
+    const assetUri = assetId ? createStudioMediaAssetUri(assetId) : undefined;
+    const updated = elements.map((elem) => {
+      if (elem.id !== selectedElement.id) return elem;
+      const nextProps = { ...elem.properties };
+      if (selectedElement.type === 'image' || selectedElement.type === 'sticker') {
+        nextProps.imageUrl = assetUri || url;
+        if (assetId) nextProps.imageAssetId = assetId;
+        else delete nextProps.imageAssetId;
+      } else if (selectedElement.type === 'video') {
+        nextProps.videoUrl = assetUri || url;
+        if (assetId) nextProps.videoAssetId = assetId;
+        else delete nextProps.videoAssetId;
+      }
+      return { ...elem, properties: nextProps };
+    });
+    commitElements(updated);
   };
 
   // Event Simulator Emitter
@@ -1264,6 +1443,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   });
 
   const handleInstallMarketplacePack = (item: MarketplaceItem) => {
+    if (isStrictModeBLocked) return;
     if (onInstallMarketplaceElements) {
       onInstallMarketplaceElements(item.elementsPayload);
     } else {
@@ -1274,6 +1454,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
       commitElements([...elements, ...freshElements]);
     }
     setActiveSidePanel('properties');
+  };
+
+  const resolveStudioElementMediaSrc = (elem: StudioElement, kind: 'image' | 'video'): string => {
+    const rawUrl = kind === 'video' ? elem.properties.videoUrl : elem.properties.imageUrl;
+    const explicitAssetId =
+      kind === 'video' ? elem.properties.videoAssetId : elem.properties.imageAssetId;
+    const assetId =
+      (typeof explicitAssetId === 'string' && explicitAssetId.trim()) ||
+      getStudioMediaAssetIdFromUri(rawUrl);
+
+    if (assetId) {
+      const matched = mediaLibrary.find((m) => m.assetId === assetId || m.id === assetId);
+      if (matched?.url) return matched.url;
+      const cached = createdObjectUrlsRef.current.get(assetId);
+      if (cached) return cached;
+      return '';
+    }
+    return typeof rawUrl === 'string' ? rawUrl : '';
   };
 
   // Render Element on Canvas
@@ -1587,10 +1785,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
         );
 
       case 'image':
-      case 'sticker':
-        return elem.properties.imageUrl ? (
+      case 'sticker': {
+        const resolvedImgSrc = resolveStudioElementMediaSrc(elem, 'image');
+        return resolvedImgSrc ? (
           <img
-            src={elem.properties.imageUrl}
+            src={resolvedImgSrc}
             alt={elem.name}
             className={`w-full h-full object-contain rounded select-none pointer-events-none ${animClass}`}
           />
@@ -1600,11 +1799,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <span className="text-[9px] font-bold">{elem.name}</span>
           </div>
         );
+      }
 
-      case 'video':
-        return elem.properties.videoUrl ? (
+      case 'video': {
+        const resolvedVideoSrc = resolveStudioElementMediaSrc(elem, 'video');
+        return resolvedVideoSrc ? (
           <video
-            src={elem.properties.videoUrl}
+            src={resolvedVideoSrc}
             autoPlay
             loop
             muted
@@ -1617,6 +1818,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <span className="text-[9px] font-bold">Video Background Loop</span>
           </div>
         );
+      }
 
       default:
         return (
@@ -1744,14 +1946,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <div className="flex items-center space-x-3">
                 <button
                   onClick={() => setSelectorCreateModalOpen(true)}
-                  className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-sm flex items-center space-x-2 transition shadow-lg shadow-blue-600/25"
+                  disabled={isModeBMutationLocked}
+                  className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-sm flex items-center space-x-2 transition shadow-lg shadow-blue-600/25 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Buat Preset Baru</span>
                 </button>
                 <button
                   onClick={handleSelectorBlankCanvas}
-                  className="px-4 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] active:scale-95 text-slate-300 hover:text-white font-bold text-sm flex items-center space-x-2 transition"
+                  disabled={isStrictModeBLocked}
+                  className="px-4 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] active:scale-95 text-slate-300 hover:text-white font-bold text-sm flex items-center space-x-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Layout className="w-4 h-4" />
                   <span>Kanvas Kosong</span>
@@ -1875,7 +2079,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     <div className="flex items-center space-x-1">
                       <button
                         onClick={() => onDuplicatePreset?.(preset.id)}
-                        className="p-2 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-slate-300 text-xs transition"
+                        disabled={isModeBMutationLocked}
+                        className="p-2 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-slate-300 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Duplikasi"
                       >
                         <Copy className="w-3.5 h-3.5" />
@@ -1883,7 +2088,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       {presets.length > 1 && (
                         <button
                           onClick={() => onDeletePreset?.(preset.id)}
-                          className="p-2 rounded-lg bg-[#1e293b] hover:bg-red-500/20 text-slate-400 hover:text-red-400 text-xs transition"
+                          disabled={isModeBMutationLocked}
+                          className="p-2 rounded-lg bg-[#1e293b] hover:bg-red-500/20 text-slate-400 hover:text-red-400 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Hapus"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -2051,8 +2257,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <div className="flex items-center p-1 bg-[#0e1626] rounded-xl border border-slate-800 text-xs font-semibold">
             <button
               type="button"
+              disabled={isModeBMutationLocked}
               onClick={() => onChangeOrientation('9:16')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 canvasOrientation === '9:16'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2062,8 +2269,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </button>
             <button
               type="button"
+              disabled={isModeBMutationLocked}
               onClick={() => onChangeOrientation('16:9')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 canvasOrientation === '16:9'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2073,8 +2281,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </button>
             <button
               type="button"
+              disabled={isModeBMutationLocked}
               onClick={() => onChangeOrientation('1:1')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 canvasOrientation === '1:1'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -2086,8 +2295,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           <button
             type="button"
+            disabled={isModeBMutationLocked}
             onClick={onSaveAsPreset}
-            className="min-h-[38px] px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md"
+            className="min-h-[38px] px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Sparkles className="w-4 h-4" /> Simpan Preset
           </button>
@@ -2101,6 +2311,53 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Mode B Active Status / Lock / Live Apply Banner */}
+      {isModeBSelected && isModeBMutationLocked && (
+        <div
+          className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            isModeBLive
+              ? 'bg-emerald-950/35 border-emerald-700/60 text-emerald-100'
+              : 'bg-amber-950/40 border-amber-700/60 text-amber-100'
+          }`}
+        >
+          <div className="space-y-1 text-xs">
+            <div className="font-bold flex items-center gap-2">
+              <Lock className="w-4 h-4 shrink-0" />
+              {isModeBLive
+                ? 'Mode B sedang LIVE — Orientasi & Struktur Preset Dikunci'
+                : `Mode B sedang sibuk (${modeBStatus?.status || 'transisi'}) — Mutasi Kanvas Dikunci Sementara`}
+            </div>
+            <p className="text-[11px] opacity-90 leading-relaxed">
+              {isModeBLive
+                ? 'Anda tetap dapat menyesuaikan overlay/teks/layar tunggu atau memilih preset statis yang kompatibel, lalu tekan "Terapkan Perubahan ke LIVE" untuk mengirim ke encoder native.'
+                : 'Mutasi struktur kanvas dan preset diblokir sementara selama Mode B memulai, menghentikan, atau meminta ulang Screen Share.'}
+            </p>
+            {modeBLiveApplyFeedback && (
+              <div
+                className={`text-[11px] font-semibold pt-0.5 ${
+                  modeBLiveApplyFeedback.success ? 'text-emerald-300' : 'text-amber-300'
+                }`}
+              >
+                {modeBLiveApplyFeedback.message}
+              </div>
+            )}
+          </div>
+          {isModeBLive && onApplyLiveSceneToModeB && (
+            <button
+              type="button"
+              disabled={isModeBActionPending}
+              onClick={async () => {
+                const res = await onApplyLiveSceneToModeB(elements, activePreset);
+                setModeBLiveApplyFeedback(res);
+              }}
+              className="shrink-0 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isModeBActionPending ? 'Menerapkan...' : 'Terapkan Perubahan ke LIVE'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Main Studio Viewport Split (Canvas on Left, Modular Consolidated Panel on Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -2546,6 +2803,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <p className="text-[11px] text-slate-400 leading-relaxed">
                           Menangkap feed game Android atau tampilan layar dengan MediaProjection 60 FPS.
                         </p>
+                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[10px] text-slate-300 space-y-1">
+                          <div>
+                            <strong className="text-rose-300">Aturan Mode B RTMP:</strong> Layer Tangkapan Layar harus berada di lapisan paling bawah (Layer #1 / di bawah semua overlay).
+                          </div>
+                          <div className="text-slate-400">
+                            Crop Mode aktif: <span className="font-mono text-white">Fit</span> · Rotasi didukung: <span className="font-mono text-white">0° / 90° / 180° / 270°</span>.
+                          </div>
+                        </div>
                         <button
                           type="button"
                           onClick={handleToggleScreenCapture}
@@ -3515,8 +3780,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
                 <button
                   type="button"
+                  disabled={isModeBMutationLocked}
                   onClick={() => setNewPresetModalOpen(true)}
-                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-3 h-3" /> Baru
                 </button>
@@ -3627,8 +3893,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           )}
                           <button
                             type="button"
+                            disabled={isStrictModeBLocked || isModeBActionPending}
                             onClick={() => handleApplyPresetToScene(preset)}
-                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold"
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             Terapkan
                           </button>
@@ -3638,6 +3905,228 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   );
                 })}
               </div>
+
+              {/* Active Preset Mode B Background & Screensaver Settings */}
+              {activePreset && onUpdatePresetModeBSettings && (() => {
+                const screensaver = toStudioScreensaverSettings(activePreset.screensaver);
+                const savedLocalVisualAssets = mediaLibrary.filter((m) => Boolean(m.assetId));
+                const compatibleScreensaverAssets = savedLocalVisualAssets.filter((m) =>
+                  isSupportedScreensaverAssetSelection(
+                    screensaver.mediaType === 'video' ? 'video' : 'image',
+                    m.type,
+                    m.mimeType || '',
+                  ),
+                );
+                const readTransitionType = (t: unknown): 'fade' | 'cut' => {
+                  if (t === 'cut' || t === 'none') return 'cut';
+                  if (t && typeof t === 'object' && (t as any).type === 'cut') return 'cut';
+                  return 'fade';
+                };
+
+                return (
+                  <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-400">
+                        Pengaturan Mode B Preset Aktif
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400 truncate max-w-[140px]">
+                        {activePreset.name}
+                      </span>
+                    </div>
+
+                    {/* Background Studio Media */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-300 block">
+                        Background Studio (Opsional)
+                      </label>
+                      <select
+                        disabled={isStrictModeBLocked}
+                        value={activePreset.backgroundUri || ''}
+                        onChange={(e) =>
+                          void onUpdatePresetModeBSettings(activePreset.id, {
+                            backgroundUri: e.target.value || undefined,
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
+                      >
+                        <option value="">Tanpa Background Studio</option>
+                        {savedLocalVisualAssets.map((item) => {
+                          const uri = createStudioMediaAssetUri(item.assetId!) || '';
+                          return (
+                            <option key={item.id} value={uri}>
+                              {item.type === 'video' ? '[Video]' : '[Gambar]'} {item.name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* Layar Tunggu / Host Wait */}
+                    <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-[11px] font-bold text-white">Layar Tunggu (Screensaver)</div>
+                          <div className="text-[10px] text-slate-400">
+                            Ditampilkan saat mode Layar Tunggu diaktifkan ketika LIVE.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isStrictModeBLocked}
+                          onClick={() =>
+                            void onUpdatePresetModeBSettings(activePreset.id, {
+                              screensaver: { ...screensaver, on: !screensaver.on },
+                            })
+                          }
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors disabled:opacity-50 ${
+                            screensaver.on
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {screensaver.on ? 'Siap Pakai' : 'Standby'}
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
+                          Teks Layar Tunggu
+                        </label>
+                        <input
+                          type="text"
+                          disabled={isStrictModeBLocked}
+                          value={screensaver.text || ''}
+                          onChange={(e) =>
+                            void onUpdatePresetModeBSettings(activePreset.id, {
+                              screensaver: { ...screensaver, text: e.target.value },
+                            })
+                          }
+                          placeholder={MODE_B_SCREENSAVER_DEFAULT_TEXT}
+                          className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
+                            Jenis Media
+                          </label>
+                          <select
+                            disabled={isStrictModeBLocked}
+                            value={screensaver.mediaType === 'video' ? 'video' : 'image'}
+                            onChange={(e) =>
+                              void onUpdatePresetModeBSettings(activePreset.id, {
+                                screensaver: {
+                                  ...screensaver,
+                                  mediaType: e.target.value === 'video' ? 'video' : 'image',
+                                  media: '',
+                                },
+                              })
+                            }
+                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
+                          >
+                            <option value="image">Gambar (PNG/JPG/GIF)</option>
+                            <option value="video">Video MP4</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
+                            Asset Lokal
+                          </label>
+                          <select
+                            disabled={isStrictModeBLocked}
+                            value={screensaver.media || ''}
+                            onChange={(e) =>
+                              void onUpdatePresetModeBSettings(activePreset.id, {
+                                screensaver: { ...screensaver, media: e.target.value },
+                              })
+                            }
+                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
+                          >
+                            <option value="">Teks saja</option>
+                            {compatibleScreensaverAssets.map((item) => {
+                              const uri = createStudioMediaAssetUri(item.assetId!) || '';
+                              return (
+                                <option key={item.id} value={uri}>
+                                  {item.name}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      </div>
+
+                      {screensaver.mediaType === 'video' && (
+                        <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            disabled={isStrictModeBLocked}
+                            checked={screensaver.mediaSound === true}
+                            onChange={(e) =>
+                              void onUpdatePresetModeBSettings(activePreset.id, {
+                                screensaver: { ...screensaver, mediaSound: e.target.checked },
+                              })
+                            }
+                            className="accent-emerald-500"
+                          />
+                          <span>Putar audio video layar tunggu</span>
+                        </label>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
+                            Transisi Masuk
+                          </label>
+                          <select
+                            disabled={isStrictModeBLocked}
+                            value={readTransitionType(screensaver.enter)}
+                            onChange={(e) =>
+                              void onUpdatePresetModeBSettings(activePreset.id, {
+                                screensaver: {
+                                  ...screensaver,
+                                  enter:
+                                    e.target.value === 'cut'
+                                      ? { type: 'cut', duration: 0 }
+                                      : { type: 'fade', duration: MODE_B_SCREENSAVER_DEFAULT_FADE_MS },
+                                },
+                              })
+                            }
+                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
+                          >
+                            <option value="fade">Fade (300ms)</option>
+                            <option value="cut">Cut (Instan)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
+                            Transisi Keluar
+                          </label>
+                          <select
+                            disabled={isStrictModeBLocked}
+                            value={readTransitionType(screensaver.exit)}
+                            onChange={(e) =>
+                              void onUpdatePresetModeBSettings(activePreset.id, {
+                                screensaver: {
+                                  ...screensaver,
+                                  exit:
+                                    e.target.value === 'cut'
+                                      ? { type: 'cut', duration: 0 }
+                                      : { type: 'fade', duration: MODE_B_SCREENSAVER_DEFAULT_FADE_MS },
+                                },
+                              })
+                            }
+                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
+                          >
+                            <option value="fade">Fade (300ms)</option>
+                            <option value="cut">Cut (Instan)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Modal Save Scene as New Preset */}
               {newPresetModalOpen && (
@@ -3761,6 +4250,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
               )}
 
+              {mediaModeBNotice && (
+                <div className="p-2 rounded bg-amber-950/40 border border-amber-700/60 text-[11px] text-amber-200 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {mediaModeBNotice}
+                </div>
+              )}
+
               {/* URL Manual Input Alternative */}
               <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-2">
                 <label className="text-[10px] font-bold text-slate-300">Atau Gunakan Tautan URL Media</label>
@@ -3787,6 +4283,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         setMediaLibrary((prev) => [newItem, ...prev]);
                         setPreviewMediaUrl(newItem.url);
                         setPreviewMediaType(newItem.type);
+                        setPreviewAssetId(undefined);
                         setManualMediaUrlInput('');
                       }
                     }}
@@ -3811,24 +4308,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       type="button"
+                      disabled={isStrictModeBLocked}
                       onClick={() => {
                         handleAddMediaToCanvas({
-                          id: `item_${Date.now()}`,
+                          id: previewAssetId || `item_${Date.now()}`,
+                          assetId: previewAssetId,
                           name: previewMediaType === 'image' ? 'Gambar Lokal' : 'Video Lokal',
                           type: previewMediaType,
                           url: previewMediaUrl,
                           addedAt: Date.now(),
                         });
                       }}
-                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1"
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-3.5 h-3.5" /> Pasang Sebagai Elemen Baru
                     </button>
-                    {selectedElement && (selectedElement.type === 'image' || selectedElement.type === 'video') && (
+                    {selectedElement && (selectedElement.type === 'image' || selectedElement.type === 'sticker' || selectedElement.type === 'video') && (
                       <button
                         type="button"
-                        onClick={() => handleApplyMediaToSelectedElement(previewMediaUrl)}
-                        className="py-1.5 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold"
+                        disabled={isStrictModeBLocked}
+                        onClick={() => handleApplyMediaToSelectedElement(previewMediaUrl, previewAssetId)}
+                        className="py-1.5 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Terapkan ke elemen yang sedang dipilih di canvas"
                       >
                         Ganti Elemen Terpilih
@@ -3857,7 +4357,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-bold text-white truncate">{item.name}</div>
-                      <div className="text-[9px] text-slate-500 capitalize">{item.type} lokal</div>
+                      <div className="text-[9px] text-slate-500 capitalize">
+                        {item.assetId ? `${item.type} lokal tersimpan` : `${item.type} URL`}
+                      </div>
                     </div>
                     <div className="flex items-center gap-1">
                       <button
@@ -3865,6 +4367,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         onClick={() => {
                           setPreviewMediaUrl(item.url);
                           setPreviewMediaType(item.type);
+                          setPreviewAssetId(item.assetId);
                         }}
                         className="p-1.5 rounded bg-slate-800 text-slate-300 hover:text-white text-xs"
                         title="Lihat Pratinjau"
@@ -3873,12 +4376,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </button>
                       <button
                         type="button"
+                        disabled={isStrictModeBLocked}
                         onClick={() => handleAddMediaToCanvas(item)}
-                        className="p-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 text-xs"
+                        className="p-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Tambahkan ke Kanvas"
                       >
                         <Plus className="w-3.5 h-3.5" />
                       </button>
+                      {item.assetId && (
+                        <button
+                          type="button"
+                          disabled={isStrictModeBLocked}
+                          onClick={() => void handleDeleteLocalMediaAsset(item)}
+                          className="p-1.5 rounded bg-rose-950/60 text-rose-300 hover:bg-rose-900 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Hapus Asset Lokal"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

@@ -7,8 +7,10 @@ import {
   AppLanguage,
   AppTheme,
   HudPosition,
+  ModeBAudioSource,
 } from '../types';
 import { isHapticSupported, vibrateNow } from '../services/haptics';
+import { validateModeBRtmpConfig } from '../services/modeBController';
 import {
   Settings,
   Monitor,
@@ -1043,8 +1045,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <FieldRow
           title={t('settings.confirmEnd.title', 'Konfirmasi Sebelum Mengakhiri LIVE')}
-          description={t('settings.confirmEnd.desc', 'Preferensi tersimpan, tetapi belum ada aksi yang bisa dikonfirmasi: Mode A tidak dapat mengakhiri LIVE TikTok (aplikasi TikTok resmi yang mengontrol siaran) dan Mode B belum memiliki sesi encoder.')}
-          status="pending"
+          description={t('settings.confirmEnd.desc', 'Meminta konfirmasi terlebih dahulu saat tombol Hentikan Siaran Mode B ditekan ketika LIVE berlangsung. Pada Mode A, aplikasi TikTok resmi tetap mengontrol akhir sesi LIVE TikTok.')}
+          status="functional"
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-slate-400">
@@ -1400,8 +1402,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <li>
               <span className="text-slate-200 font-semibold">Mode B:</span>{' '}
               {isEnglish
-                ? 'SYNTXRR encoder controls become active once native RTMP pipeline is ready. Currently not connected.'
-                : 'kontrol encoder SYNTXRR hanya aktif setelah pipeline RTMP benar-benar tersedia. Saat ini belum ada.'}
+                ? 'Standalone Android MediaProjection + MediaCodec RTMP/RTMPS broadcast controls are operated directly from the Dashboard when Mode B is active.'
+                : 'Kontrol siaran mandiri MediaProjection + MediaCodec RTMP/RTMPS dioperasikan langsung melalui Dashboard saat Mode B dipilih.'}
             </li>
           </ul>
         </div>
@@ -1679,56 +1681,109 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Output Mode B — dipertahankan */}
-        <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
-          <div className="flex items-center gap-2">
-            <Radio className="w-4 h-4 text-blue-400" />
-            <span className="text-xs font-semibold text-white">{t('settings.rtmp.title', 'Output Siaran Mode B (RTMP / RTMPS)')}</span>
-            <StatusBadge status="not_connected" />
-          </div>
-          <div>
-            <label className="block text-slate-300 font-medium mb-1 text-[11px]">{t('settings.rtmp.url', 'URL Server RTMP')}</label>
-            <input
-              type="text"
-              value={settings.rtmpServer}
-              onChange={(e) => handleUpdate('rtmpServer', e.target.value)}
-              placeholder="rtmp://live.twitch.tv/app"
-              className="w-full px-3 py-2 rounded-xl bg-[#0e1626] border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-slate-300 font-medium text-[11px]">{t('settings.rtmp.key', 'Stream Key / Kunci Siaran')}</label>
-              <button
-                type="button"
-                onClick={() => setShowStreamKey(!showStreamKey)}
-                className="text-[11px] text-blue-400 hover:underline flex items-center gap-1"
-              >
-                {showStreamKey ? (
-                  <>
-                    <EyeOff className="w-3 h-3" /> {t('settings.rtmp.hide', 'Sembunyikan')}
-                  </>
-                ) : (
-                  <>
-                    <Eye className="w-3 h-3" /> {t('settings.rtmp.show', 'Tampilkan')}
-                  </>
+        {/* Output Mode B (RTMP / RTMPS & Sumber Audio) */}
+        {(() => {
+          const rtmpValidation = validateModeBRtmpConfig(settings.rtmpServer, settings.streamKey);
+          const currentAudioSource: ModeBAudioSource =
+            settings.modeBAudioSource === 'internal' || settings.modeBAudioSource === 'microphone'
+              ? settings.modeBAudioSource
+              : 'mix';
+          return (
+            <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-blue-400" />
+                  <span className="text-xs font-semibold text-white">
+                    {t('settings.rtmp.title', 'Output Siaran Mode B (RTMP / RTMPS)')}
+                  </span>
+                </div>
+                <StatusBadge
+                  status={rtmpValidation.valid ? (nativeAndroid ? 'functional' : 'stored') : 'not_connected'}
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1 text-[11px]">
+                  {t('settings.rtmp.url', 'URL Server RTMP / RTMPS')}
+                </label>
+                <input
+                  type="text"
+                  value={settings.rtmpServer}
+                  onChange={(e) => handleUpdate('rtmpServer', e.target.value)}
+                  placeholder="rtmp://live.twitch.tv/app"
+                  className={`w-full px-3 py-2 rounded-xl bg-[#0e1626] border text-white font-mono text-xs focus:outline-none focus:border-blue-500 ${
+                    rtmpValidation.serverError ? 'border-amber-600/80' : 'border-slate-700'
+                  }`}
+                />
+                {rtmpValidation.serverError && (
+                  <p className="mt-1 text-[10px] text-amber-300">{rtmpValidation.serverError}</p>
                 )}
-              </button>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-300 font-medium text-[11px]">
+                    {t('settings.rtmp.key', 'Stream Key / Kunci Siaran')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowStreamKey(!showStreamKey)}
+                    className="text-[11px] text-blue-400 hover:underline flex items-center gap-1"
+                  >
+                    {showStreamKey ? (
+                      <>
+                        <EyeOff className="w-3 h-3" /> {t('settings.rtmp.hide', 'Sembunyikan')}
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3 h-3" /> {t('settings.rtmp.show', 'Tampilkan')}
+                      </>
+                    )}
+                  </button>
+                </div>
+                <input
+                  type={showStreamKey ? 'text' : 'password'}
+                  value={settings.streamKey}
+                  onChange={(e) => handleUpdate('streamKey', e.target.value)}
+                  placeholder="Masukkan stream key platform Anda"
+                  autoComplete="off"
+                  className={`w-full px-3 py-2 rounded-xl bg-[#0e1626] border text-white font-mono text-xs focus:outline-none focus:border-blue-500 ${
+                    rtmpValidation.streamKeyError ? 'border-amber-600/80' : 'border-slate-700'
+                  }`}
+                />
+                {rtmpValidation.streamKeyError && (
+                  <p className="mt-1 text-[10px] text-amber-300">{rtmpValidation.streamKeyError}</p>
+                )}
+              </div>
+
+              <div className="pt-1 space-y-1.5">
+                <label className="block text-slate-300 font-medium text-[11px]">
+                  {isEnglish ? 'Mode B Audio Source' : 'Sumber Audio Mode B'}
+                </label>
+                <Segmented<ModeBAudioSource>
+                  options={[
+                    { value: 'mix', label: isEnglish ? 'Mixed' : 'Campuran', hint: isEnglish ? 'Internal + Mic' : 'Sistem + Mic' },
+                    { value: 'internal', label: isEnglish ? 'Internal' : 'Audio Internal', hint: 'Android 10+' },
+                    { value: 'microphone', label: isEnglish ? 'Microphone' : 'Mikrofon', hint: isEnglish ? 'Mic only' : 'Mic saja' },
+                  ]}
+                  value={currentAudioSource}
+                  onChange={(value) => handleUpdate('modeBAudioSource', value)}
+                />
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  {isEnglish
+                    ? 'Internal playback capture requires Android 10+ and RECORD_AUDIO permission. Mixed mode falls back to microphone only if internal capture is unavailable on the device.'
+                    : 'Capture audio internal memerlukan Android 10+ dan izin RECORD_AUDIO. Mode Campuran hanya beralih ke mikrofon bila capture playback sistem tidak tersedia.'}
+                </p>
+              </div>
+
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                {isEnglish
+                  ? 'Stream keys are saved locally per device and never included in backup files. Operate Go Live, Stop, and Screen Reshare from the Dashboard when Mode B is active.'
+                  : 'Kredensial disimpan lokal per perangkat dan tidak pernah disertakan dalam file cadangan. Pengoperasian Mulai Siaran, Hentikan, Layar Tunggu, dan Bagikan Layar Ulang dilakukan di Dashboard saat Mode B dipilih.'}
+              </p>
             </div>
-            <input
-              type={showStreamKey ? 'text' : 'password'}
-              value={settings.streamKey}
-              onChange={(e) => handleUpdate('streamKey', e.target.value)}
-              placeholder="live_..."
-              className="w-full px-3 py-2 rounded-xl bg-[#0e1626] border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <p className="text-[10px] text-slate-500">
-            {isEnglish
-              ? 'Credentials are saved locally per device and never included in backup files. Native RTMP encoder pipeline is coming soon.'
-              : 'Kredensial disimpan per perangkat dan tidak pernah disertakan dalam file cadangan. Pipeline encoder RTMP belum tersedia, sehingga tombol siaran tidak disediakan di sini.'}
-          </p>
-        </div>
+          );
+        })()}
       </Section>
       )}
 

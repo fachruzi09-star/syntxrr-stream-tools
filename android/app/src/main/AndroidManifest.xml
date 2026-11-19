@@ -19,6 +19,13 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- Fresh MediaProjection consent activity used by the native LIVE reshare control. -->
+        <activity
+            android:name=".ModeBReshareActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -51,6 +58,14 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback|microphone"
             android:stopWithTask="false" />
+
+        <!-- Mode B native MediaProjection + RTMP encoder. Started only after explicit user consent. -->
+        <service
+            android:name=".ModeBStreamService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection|microphone|camera"
+            android:stopWithTask="false" />
     </application>
 
     <!-- Permissions -->
@@ -72,7 +87,9 @@
     <!-- Foreground service: mencegah proses dibekukan saat Floating HUD dipakai di atas TikTok (Android 12+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
 
     <!-- Camera & Microphone Permissions (Studio camera element, WebView getUserMedia) -->
     <uses-permission android:name="android.permission.CAMERA" />

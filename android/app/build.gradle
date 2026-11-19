@@ -25,6 +25,7 @@ android {
 }
 
 repositories {
+    maven { url 'https://jitpack.io' }
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
@@ -40,6 +41,8 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // Native Android H.264/AAC encoding and RTMP transport for Mode B.
+    implementation 'com.github.pedroSG94.RootEncoder:library:2.8.1'
 }
 
 apply from: 'capacitor.build.gradle'

@@ -64,6 +64,8 @@ export type NavigationTab =
 // Alias for backwards compatibility
 export type ActiveNav = NavigationTab;
 
+export type ModeBAudioSource = 'mix' | 'internal' | 'microphone';
+
 export interface AppSettings {
   operatingMode: OperatingMode;
   targetResolution: ResolutionTarget;
@@ -73,6 +75,7 @@ export interface AppSettings {
   canvasOrientation: CanvasOrientation;
   rtmpServer: string;
   streamKey: string;
+  modeBAudioSource?: ModeBAudioSource;
   videoBitrateKbps: number;
   audioBitrateKbps: number;
   enableOverlayInPip: boolean;
@@ -191,6 +194,21 @@ export interface StudioPreset {
   isFavorite: boolean;
   description: string;
   thumbnailColor?: string;
+  backgroundUri?: string;
+  screensaver?: StudioScreensaverSettings | Record<string, unknown> | string | null;
+  transitionIn?: Record<string, unknown> | string | null;
+  transitionOut?: Record<string, unknown> | string | null;
+}
+
+export interface StudioScreensaverSettings {
+  on: boolean;
+  text?: string;
+  media?: string;
+  /** Local Screensaver asset kind; omitted legacy metadata defaults to image. */
+  mediaType?: 'image' | 'video';
+  mediaSound?: boolean;
+  enter?: Record<string, unknown> | string | null;
+  exit?: Record<string, unknown> | string | null;
 }
 
 // EVENT SYSTEM & SIMULATOR
