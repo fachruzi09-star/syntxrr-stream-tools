@@ -19,6 +19,7 @@ import {
   normalizeUnitVolume,
 } from '../types';
 import { DEFAULT_TTS_CONFIG } from './ttsService';
+import { normalizeStudioPreset } from './presetModel';
 
 const DB_NAME = 'syntxrr_stream_tools_db';
 const DB_VERSION = 3; // Incremented for SYNTXRR STREAM Master Architecture
@@ -804,18 +805,29 @@ export const StorageService = {
   // PRESETS
   async getPresets(): Promise<StudioPreset[]> {
     const stored = await idbGet<StudioPreset[]>('studio_presets');
-    if (!stored || stored.length === 0) {
-      await idbSet('studio_presets', DEFAULT_PRESETS);
-      return DEFAULT_PRESETS;
+    if (!Array.isArray(stored) || stored.length === 0) {
+      const defaults = DEFAULT_PRESETS.map((preset) =>
+        normalizeStudioPreset({
+          ...preset,
+          elements: ensureUniqueElementIds(preset.elements || []),
+        }),
+      );
+      await idbSet('studio_presets', defaults);
+      return defaults;
     }
-    return stored.map((preset) => ({
-      ...preset,
-      elements: ensureUniqueElementIds(preset.elements || []),
-    }));
+    return stored.map((preset) =>
+      normalizeStudioPreset({
+        ...preset,
+        elements: ensureUniqueElementIds(preset.elements || []),
+      }),
+    );
   },
 
   async savePresets(presets: StudioPreset[]): Promise<void> {
-    await idbSet('studio_presets', presets);
+    await idbSet(
+      'studio_presets',
+      presets.map((preset) => normalizeStudioPreset(preset)),
+    );
   },
 
   async getActivePresetId(): Promise<string> {
@@ -830,7 +842,9 @@ export const StorageService = {
   // STUDIO ELEMENTS
   async getStudioElements(): Promise<StudioElement[]> {
     const stored = await idbGet<StudioElement[]>('studio_elements');
-    if (!stored || stored.length === 0) {
+    // An empty canvas is a valid user choice. Only a missing/corrupt value should
+    // initialize defaults; treating [] as missing silently repopulates deleted elements.
+    if (!Array.isArray(stored)) {
       await idbSet('studio_elements', DEFAULT_STUDIO_ELEMENTS);
       return DEFAULT_STUDIO_ELEMENTS;
     }
