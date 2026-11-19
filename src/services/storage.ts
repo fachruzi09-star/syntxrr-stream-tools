@@ -959,6 +959,97 @@ export const StorageService = {
     return results;
   },
 
+  /** Returns all requested Studio media kinds, including audio, for portable preset transfer. */
+  async getStudioMediaAssetsForPresetTransfer(
+    ids: string[],
+  ): Promise<Array<StoredStudioMediaAsset & { blob: Blob }>> {
+    const wanted = new Set(
+      (Array.isArray(ids) ? ids : []).filter(
+        (id): id is string => typeof id === 'string' && VALID_STUDIO_MEDIA_ASSET_ID.test(id),
+      ),
+    );
+    if (wanted.size === 0) return [];
+    const index = await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index');
+    if (!Array.isArray(index) || index.length === 0) return [];
+
+    const selected = index.filter(
+      (metadata): metadata is StoredStudioMediaAsset =>
+        Boolean(metadata) &&
+        wanted.has(metadata.id) &&
+        (metadata.type === 'image' || metadata.type === 'video' || metadata.type === 'audio'),
+    );
+    const assets: Array<StoredStudioMediaAsset & { blob: Blob }> = [];
+    for (const metadata of selected) {
+      const blob = await idbGet<Blob>(`studio_media_asset:${metadata.id}`);
+      if (isBlobValue(blob) && blob.size > 0) {
+        assets.push({ ...metadata, blob });
+      }
+    }
+    return assets;
+  },
+
+  /** Atomically restores a set of media files for an imported preset inside one readwrite transaction. */
+  async saveStudioMediaAssetsForPresetTransfer(
+    assets: Array<StoredStudioMediaAsset & { blob: Blob }>,
+  ): Promise<void> {
+    if (!Array.isArray(assets) || assets.length === 0) return;
+    const seenIds = new Set<string>();
+    for (const asset of assets) {
+      if (
+        !asset ||
+        typeof asset.id !== 'string' ||
+        !VALID_STUDIO_MEDIA_ASSET_ID.test(asset.id) ||
+        seenIds.has(asset.id)
+      ) {
+        throw new Error('Identitas media preset yang akan dipulihkan tidak valid.');
+      }
+      if (
+        typeof asset.name !== 'string' ||
+        !asset.name.trim() ||
+        !['image', 'video', 'audio'].includes(asset.type) ||
+        !isBlobValue(asset.blob) ||
+        asset.blob.size <= 0 ||
+        asset.blob.size !== asset.sizeBytes ||
+        typeof asset.mimeType !== 'string' ||
+        !asset.mimeType.trim()
+      ) {
+        throw new Error(`Data media ${asset.name || asset.id} tidak valid.`);
+      }
+      seenIds.add(asset.id);
+    }
+
+    const db = await openDB();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('store', 'readwrite');
+        const store = tx.objectStore('store');
+        const indexRequest = store.get('studio_media_assets_index');
+        indexRequest.onsuccess = () => {
+          const current = Array.isArray(indexRequest.result)
+            ? (indexRequest.result as StoredStudioMediaAsset[])
+            : [];
+          const incomingIds = new Set(assets.map((asset) => asset.id));
+          for (const asset of assets) {
+            store.put(asset.blob, `studio_media_asset:${asset.id}`);
+          }
+          store.put(
+            [
+              ...assets.map(({ blob: _blob, ...metadata }) => metadata),
+              ...current.filter((item) => item && !incomingIds.has(item.id)),
+            ],
+            'studio_media_assets_index',
+          );
+        };
+        indexRequest.onerror = () => tx.abort();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('Pemulihan media preset gagal.'));
+        tx.onabort = () => reject(tx.error || new Error('Pemulihan media preset dibatalkan.'));
+      });
+    } finally {
+      db.close();
+    }
+  },
+
   async deleteStudioMediaAsset(id: string): Promise<void> {
     if (!VALID_STUDIO_MEDIA_ASSET_ID.test(id)) return;
     await idbDelete(`studio_media_asset:${id}`);

@@ -1089,8 +1089,8 @@ export default function App() {
     await StorageService.saveSettings(updatedSettings);
   };
 
-  const handleCreatePreset = async (presetData: Omit<StudioPreset, 'id' | 'createdAt'>) => {
-    if (!(await guardModeBStructuralPresetAction())) return;
+  const handleCreatePreset = async (presetData: Omit<StudioPreset, 'id' | 'createdAt'>): Promise<boolean> => {
+    if (!(await guardModeBStructuralPresetAction())) return false;
     await flushStudioPersistence();
     const newPreset: StudioPreset = normalizeStudioPreset({
       ...presetData,
@@ -1112,6 +1112,7 @@ export default function App() {
     await StorageService.saveActivePresetId(newPreset.id);
     await StorageService.saveStudioElements(newPreset.elements);
     await StorageService.saveSettings(updatedSettings);
+    return true;
   };
 
   const handleDuplicatePreset = async (presetId: string) => {
@@ -2815,6 +2816,7 @@ export default function App() {
             activePresetId={activePresetId}
             onSelectPreset={handleSelectPreset}
             onCreatePreset={handleCreatePreset}
+            onCanImportPreset={guardModeBStructuralPresetAction}
             onDuplicatePreset={handleDuplicatePreset}
             onDeletePreset={handleDeletePreset}
             onRenamePreset={handleRenamePreset}
