@@ -1099,19 +1099,21 @@ export default function App() {
       createdAt: Date.now(),
     });
     const updated = [newPreset, ...presets];
-    setPresets(updated);
-    setActivePresetId(newPreset.id);
-    setStudioElements(newPreset.elements);
     const updatedSettings = {
       ...settingsRef.current,
       canvasOrientation: newPreset.canvasOrientation,
     };
+    await StorageService.savePresetActivationAtomically({
+      presets: updated,
+      activePresetId: newPreset.id,
+      studioElements: newPreset.elements,
+      settings: updatedSettings,
+    });
+    setPresets(updated);
+    setActivePresetId(newPreset.id);
+    setStudioElements(newPreset.elements);
     settingsRef.current = updatedSettings;
     setSettings(updatedSettings);
-    await StorageService.savePresets(updated);
-    await StorageService.saveActivePresetId(newPreset.id);
-    await StorageService.saveStudioElements(newPreset.elements);
-    await StorageService.saveSettings(updatedSettings);
     return true;
   };
 

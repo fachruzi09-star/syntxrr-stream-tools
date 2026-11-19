@@ -860,6 +860,171 @@ export const StorageService = {
     await idbSet('studio_elements', sanitized);
   },
 
+  /**
+   * Atomically persists presets, activePresetId, studioElements, and settings in one IndexedDB transaction.
+   * Only falls back to synchronized localStorage writes when openDB() fails before starting a transaction.
+   */
+  async savePresetActivationAtomically(input: {
+    presets: StudioPreset[];
+    activePresetId: string;
+    studioElements: StudioElement[];
+    settings: AppSettings;
+  }): Promise<void> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('Data aktivasi preset tidak valid.');
+    }
+    if (!Array.isArray(input.presets) || input.presets.length === 0) {
+      throw new Error('Daftar preset tidak boleh kosong.');
+    }
+    const activePresetId = typeof input.activePresetId === 'string' ? input.activePresetId.trim() : '';
+    if (!activePresetId) {
+      throw new Error('ID preset aktif tidak valid.');
+    }
+    if (!Array.isArray(input.studioElements)) {
+      throw new Error('Daftar elemen Studio tidak valid.');
+    }
+    if (!input.settings || typeof input.settings !== 'object' || Array.isArray(input.settings)) {
+      throw new Error('Pengaturan aplikasi tidak valid.');
+    }
+
+    const seenPresetIds = new Set<string>();
+    const normalizedPresets = input.presets.map((preset) => {
+      if (!preset || typeof preset !== 'object' || Array.isArray(preset)) {
+        throw new Error('Item preset tidak valid.');
+      }
+      const presetId = typeof preset.id === 'string' ? preset.id.trim() : '';
+      if (!presetId || seenPresetIds.has(presetId)) {
+        throw new Error('ID preset tidak valid atau terduplikasi.');
+      }
+      if (!Array.isArray(preset.elements)) {
+        throw new Error(`Elemen pada preset "${preset.name || presetId}" tidak valid.`);
+      }
+      seenPresetIds.add(presetId);
+      return normalizeStudioPreset({
+        ...preset,
+        id: presetId,
+        elements: ensureUniqueElementIds(preset.elements),
+      });
+    });
+
+    if (!normalizedPresets.some((preset) => preset.id === activePresetId)) {
+      throw new Error(`Preset aktif "${activePresetId}" tidak ditemukan dalam daftar preset.`);
+    }
+
+    const normalizedElements = ensureUniqueElementIds(input.studioElements);
+    const normalizedSettings = normalizeSettingsFields(input.settings);
+
+    const entries: Array<[string, unknown]> = [
+      ['studio_presets', normalizedPresets],
+      ['active_preset_id', activePresetId],
+      ['studio_elements', normalizedElements],
+      ['settings', normalizedSettings],
+    ];
+
+    let db: IDBDatabase;
+    try {
+      db = await openDB();
+    } catch {
+      if (typeof localStorage === 'undefined') {
+        throw new Error('IndexedDB gagal dibuka dan localStorage tidak tersedia.');
+      }
+      const previousEntries: Array<{ key: string; existed: boolean; value: string | null }> = [];
+      for (const [key] of entries) {
+        const storageKey = `syntxrr_${key}`;
+        const existing = localStorage.getItem(storageKey);
+        previousEntries.push({
+          key: storageKey,
+          existed: existing !== null,
+          value: existing,
+        });
+      }
+      try {
+        for (const [key, value] of entries) {
+          localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
+        }
+        return;
+      } catch (writeError) {
+        try {
+          for (const prev of previousEntries) {
+            if (prev.existed && prev.value !== null) {
+              localStorage.setItem(prev.key, prev.value);
+            } else {
+              localStorage.removeItem(prev.key);
+            }
+          }
+        } catch (rollbackError) {
+          throw new Error(
+            `Penulisan fallback localStorage gagal dan pemulihan snapshot ikut gagal: ${
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+            }`,
+          );
+        }
+        throw writeError instanceof Error ? writeError : new Error('Penulisan fallback localStorage gagal.');
+      }
+    }
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let abortReason: Error | null = null;
+        const fail = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          reject(err instanceof Error ? err : new Error(String(err || 'Transaksi aktivasi preset gagal.')));
+        };
+
+        let tx: IDBTransaction;
+        try {
+          tx = db.transaction('store', 'readwrite');
+        } catch (err) {
+          fail(err);
+          return;
+        }
+
+        tx.oncomplete = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        tx.onerror = () => fail(abortReason || tx.error || new Error('Transaksi aktivasi preset gagal.'));
+        tx.onabort = () => fail(abortReason || tx.error || new Error('Transaksi aktivasi preset dibatalkan.'));
+
+        try {
+          const store = tx.objectStore('store');
+          for (const [key, value] of entries) {
+            const request = store.put(value, key);
+            request.onerror = () => {
+              abortReason =
+                request.error instanceof Error
+                  ? request.error
+                  : new Error(`Gagal menulis key ${key} pada transaksi aktivasi preset.`);
+              try {
+                tx.abort();
+              } catch {}
+              fail(abortReason);
+            };
+          }
+        } catch (syncError) {
+          abortReason = syncError instanceof Error ? syncError : new Error(String(syncError));
+          try {
+            tx.abort();
+          } catch {}
+          fail(abortReason);
+        }
+      });
+    } finally {
+      db.close();
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        for (const [key, value] of entries) {
+          localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
+        }
+      } catch {}
+    }
+  },
+
   // STUDIO MEDIA ASSETS (Mode B local images / MP4 / audio stored as Blob in same DB)
   async saveStudioMediaAsset(input: {
     id?: string;
