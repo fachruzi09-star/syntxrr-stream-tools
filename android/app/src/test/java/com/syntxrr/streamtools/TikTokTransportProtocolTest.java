@@ -4,98 +4,209 @@ import org.junit.Test;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-/** Regression tests for outbound TikTok room-entry and Euler WebSocket handshake formats. */
+/**
+ * Unit tests verifying the outbound transport contracts available in active production code
+ * ({@link TikTokWebcastDecoder}, {@link TikTokWebSocketTransport}, and {@link EulerStreamTransport}).
+ */
 public class TikTokTransportProtocolTest {
 
     @Test
-    public void roomEntryFrameContainsExpectedPushFrameAndMessageFields() {
-        long expectedRoomId = 987654321L;
-        long expectedEnterId = 1234567890123L;
-        byte[] encoded = TikTokWebcastDecoder.encodePushFrameEnterRoom(
-                String.valueOf(expectedRoomId), expectedEnterId);
+    public void heartbeatFrameEncodesOnlyPbHeaderAndHbPayloadType() {
+        byte[] encoded = TikTokWebcastDecoder.encodePushFrameHeartbeat();
 
         Map<Integer, Field> pushFrame = parseFields(encoded);
-        assertEquals("pb", readString(pushFrame.get(6)));
-        assertEquals("im_enter_room", readString(pushFrame.get(7)));
-        assertTrue(pushFrame.containsKey(8));
-
-        Map<Integer, Field> enter = parseFields((byte[]) pushFrame.get(8).value);
-        assertEquals(expectedRoomId, readVarint(enter.get(1)));
-        assertEquals(12L, readVarint(enter.get(4)));
-        assertEquals("audience", readString(enter.get(5)));
-        assertEquals(expectedEnterId, readVarint(enter.get(8)));
-        assertEquals("0", readString(enter.get(9)));
-    }
-
-    @Test
-    public void roomEntryRejectsNonNumericOrZeroRoomIds() {
-        assertIllegalArgument(() -> TikTokWebcastDecoder.encodePushFrameEnterRoom("not-a-room", 1L));
-        assertIllegalArgument(() -> TikTokWebcastDecoder.encodePushFrameEnterRoom("0", 1L));
-        assertIllegalArgument(() -> TikTokWebcastDecoder.encodePushFrameEnterRoom("123", 0L));
-    }
-
-    @Test
-    public void heartbeatFrameContainsRoomIdAndIncrementingSequencePayload() {
-        long expectedRoomId = 987654321L;
-        long expectedSequenceId = 42L;
-        byte[] encoded = TikTokWebcastDecoder.encodePushFrameHeartbeat(
-                String.valueOf(expectedRoomId), expectedSequenceId);
-
-        Map<Integer, Field> pushFrame = parseFields(encoded);
+        assertEquals(2, pushFrame.size());
         assertEquals("pb", readString(pushFrame.get(6)));
         assertEquals("hb", readString(pushFrame.get(7)));
+        assertFalse(pushFrame.containsKey(2));
+        assertFalse(pushFrame.containsKey(8));
+    }
+
+    @Test
+    public void ackFrameEncodesPositiveLogIdHeadersAndInternalExtPayload() {
+        long expectedLogId = 9876543210123L;
+        String expectedInternalExt = "ack_ext_value_123";
+        byte[] encoded = TikTokWebcastDecoder.encodePushFrameAck(expectedLogId, expectedInternalExt);
+
+        Map<Integer, Field> pushFrame = parseFields(encoded);
+        assertEquals(4, pushFrame.size());
+        assertEquals(expectedLogId, readVarint(pushFrame.get(2)));
+        assertEquals("pb", readString(pushFrame.get(6)));
+        assertEquals("ack", readString(pushFrame.get(7)));
+        assertEquals(expectedInternalExt, readString(pushFrame.get(8)));
+    }
+
+    @Test
+    public void ackFrameOmitsZeroLogIdAndUsesEmptyPayloadWhenInternalExtIsNull() {
+        byte[] encoded = TikTokWebcastDecoder.encodePushFrameAck(0L, null);
+
+        Map<Integer, Field> pushFrame = parseFields(encoded);
+        assertEquals(3, pushFrame.size());
+        assertFalse(pushFrame.containsKey(2));
+        assertEquals("pb", readString(pushFrame.get(6)));
+        assertEquals("ack", readString(pushFrame.get(7)));
         assertTrue(pushFrame.containsKey(8));
-
-        Map<Integer, Field> heartbeat = parseFields((byte[]) pushFrame.get(8).value);
-        assertEquals(expectedRoomId, readVarint(heartbeat.get(1)));
-        assertEquals(expectedSequenceId, readVarint(heartbeat.get(2)));
+        assertEquals(0, ((byte[]) pushFrame.get(8).value).length);
     }
 
     @Test
-    public void heartbeatRejectsInvalidRoomAndSequence() {
-        assertIllegalArgument(() -> TikTokWebcastDecoder.encodePushFrameHeartbeat("bad-room", 1L));
-        assertIllegalArgument(() -> TikTokWebcastDecoder.encodePushFrameHeartbeat("123", 0L));
-        assertIllegalArgument(() -> TikTokWebcastDecoder.encodePushFrameHeartbeat("0", 1L));
+    public void webSocketUrlIncludesStandardRouteAndEncodedQueryParameters() throws Exception {
+        Map<String, String> routeParams = Collections.singletonMap("route_token", "node a+b=c");
+        String url = TikTokWebSocketTransport.buildWebSocketUrl(
+                "wss://example.test/webcast/im/fetch/",
+                "987654321",
+                true,
+                10_000L,
+                true,
+                42L,
+                "cursor +/=",
+                "ext&= value",
+                routeParams
+        );
+
+        assertTrue(url.startsWith("wss://example.test/webcast/im/fetch/?"));
+        String rawQuery = url.substring(url.indexOf('?') + 1);
+        assertTrue(rawQuery.contains("cursor=cursor+%2B%2F%3D"));
+        assertTrue(rawQuery.contains("internal_ext=ext%26%3D+value"));
+
+        Map<String, String> params = parseQuery(rawQuery);
+        assertEquals("987654321", params.get("room_id"));
+        assertEquals("1", params.get("ws_direct"));
+        assertEquals("protobuf", params.get("resp_content_type"));
+        assertEquals("10000", params.get("heartbeat_duration"));
+        assertEquals("1", params.get("client_enter"));
+        assertEquals("42", params.get("last_rtt"));
+        assertEquals("cursor +/=", params.get("cursor"));
+        assertEquals("ext&= value", params.get("internal_ext"));
+        assertEquals("node a+b=c", params.get("route_token"));
+        assertEquals("1988", params.get("aid"));
+        assertEquals("tiktok_web", params.get("app_name"));
     }
 
     @Test
-    public void eulerUrlUsesCurrentAuthenticatedV1Contract() throws Exception {
-        String url = EulerStreamTransport.buildWebSocketUrl("@sample_live", "test-api-key");
+    public void webSocketUrlClampsHeartbeatDurationToMinimumFiveSeconds() throws Exception {
+        String url = TikTokWebSocketTransport.buildWebSocketUrl(
+                "wss://example.test/webcast/im/fetch/",
+                "987654321",
+                false,
+                1_200L,
+                false,
+                0L,
+                null,
+                null,
+                null
+        );
+
         Map<String, String> params = parseQuery(url.substring(url.indexOf('?') + 1));
-
-        assertEquals("sample_live", params.get("uniqueId"));
-        assertEquals("test-api-key", params.get("apiKey"));
-        assertEquals("v1", params.get("schemaVersion"));
-        assertEquals("true", params.get("features.bundleEvents"));
-        assertEquals("false", params.get("features.rawMessages"));
-        assertEquals("true", params.get("features.normalizeUniqueId"));
-        assertEquals("true", params.get("features.syntheticPresence"));
-        assertFalse(params.containsKey("features.schemaVersion"));
-        assertFalse(params.containsKey("features.webcastPlatform"));
+        assertEquals("5000", params.get("heartbeat_duration"));
+        assertEquals("0", params.get("ws_direct"));
+        assertFalse(params.containsKey("client_enter"));
+        assertFalse(params.containsKey("last_rtt"));
     }
 
     @Test
-    public void eulerUrlRejectsMissingAuthentication() throws Exception {
-        assertIllegalArgument(() -> EulerStreamTransport.buildWebSocketUrl("sample_live", " "));
+    public void webSocketUrlPreservesSignedBaseParametersAndBlocksRouteOverride() throws Exception {
+        String signedBaseUrl =
+                "wss://signed.example.test/webcast/im/fetch/?signature=signed_sig_value&room_id=111222333&aid=7777";
+        Map<String, String> routeParams = new LinkedHashMap<>();
+        routeParams.put("signature", "tampered_sig");
+        routeParams.put("room_id", "000000");
+        routeParams.put("aid", "9999");
+        routeParams.put("custom_route", "apac");
+
+        String url = TikTokWebSocketTransport.buildWebSocketUrl(
+                signedBaseUrl,
+                "987654321",
+                true,
+                10_000L,
+                true,
+                15L,
+                null,
+                null,
+                routeParams
+        );
+
+        assertTrue(url.startsWith(signedBaseUrl + "&"));
+        String rawQuery = url.substring(url.indexOf('?') + 1);
+        assertEquals(1, countQueryKey(rawQuery, "signature"));
+        assertEquals(1, countQueryKey(rawQuery, "room_id"));
+        assertEquals(1, countQueryKey(rawQuery, "aid"));
+
+        Map<String, String> params = parseQuery(rawQuery);
+        assertEquals("signed_sig_value", params.get("signature"));
+        assertEquals("111222333", params.get("room_id"));
+        assertEquals("7777", params.get("aid"));
+        assertEquals("apac", params.get("custom_route"));
+        assertEquals("tiktok_web", params.get("app_name"));
     }
 
-    private static void assertIllegalArgument(ThrowingRunnable action) {
-        try {
-            action.run();
-            fail("Expected IllegalArgumentException");
-        } catch (IllegalArgumentException expected) {
-            // Expected.
-        } catch (Exception other) {
-            throw new AssertionError(other);
+    @Test
+    public void eulerFetchUrlPrioritizesRoomIdAndEncodesParametersWithoutApiKeyQuery() throws Exception {
+        String url = EulerStreamTransport.buildFetchUrl(
+                "987654321",
+                "@sample_live",
+                "cursor +/=",
+                "ext&= value"
+        );
+
+        assertTrue(url.startsWith(EulerStreamTransport.EULER_FETCH_ENDPOINT + "?"));
+        String rawQuery = url.substring(url.indexOf('?') + 1);
+        assertTrue(rawQuery.contains("cursor=cursor+%2B%2F%3D"));
+        assertTrue(rawQuery.contains("internal_ext=ext%26%3D+value"));
+        assertFalse(url.contains("apiKey"));
+
+        Map<String, String> params = parseQuery(rawQuery);
+        assertEquals("syntxrr", params.get("client"));
+        assertEquals("987654321", params.get("room_id"));
+        assertEquals("cursor +/=", params.get("cursor"));
+        assertEquals("ext&= value", params.get("internal_ext"));
+        assertFalse(params.containsKey("unique_id"));
+        assertFalse(params.containsKey("apiKey"));
+    }
+
+    @Test
+    public void eulerFetchUrlFallsBackToEncodedUniqueIdAndOmitsNullOptionals() throws Exception {
+        String url = EulerStreamTransport.buildFetchUrl(
+                "   ",
+                "@sample_live",
+                null,
+                null
+        );
+
+        assertTrue(url.startsWith(EulerStreamTransport.EULER_FETCH_ENDPOINT + "?"));
+        String rawQuery = url.substring(url.indexOf('?') + 1);
+        assertTrue(rawQuery.contains("unique_id=%40sample_live"));
+        assertFalse(url.contains("apiKey"));
+
+        Map<String, String> params = parseQuery(rawQuery);
+        assertEquals("syntxrr", params.get("client"));
+        assertEquals("@sample_live", params.get("unique_id"));
+        assertFalse(params.containsKey("room_id"));
+        assertFalse(params.containsKey("cursor"));
+        assertFalse(params.containsKey("internal_ext"));
+        assertFalse(params.containsKey("apiKey"));
+    }
+
+    private static int countQueryKey(String rawQuery, String targetKey) throws Exception {
+        int count = 0;
+        for (String pair : rawQuery.split("&")) {
+            int eq = pair.indexOf('=');
+            String rawKey = eq >= 0 ? pair.substring(0, eq) : pair;
+            String decodedKey = URLDecoder.decode(rawKey, StandardCharsets.UTF_8.name());
+            if (targetKey.equals(decodedKey)) {
+                count++;
+            }
         }
+        return count;
     }
 
     private static Map<String, String> parseQuery(String rawQuery) throws Exception {
@@ -163,9 +274,5 @@ public class TikTokTransportProtocolTest {
             this.wire = wire;
             this.value = value;
         }
-    }
-
-    private interface ThrowingRunnable {
-        void run() throws Exception;
     }
 }
