@@ -1097,3 +1097,38 @@ Checks performed against the V108 baseline and newly added files:
 Not run: the new GitHub Actions workflow has not been triggered; there is no complete RootEncoder checkout or Android SDK/Gradle installation in this local validation environment; therefore no patched RootEncoder Gradle build, JUnit suite, AAR generation, or `javap` verification is claimed. No APK was built. SYNTXRR still consumes the official unpatched Maven/JitPack `com.github.pedroSG94.RootEncoder:library:2.8.1`, and `ModeBStreamService` still does not call the proposed callback. Runtime EGL acknowledgement remains inactive.
 
 Archive policy: V109 is derived directly from the CRC-verified V108 Library ZIP. It retains every V108 ZIP entry, adds only `android/rootencoder-patches/2.8.1/build_verified_fork.sh` and `.github/workflows/rootencoder-patch-validation.yml`, modifies only this master audit, removes no entry, and keeps `package.json` and `bun.lock` byte-identical to V108.
+
+---
+
+## Post-V109 RootEncoder Validation Correction — 2026-11-18
+
+Catatan historis di atas tetap dipertahankan sebagaimana status pada saat arsip checkpoint V109 disusun. Sebagai koreksi lanjutan terhadap arsip referensi `syntxrr-stream-tools-main-fixed-v109(4).zip`, arsip tersebut masih menyimpan empat file RootEncoder versi sebelum perbaikan (*pre-fix*). Versi perbaikan yang sekarang berada pada branch `main` cocok dengan arsip `syntxrr-stream-tools-main-merged-v109-rootencoder.zip` dengan perbandingan checksum sebagai berikut:
+
+| File | V109 pre-fix SHA-256 | Corrected SHA-256 (`main`) |
+| :--- | :--- | :--- |
+| `OUTPUT_FRAME_ACKNOWLEDGEMENT.patch` | `c9c8df2a04752ea3ba3ecab8bbcc772dde598560cba8570d8c7be4e776c5ee2f` | `ba68031393a34cbc971382fe7d8cec7f818768b66bdf7b936b73d34feb6ea87a` |
+| `apply_verified_patch.py` | `f48c1a318708cc88a9d5586a959d6a1fa069f00990f5d29d77de7e6ff7863efc` | `1f823ac4bbac59a3b3ebb2592c698e44b45303f9fe28bb22f3d303c8872bb104` |
+| `build_verified_fork.sh` | `06022aa72bee4d1292cb5ac43367c95a06ded6f11bbdf8f2ba015d3be2ebd6c5` | `301bf3bd2d1e59315bcefe2ca4fb50b36507d712bd6cd9608f1124631755aa28` |
+| `rootencoder-patch-validation.yml` | `d5cc64e088982680113f6915f71a83b7d8594c4c6daa7470ba840b2a9b86f91c` | `8f48cb99e3c862f2da0d620251dd0afaf94d86d326020ab80ae96a8190c109c0` |
+
+### GitHub Actions Validation Evidence
+
+- **Workflow run ID:** `44292298933`
+- **Commit yang diuji:** `68df1e61e412187a02e267831e691dbfaad0405d`
+- **Job:** `Build and validate patched RootEncoder`
+- **Conclusion:** `success`
+- **Build:** `BUILD SUCCESSFUL`
+- **Output AAR:** Delapan Release AAR dihasilkan
+- **Bytecode & API checks:** Empat callback classes terdeteksi; `javap_setOutputFrameCallback=PASS`
+- **Artifact:** `SYNTXRR-RootEncoder-2.8.1-patched-AARs`
+- **Artifact ID:** `14421119067`
+- **Artifact SHA-256:** `98d686f48f3070d61d6a297c6eb6bd641a6e3e734e07727369e99dfd7c84dc92`
+- **Referensi:** https://github.com/fachruzi09-star/syntxrr-stream-tools/actions/runs/44292298933
+
+### Validation Boundaries
+
+- Validasi dilakukan pada isolated RootEncoder `2.8.1` fork.
+- Patch membuktikan API callback tersedia dalam compiled library.
+- Hasil tersebut mengakui keberhasilan EGL submission, bukan bukti MediaCodec telah mengonsumsi frame atau RTMP telah mengirimkannya.
+- Dependency aplikasi masih menggunakan RootEncoder resmi `2.8.1` (`com.github.pedroSG94.RootEncoder:library:2.8.1`).
+- `ModeBStreamService` belum mengaktifkan callback baru.
