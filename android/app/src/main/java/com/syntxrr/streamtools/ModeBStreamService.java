@@ -1928,7 +1928,8 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                 attachStagedLiveSceneFilter(previousView, previousFilter, stagedView, stagedFilter,
                         stagedBackgroundView, stagedBackgroundFilter, backgroundChanged,
                         nextBackgroundId, nextBackgroundNamespace, transitionOutDurationMs,
-                        transitionInDurationMs, resultCallback, nextAssetNamespace);
+                        transitionInDurationMs, resultCallback, nextAssetNamespace,
+                        nextScreensaverPolicy);
             }
         };
         MAIN.post(sceneReplacementAssetPoll);
@@ -2022,7 +2023,8 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
             ModeBSceneReplacementFilter stagedBackgroundFilter, boolean backgroundChanged,
             String nextBackgroundId, String nextBackgroundNamespace,
             int transitionOutDurationMs, int transitionInDurationMs,
-            SceneReplacementCallback callback, String nextAssetNamespace) {
+            SceneReplacementCallback callback, String nextAssetNamespace,
+            ModeBScreensaverPolicy nextScreensaverPolicy) {
         if (!sceneReplacementPending || pendingSceneView != stagedView || stopRequested.get()
                 || stream == null || cleanedUp.get()) return;
 

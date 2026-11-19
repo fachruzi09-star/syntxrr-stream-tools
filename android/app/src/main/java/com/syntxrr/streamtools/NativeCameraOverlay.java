@@ -19,6 +19,7 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.Range;
 import android.util.Size;
+import android.view.Display;
 import android.view.Surface;
 import android.view.WindowManager;
 
@@ -79,7 +80,7 @@ final class NativeCameraOverlay {
         @Override public void onDisplayAdded(int displayId) { }
         @Override public void onDisplayRemoved(int displayId) { }
         @Override public void onDisplayChanged(int displayId) {
-            if (displayId != DisplayManager.DEFAULT_DISPLAY || released.get()) return;
+            if (displayId != Display.DEFAULT_DISPLAY || released.get()) return;
             Handler current = handler;
             if (current != null) current.post(NativeCameraOverlay.this::updateCameraFrameRotation);
         }

@@ -50,6 +50,9 @@ final class ModeBScreenCaptureVideoSource extends VideoSource {
     private Surface producerSurface;
     private VirtualDisplay virtualDisplay;
     private long projectionGeneration;
+    private int captureWidth;
+    private int captureHeight;
+    private int captureRotation;
 
     ModeBScreenCaptureVideoSource(Context context,
                                   MediaProjection mediaProjection,
@@ -67,7 +70,12 @@ final class ModeBScreenCaptureVideoSource extends VideoSource {
 
     @Override
     protected boolean create(int width, int height, int fps, int rotation) {
-        return width > 0 && height > 0 && (width & 1) == 0 && (height & 1) == 0 && rotation == 0;
+        boolean valid = width > 0 && height > 0 && (width & 1) == 0 && (height & 1) == 0 && rotation == 0;
+        if (!valid) return false;
+        this.captureWidth = width;
+        this.captureHeight = height;
+        this.captureRotation = rotation;
+        return true;
     }
 
     @Override
@@ -82,7 +90,7 @@ final class ModeBScreenCaptureVideoSource extends VideoSource {
             handlerThread.start();
             handler = new Handler(handlerThread.getLooper());
             producerSurface = new Surface(surfaceTexture);
-            surfaceTexture.setDefaultBufferSize(width, height);
+            surfaceTexture.setDefaultBufferSize(captureWidth, captureHeight);
             installFrameListenerLocked(projectionGeneration);
             createVirtualDisplayLocked(projectionGeneration);
         }
@@ -248,8 +256,8 @@ final class ModeBScreenCaptureVideoSource extends VideoSource {
             int densityDpi = context.getResources().getDisplayMetrics().densityDpi;
             virtualDisplay = mediaProjection.createVirtualDisplay(
                     "SYNTXRR_Mode_B_Direct_Screen_Source",
-                    width,
-                    height,
+                    captureWidth,
+                    captureHeight,
                     densityDpi,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     producerSurface,
@@ -346,7 +354,7 @@ final class ModeBScreenCaptureVideoSource extends VideoSource {
 
     @Override
     public OrientationConfig getOrientationConfig() {
-        boolean isPortrait = ((rotation == 90 || rotation == 270) != (height > width));
+        boolean isPortrait = ((captureRotation == 90 || captureRotation == 270) != (captureHeight > captureWidth));
         return new OrientationConfig(0, isPortrait, OrientationForced.NONE);
     }
 
