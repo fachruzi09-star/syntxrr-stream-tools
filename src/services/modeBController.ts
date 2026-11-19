@@ -197,6 +197,232 @@ export async function ensureModeBNotificationPermission(
   }
 }
 
+const DEFAULT_READINESS_POLL_INTERVAL_MS = 250;
+const DEFAULT_READINESS_MAX_ATTEMPTS = 24;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, ms));
+  });
+}
+
+export function hasConfirmedModeBReadiness(
+  snapshot: Pick<ModeBStreamSnapshot, 'canStartNewSession'> | null | undefined,
+): boolean {
+  return Boolean(snapshot && snapshot.canStartNewSession === true);
+}
+
+export interface WaitForModeBReadinessOptions {
+  getStatusFn?: () => Promise<ModeBStreamSnapshot>;
+  sleepFn?: (ms: number) => Promise<void>;
+  intervalMs?: number;
+  maxAttempts?: number;
+  onSnapshot?: (snapshot: ModeBStreamSnapshot) => void;
+}
+
+export interface ModeBReadinessWaitResult {
+  ready: boolean;
+  attempts: number;
+  snapshot: ModeBStreamSnapshot;
+  reason: 'ready' | 'not_ready_timeout' | 'status_error' | 'invalid_readiness';
+  message: string;
+}
+
+export async function waitForModeBSessionReadiness(
+  options: WaitForModeBReadinessOptions = {},
+): Promise<ModeBReadinessWaitResult> {
+  const {
+    getStatusFn = getModeBStreamStatus,
+    sleepFn = defaultSleep,
+    intervalMs = DEFAULT_READINESS_POLL_INTERVAL_MS,
+    maxAttempts = DEFAULT_READINESS_MAX_ATTEMPTS,
+    onSnapshot,
+  } = options;
+
+  const totalAttempts = Math.max(1, Math.floor(maxAttempts));
+  let lastSnapshot: ModeBStreamSnapshot = {
+    status: 'error',
+    message: 'Status kesiapan encoder Mode B belum terbaca.',
+    isStreaming: false,
+    bitrateKbps: 0,
+    canStartNewSession: false,
+  };
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+    try {
+      const snapshot = await getStatusFn();
+      lastSnapshot = snapshot;
+      onSnapshot?.(snapshot);
+
+      if (hasConfirmedModeBReadiness(snapshot)) {
+        return {
+          ready: true,
+          attempts: attempt,
+          snapshot,
+          reason: 'ready',
+          message: snapshot.message || 'Encoder Mode B siap untuk sesi baru.',
+        };
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : 'Gagal membaca status pembersihan encoder Mode B.';
+      const errorSnapshot: ModeBStreamSnapshot = {
+        status: 'error',
+        message,
+        isStreaming: false,
+        bitrateKbps: 0,
+        canStartNewSession: false,
+      };
+      onSnapshot?.(errorSnapshot);
+      return {
+        ready: false,
+        attempts: attempt,
+        snapshot: errorSnapshot,
+        reason: 'status_error',
+        message,
+      };
+    }
+
+    if (attempt < totalAttempts) {
+      await sleepFn(intervalMs);
+    }
+  }
+
+  const missingField = typeof lastSnapshot.canStartNewSession !== 'boolean';
+  const failMessage = missingField
+    ? 'Status kesiapan native Mode B (canStartNewSession) tidak tersedia; operasi ditahan demi keamanan.'
+    : lastSnapshot.message && lastSnapshot.status === 'error'
+    ? lastSnapshot.message
+    : 'Pembersihan encoder/GL dan cache aset Mode B sebelumnya belum selesai. Coba lagi sesaat lagi.';
+
+  return {
+    ready: false,
+    attempts: totalAttempts,
+    snapshot: { ...lastSnapshot, canStartNewSession: false },
+    reason: missingField ? 'invalid_readiness' : 'not_ready_timeout',
+    message: failMessage,
+  };
+}
+
+export interface StopModeBAndWaitOptions extends WaitForModeBReadinessOptions {
+  stopFn?: () => Promise<ModeBStreamSnapshot>;
+  onStopSnapshot?: (snapshot: ModeBStreamSnapshot) => void;
+}
+
+export async function stopModeBStreamAndWaitForCleanup(
+  options: StopModeBAndWaitOptions = {},
+): Promise<ModeBReadinessWaitResult & { stopSnapshot: ModeBStreamSnapshot }> {
+  const {
+    stopFn = stopModeBStream,
+    onStopSnapshot,
+    ...waitOptions
+  } = options;
+
+  let stopSnapshot: ModeBStreamSnapshot;
+  try {
+    stopSnapshot = await stopFn();
+    onStopSnapshot?.(stopSnapshot);
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : 'Gagal mengirim perintah berhenti ke encoder Mode B.';
+    const errorSnapshot: ModeBStreamSnapshot = {
+      status: 'error',
+      message,
+      isStreaming: false,
+      bitrateKbps: 0,
+      canStartNewSession: false,
+    };
+    return {
+      ready: false,
+      attempts: 0,
+      snapshot: errorSnapshot,
+      stopSnapshot: errorSnapshot,
+      reason: 'status_error',
+      message,
+    };
+  }
+
+  const waitResult = await waitForModeBSessionReadiness(waitOptions);
+  return {
+    ...waitResult,
+    stopSnapshot,
+  };
+}
+
+export interface ModeBLifecycleCoordinator {
+  getSnapshot: () => ModeBStreamSnapshot;
+  getRevision: () => number;
+  isActionPending: () => boolean;
+  commitNativeEvent: (snapshot: ModeBStreamSnapshot) => ModeBStreamSnapshot;
+  commitPromiseSnapshotIfUnchanged: (
+    capturedRevision: number,
+    snapshot: ModeBStreamSnapshot,
+  ) => { applied: boolean; snapshot: ModeBStreamSnapshot };
+  runExclusiveAction: <T>(
+    actionLabel: string,
+    fn: () => Promise<T>,
+  ) => Promise<{ acquired: true; value: T } | { acquired: false; reason: string }>;
+}
+
+export function createModeBLifecycleCoordinator(
+  initialSnapshot: ModeBStreamSnapshot,
+  hooks?: {
+    onSnapshotChange?: (snapshot: ModeBStreamSnapshot) => void;
+    onPendingChange?: (pending: boolean) => void;
+  },
+): ModeBLifecycleCoordinator {
+  let currentSnapshot = initialSnapshot;
+  let revision = 0;
+  let pending = false;
+
+  const setSnapshot = (next: ModeBStreamSnapshot) => {
+    currentSnapshot = next;
+    hooks?.onSnapshotChange?.(next);
+  };
+
+  const setPending = (nextPending: boolean) => {
+    pending = nextPending;
+    hooks?.onPendingChange?.(nextPending);
+  };
+
+  return {
+    getSnapshot: () => currentSnapshot,
+    getRevision: () => revision,
+    isActionPending: () => pending,
+    commitNativeEvent: (snapshot: ModeBStreamSnapshot) => {
+      revision += 1;
+      setSnapshot(snapshot);
+      return currentSnapshot;
+    },
+    commitPromiseSnapshotIfUnchanged: (capturedRevision: number, snapshot: ModeBStreamSnapshot) => {
+      if (capturedRevision !== revision) {
+        return { applied: false, snapshot: currentSnapshot };
+      }
+      setSnapshot(snapshot);
+      return { applied: true, snapshot: currentSnapshot };
+    },
+    runExclusiveAction: async <T,>(actionLabel: string, fn: () => Promise<T>) => {
+      if (pending) {
+        return {
+          acquired: false as const,
+          reason: `Operasi Mode B lain sedang berjalan. Tunggu hingga selesai sebelum menjalankan ${actionLabel}.`,
+        };
+      }
+      setPending(true);
+      try {
+        const value = await fn();
+        return { acquired: true as const, value };
+      } finally {
+        setPending(false);
+      }
+    },
+  };
+}
+
 export interface PrepareAndStartModeBParams {
   settings: AppSettings;
   elements: StudioElement[];
@@ -204,6 +430,7 @@ export interface PrepareAndStartModeBParams {
   resolveAssets?: ModeBMediaAssetResolver;
   notificationAdapter?: NotificationPermissionAdapter;
   isNativeStreamingFn?: () => boolean;
+  getStatusFn?: typeof getModeBStreamStatus;
   startStreamFn?: typeof startModeBStream;
 }
 
@@ -222,6 +449,7 @@ export async function prepareAndStartModeBStream(
     resolveAssets,
     notificationAdapter = defaultNotificationAdapter,
     isNativeStreamingFn = isNativeStreamingAvailable,
+    getStatusFn = getModeBStreamStatus,
     startStreamFn = startModeBStream,
   } = params;
 
@@ -236,6 +464,7 @@ export async function prepareAndStartModeBStream(
         message: rtmpCheck.summaryError || 'Konfigurasi RTMP Mode B belum lengkap.',
         isStreaming: false,
         bitrateKbps: 0,
+        canStartNewSession: false,
       },
     };
   }
@@ -250,6 +479,42 @@ export async function prepareAndStartModeBStream(
         message: 'Encoder RTMP native hanya tersedia pada APK Android. Konfigurasi RTMP valid dan siap dipakai di Android.',
         isStreaming: false,
         bitrateKbps: 0,
+        canStartNewSession: false,
+      },
+    };
+  }
+
+  let preflightStatus: ModeBStreamSnapshot;
+  try {
+    preflightStatus = await getStatusFn();
+  } catch (error) {
+    return {
+      notification,
+      snapshot: {
+        status: 'error',
+        message:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Status kesiapan encoder Mode B tidak dapat diverifikasi. Coba hentikan sesi sebelumnya lalu ulangi.',
+        isStreaming: false,
+        bitrateKbps: 0,
+        canStartNewSession: false,
+      },
+    };
+  }
+
+  if (!hasConfirmedModeBReadiness(preflightStatus) || isModeBSessionActive(preflightStatus)) {
+    return {
+      notification,
+      snapshot: {
+        status: 'error',
+        message:
+          preflightStatus.message && preflightStatus.status === 'error'
+            ? preflightStatus.message
+            : 'Sesi siaran Mode B sebelumnya masih aktif atau pembersihan encoder/aset belum selesai. Tunggu sebentar lalu coba Go Live lagi.',
+        isStreaming: preflightStatus.isStreaming === true,
+        bitrateKbps: preflightStatus.bitrateKbps || 0,
+        canStartNewSession: false,
       },
     };
   }
@@ -464,44 +729,159 @@ export interface SwitchOperatingModeContext {
   modeASessionMode: ModeASessionMode;
   isTikTokActive: boolean;
   modeBStatus: ModeBStreamSnapshot;
-  stopModeASession: () => Promise<void>;
+  isNativeStreaming?: boolean;
+  stopModeASession: () => Promise<boolean | void>;
+  verifyModeAStopped?: () => Promise<boolean>;
   hideHudIfNeeded: () => Promise<void>;
   stopModeBSession: () => Promise<ModeBStreamSnapshot>;
+  getModeBStatus?: () => Promise<ModeBStreamSnapshot>;
+  waitForModeBReadiness?: (
+    options?: WaitForModeBReadinessOptions,
+  ) => Promise<ModeBReadinessWaitResult>;
+}
+
+export interface ExecuteOperatingModeSwitchResult {
+  switched: boolean;
+  nextMode: 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER';
+  stoppedModeA: boolean;
+  stoppedModeB: boolean;
+  modeBSnapshot?: ModeBStreamSnapshot;
+  errorMessage?: string;
 }
 
 export async function executeOperatingModeSwitch(
   ctx: SwitchOperatingModeContext,
-): Promise<{
-  nextMode: 'MODE_A_TIKTOK_COMPANION' | 'MODE_B_STREAMING_ENCODER';
-  stoppedModeA: boolean;
-  stoppedModeB: boolean;
-}> {
+): Promise<ExecuteOperatingModeSwitchResult> {
+  const previousMode = normalizeOperatingMode(ctx.currentMode);
   const nextMode = normalizeOperatingMode(ctx.targetMode);
-  const currentIsModeA = isModeAOperatingMode(ctx.currentMode);
-  const currentIsModeB = isModeBOperatingMode(ctx.currentMode);
+  const currentIsModeA = isModeAOperatingMode(previousMode);
+  const currentIsModeB = isModeBOperatingMode(previousMode);
   const targetIsModeB = nextMode === 'MODE_B_STREAMING_ENCODER';
   const targetIsModeA = nextMode === 'MODE_A_TIKTOK_COMPANION';
+  const nativeStreamingActive = ctx.isNativeStreaming ?? isNativeStreamingAvailable();
+  const waitReadinessFn = ctx.waitForModeBReadiness ?? waitForModeBSessionReadiness;
+  const getStatusFn = ctx.getModeBStatus ?? getModeBStreamStatus;
 
   let stoppedModeA = false;
   let stoppedModeB = false;
+  let latestModeBSnapshot: ModeBStreamSnapshot | undefined = ctx.modeBStatus;
 
   if (currentIsModeA && targetIsModeB) {
     if (ctx.companionRunning || ctx.modeASessionMode !== 'inactive' || ctx.isTikTokActive) {
-      await ctx.stopModeASession();
-      stoppedModeA = true;
+      try {
+        const stopAResult = await ctx.stopModeASession();
+        if (stopAResult === false) {
+          return {
+            switched: false,
+            nextMode: previousMode,
+            stoppedModeA: false,
+            stoppedModeB: false,
+            modeBSnapshot: latestModeBSnapshot,
+            errorMessage:
+              'Sesi Companion / TikTok Mode A gagal dihentikan. Perpindahan ke Mode B dibatalkan.',
+          };
+        }
+        if (ctx.verifyModeAStopped) {
+          const stoppedVerified = await ctx.verifyModeAStopped();
+          if (!stoppedVerified) {
+            return {
+              switched: false,
+              nextMode: previousMode,
+              stoppedModeA: false,
+              stoppedModeB: false,
+              modeBSnapshot: latestModeBSnapshot,
+              errorMessage:
+                'Companion Service atau konektor TikTok Mode A masih aktif. Perpindahan ke Mode B dibatalkan.',
+            };
+          }
+        }
+        stoppedModeA = true;
+      } catch (error) {
+        return {
+          switched: false,
+          nextMode: previousMode,
+          stoppedModeA: false,
+          stoppedModeB: false,
+          modeBSnapshot: latestModeBSnapshot,
+          errorMessage:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : 'Gagal menghentikan sesi Mode A sebelum pindah ke Mode B.',
+        };
+      }
     } else {
       await ctx.hideHudIfNeeded();
     }
+
+    if (nativeStreamingActive || ctx.waitForModeBReadiness || ctx.getModeBStatus) {
+      const readinessResult = await waitReadinessFn({ getStatusFn });
+      latestModeBSnapshot = readinessResult.snapshot;
+      if (!readinessResult.ready) {
+        return {
+          switched: false,
+          nextMode: previousMode,
+          stoppedModeA,
+          stoppedModeB: false,
+          modeBSnapshot: latestModeBSnapshot,
+          errorMessage:
+            readinessResult.message ||
+            'Mode B masih membersihkan sesi sebelumnya. Tunggu sebentar sebelum pindah ke Mode B.',
+        };
+      }
+    }
   } else if (currentIsModeB && targetIsModeA) {
     if (isModeBSessionActive(ctx.modeBStatus)) {
-      await ctx.stopModeBSession();
-      stoppedModeB = true;
+      try {
+        latestModeBSnapshot = await ctx.stopModeBSession();
+        stoppedModeB = true;
+      } catch (error) {
+        return {
+          switched: false,
+          nextMode: previousMode,
+          stoppedModeA: false,
+          stoppedModeB: false,
+          modeBSnapshot: latestModeBSnapshot,
+          errorMessage:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : 'Gagal menghentikan siaran Mode B. Mode tetap dipertahankan di Mode B.',
+        };
+      }
+    }
+
+    if (
+      stoppedModeB ||
+      ((nativeStreamingActive || ctx.waitForModeBReadiness || ctx.getModeBStatus) &&
+        !hasConfirmedModeBReadiness(latestModeBSnapshot))
+    ) {
+      if (nativeStreamingActive || ctx.waitForModeBReadiness || ctx.getModeBStatus) {
+        const readinessResult = await waitReadinessFn({ getStatusFn });
+        latestModeBSnapshot = readinessResult.snapshot;
+        if (!readinessResult.ready) {
+          return {
+            switched: false,
+            nextMode: previousMode,
+            stoppedModeA: false,
+            stoppedModeB,
+            modeBSnapshot: latestModeBSnapshot,
+            errorMessage:
+              readinessResult.message ||
+              'Pembersihan encoder/GL Mode B belum selesai. Perpindahan ke Mode A dibatalkan.',
+          };
+        }
+      }
     }
   } else if (targetIsModeB) {
     await ctx.hideHudIfNeeded();
   }
 
-  return { nextMode, stoppedModeA, stoppedModeB };
+  return {
+    switched: true,
+    nextMode,
+    stoppedModeA,
+    stoppedModeB,
+    modeBSnapshot: latestModeBSnapshot,
+  };
 }
 
 export async function stopModeBSessionSafely(

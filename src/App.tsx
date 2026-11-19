@@ -103,6 +103,7 @@ import {
   forwardModeBOverlayEvent,
   getModeBStreamStatus,
   isModeBSceneMutationLocked,
+  isNativeStreamingAvailable,
   onModeBStreamState,
   requestModeBScreenReshare,
   setModeBHostWait,
@@ -112,9 +113,12 @@ import {
 import { shouldLockModeBSceneMutations } from './services/modeBSceneMutationPolicy';
 import {
   applyLiveSceneChangeToModeB,
+  createModeBLifecycleCoordinator,
   executeOperatingModeSwitch,
   isModeBSessionActive,
   prepareAndStartModeBStream,
+  stopModeBStreamAndWaitForCleanup,
+  type ModeBLifecycleCoordinator,
 } from './services/modeBController';
 import type { HudChatTab, HudPanelId, HudStateModel } from './services/nativeCompanionBridge';
 import { FloatingHudPanel } from './components/FloatingHudPanel';
@@ -178,15 +182,30 @@ export default function App() {
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
 
   // Mode B Standalone RTMP Encoder State (single source of truth synced with native streamState)
-  const [modeBStatus, setModeBStatus] = useState<ModeBStreamSnapshot>({
+  const INITIAL_MODE_B_STATUS: ModeBStreamSnapshot = {
     status: 'idle',
     message: 'Encoder Mode B siap dikonfigurasi.',
     isStreaming: false,
     bitrateKbps: 0,
-  });
+  };
+  const [modeBStatus, setModeBStatus] = useState<ModeBStreamSnapshot>(INITIAL_MODE_B_STATUS);
   const modeBStatusRef = useRef<ModeBStreamSnapshot>(modeBStatus);
   const [isModeBActionPending, setIsModeBActionPending] = useState(false);
   const modeBActionPendingRef = useRef(false);
+  const modeBCoordinatorRef = useRef<ModeBLifecycleCoordinator | null>(null);
+  if (!modeBCoordinatorRef.current) {
+    modeBCoordinatorRef.current = createModeBLifecycleCoordinator(INITIAL_MODE_B_STATUS, {
+      onSnapshotChange: (next) => {
+        modeBStatusRef.current = next;
+        setModeBStatus(next);
+      },
+      onPendingChange: (pending) => {
+        modeBActionPendingRef.current = pending;
+        setIsModeBActionPending(pending);
+      },
+    });
+  }
+  const getModeBCoordinator = () => modeBCoordinatorRef.current!;
   const [modeBNotificationWarning, setModeBNotificationWarning] = useState<string | null>(null);
   const [modeBNoticeBanner, setModeBNoticeBanner] = useState<string | null>(null);
   const [pendingConfirmModal, setPendingConfirmModal] = useState<{
@@ -196,10 +215,6 @@ export default function App() {
     tone: 'warn' | 'danger';
     onConfirm: () => Promise<void> | void;
   } | null>(null);
-
-  useEffect(() => {
-    modeBStatusRef.current = modeBStatus;
-  }, [modeBStatus]);
 
   useEffect(() => {
     tiktokAccountRef.current = tiktokAccount;
@@ -550,38 +565,87 @@ export default function App() {
 
   // Mode Selection with safe Mode A <-> Mode B isolation and user confirmation
   const applyModeSwitch = async (targetMode: OperatingMode) => {
-    const { nextMode } = await executeOperatingModeSwitch({
-      currentMode: settingsRef.current.operatingMode,
-      targetMode,
-      companionRunning,
-      modeASessionMode,
-      isTikTokActive: tiktokLiveConnector.isActiveSession(),
-      modeBStatus: modeBStatusRef.current,
-      stopModeASession: async () => {
-        await handleStopModeASession();
-      },
-      hideHudIfNeeded: async () => {
-        try {
-          await hideFloatingHud();
-        } catch (err) {
-          console.warn('Gagal menyembunyikan Floating HUD saat berpindah ke Mode B:', err);
-        }
-      },
-      stopModeBSession: async () => {
-        const res = await stopModeBStream();
-        setModeBStatus(res);
-        return res;
-      },
+    const actionResult = await getModeBCoordinator().runExclusiveAction('Perpindahan Mode', async () => {
+      const switchOutcome = await executeOperatingModeSwitch({
+        currentMode: settingsRef.current.operatingMode,
+        targetMode,
+        companionRunning,
+        modeASessionMode,
+        isTikTokActive: tiktokLiveConnector.isActiveSession(),
+        modeBStatus: modeBStatusRef.current,
+        isNativeStreaming: isNativeStreamingAvailable(),
+        stopModeASession: async () => {
+          return stopModeASessionVerified();
+        },
+        verifyModeAStopped: async () => {
+          if (tiktokLiveConnector.isActiveSession()) return false;
+          if (!isNativeAndroidPlatform) return true;
+          try {
+            const st = await isCompanionRunning();
+            const running = !!st?.isRunning;
+            setCompanionRunning(running);
+            if (running) {
+              setModeASessionMode(
+                tiktokLiveConnector.isActiveSession()
+                  ? 'with_live_connector'
+                  : 'without_live_connection',
+              );
+              return false;
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        hideHudIfNeeded: async () => {
+          try {
+            await hideFloatingHud();
+          } catch (err) {
+            console.warn('Gagal menyembunyikan Floating HUD saat berpindah ke Mode B:', err);
+          }
+        },
+        stopModeBSession: async () => {
+          const capturedRev = getModeBCoordinator().getRevision();
+          const res = await stopModeBStream();
+          getModeBCoordinator().commitPromiseSnapshotIfUnchanged(capturedRev, res);
+          return res;
+        },
+        getModeBStatus: async () => {
+          const capturedRev = getModeBCoordinator().getRevision();
+          const res = await getModeBStreamStatus();
+          getModeBCoordinator().commitPromiseSnapshotIfUnchanged(capturedRev, res);
+          return res;
+        },
+      });
+
+      if (!switchOutcome.switched) {
+        setModeBNoticeBanner(
+          switchOutcome.errorMessage ||
+            'Perpindahan mode dibatalkan karena sesi aktif belum selesai dibersihkan.',
+        );
+        return;
+      }
+
+      const updated = { ...settingsRef.current, operatingMode: switchOutcome.nextMode };
+      settingsRef.current = updated;
+      setSettings(updated);
+      setModeBNoticeBanner(null);
+      await StorageService.saveSettings(updated);
     });
 
-    const updated = { ...settingsRef.current, operatingMode: nextMode };
-    settingsRef.current = updated;
-    setSettings(updated);
-    setModeBNoticeBanner(null);
-    await StorageService.saveSettings(updated);
+    if (!actionResult.acquired) {
+      setModeBNoticeBanner(actionResult.reason);
+    }
   };
 
   const handleSelectMode = async (mode: OperatingMode) => {
+    if (modeBActionPendingRef.current) {
+      setModeBNoticeBanner(
+        'Operasi Mode B lain sedang berjalan. Tunggu hingga selesai sebelum berpindah mode.',
+      );
+      return;
+    }
+
     const normalizedMode = normalizeOperatingMode(mode);
     const isCurrentModeA = isModeAOperatingMode(settingsRef.current.operatingMode);
     const isCurrentModeB = isModeBOperatingMode(settingsRef.current.operatingMode);
@@ -621,11 +685,9 @@ export default function App() {
 
   // Mode B RTMP Actions (Single source of truth)
   const handleStartModeBStream = async () => {
-    if (modeBActionPendingRef.current) return;
-    modeBActionPendingRef.current = true;
-    setIsModeBActionPending(true);
-    setModeBNoticeBanner(null);
-    try {
+    const actionResult = await getModeBCoordinator().runExclusiveAction('Go Live Mode B', async () => {
+      setModeBNoticeBanner(null);
+      const capturedRevision = getModeBCoordinator().getRevision();
       const outcome = await prepareAndStartModeBStream({
         settings: settingsRef.current,
         elements: studioElements,
@@ -638,28 +700,49 @@ export default function App() {
               'Izin notifikasi Android belum diberikan.'
           : null,
       );
-      setModeBStatus(outcome.snapshot);
-    } finally {
-      modeBActionPendingRef.current = false;
-      setIsModeBActionPending(false);
+      getModeBCoordinator().commitPromiseSnapshotIfUnchanged(capturedRevision, outcome.snapshot);
+      if (outcome.snapshot.status === 'error' && outcome.snapshot.message) {
+        setModeBNoticeBanner(outcome.snapshot.message);
+      }
+    });
+
+    if (!actionResult.acquired) {
+      setModeBNoticeBanner(actionResult.reason);
     }
   };
 
   const executeStopModeBStream = async () => {
-    if (modeBActionPendingRef.current) return;
-    modeBActionPendingRef.current = true;
-    setIsModeBActionPending(true);
-    try {
-      const result = await stopModeBStream();
-      setModeBStatus(result);
-    } finally {
-      modeBActionPendingRef.current = false;
-      setIsModeBActionPending(false);
+    const actionResult = await getModeBCoordinator().runExclusiveAction('Stop LIVE Mode B', async () => {
+      const stopRevision = getModeBCoordinator().getRevision();
+      const cleanupResult = await stopModeBStreamAndWaitForCleanup({
+        stopFn: () => stopModeBStream(),
+        onStopSnapshot: (stopSnapshot) => {
+          getModeBCoordinator().commitPromiseSnapshotIfUnchanged(stopRevision, stopSnapshot);
+        },
+        getStatusFn: async () => {
+          const pollRevision = getModeBCoordinator().getRevision();
+          const snapshot = await getModeBStreamStatus();
+          getModeBCoordinator().commitPromiseSnapshotIfUnchanged(pollRevision, snapshot);
+          return snapshot;
+        },
+      });
+      if (!cleanupResult.ready && cleanupResult.message) {
+        setModeBNoticeBanner(cleanupResult.message);
+      }
+    });
+
+    if (!actionResult.acquired) {
+      setModeBNoticeBanner(actionResult.reason);
     }
   };
 
   const handleStopModeBStream = async () => {
-    if (modeBActionPendingRef.current) return;
+    if (modeBActionPendingRef.current) {
+      setModeBNoticeBanner(
+        'Operasi Mode B lain sedang berjalan. Tunggu hingga selesai sebelum menghentikan siaran.',
+      );
+      return;
+    }
     const isActiveLive =
       modeBStatusRef.current.isStreaming ||
       ['live', 'host_wait', 'connecting', 'starting', 'reshare_waiting', 'resharing'].includes(
@@ -680,29 +763,27 @@ export default function App() {
   };
 
   const handleRequestModeBReshare = async () => {
-    if (modeBActionPendingRef.current) return;
-    modeBActionPendingRef.current = true;
-    setIsModeBActionPending(true);
-    try {
+    const actionResult = await getModeBCoordinator().runExclusiveAction('Bagikan Layar Lagi', async () => {
+      const capturedRevision = getModeBCoordinator().getRevision();
       const result = await requestModeBScreenReshare();
-      setModeBStatus(result);
-    } finally {
-      modeBActionPendingRef.current = false;
-      setIsModeBActionPending(false);
+      getModeBCoordinator().commitPromiseSnapshotIfUnchanged(capturedRevision, result);
+    });
+
+    if (!actionResult.acquired) {
+      setModeBNoticeBanner(actionResult.reason);
     }
   };
 
   const handleToggleModeBHostWait = async () => {
-    if (modeBActionPendingRef.current) return;
-    modeBActionPendingRef.current = true;
-    setIsModeBActionPending(true);
-    try {
+    const actionResult = await getModeBCoordinator().runExclusiveAction('Layar Tunggu Host', async () => {
+      const capturedRevision = getModeBCoordinator().getRevision();
       const nextEnabled = modeBStatusRef.current.status !== 'host_wait';
       const result = await setModeBHostWait(nextEnabled);
-      setModeBStatus(result);
-    } finally {
-      modeBActionPendingRef.current = false;
-      setIsModeBActionPending(false);
+      getModeBCoordinator().commitPromiseSnapshotIfUnchanged(capturedRevision, result);
+    });
+
+    if (!actionResult.acquired) {
+      setModeBNoticeBanner(actionResult.reason);
     }
   };
 
@@ -710,12 +791,7 @@ export default function App() {
     elementsOverride?: StudioElement[],
     presetOverride?: StudioPreset | null,
   ): Promise<{ success: boolean; message: string }> => {
-    if (modeBActionPendingRef.current) {
-      return { success: false, message: 'Aksi Mode B lain sedang berjalan.' };
-    }
-    modeBActionPendingRef.current = true;
-    setIsModeBActionPending(true);
-    try {
+    const actionResult = await getModeBCoordinator().runExclusiveAction('Terapkan Perubahan ke LIVE', async () => {
       const targetPreset = presetOverride ?? activePreset;
       const result = await applyLiveSceneChangeToModeB({
         elements: elementsOverride ?? studioElements,
@@ -729,16 +805,15 @@ export default function App() {
         (result.applied
           ? 'Perubahan scene berhasil diterapkan ke siaran LIVE.'
           : 'Scene siap.');
-      if (!result.allowed || !result.applied) {
-        setModeBNoticeBanner(msg);
-      } else {
-        setModeBNoticeBanner(msg);
-      }
+      setModeBNoticeBanner(msg);
       return { success: result.allowed && result.applied, message: msg };
-    } finally {
-      modeBActionPendingRef.current = false;
-      setIsModeBActionPending(false);
+    });
+
+    if (!actionResult.acquired) {
+      setModeBNoticeBanner(actionResult.reason);
+      return { success: false, message: actionResult.reason };
     }
+    return actionResult.value;
   };
 
   const handleUpdatePresetModeBSettings = async (
@@ -843,31 +918,53 @@ export default function App() {
   // Preset Handlers
   const handleSelectPreset = async (presetId: string) => {
     const target = presets.find((p) => p.id === presetId);
-    if (!target) return;
+    if (!target || presetId === activePresetId) return;
 
-    if (
-      presetId !== activePresetId &&
-      isModeBOperatingMode(settingsRef.current.operatingMode)
-    ) {
-      const liveCheck = await applyLiveSceneChangeToModeB({
-        elements: target.elements,
-        targetPreset: target,
-        activePreset,
-        resolveAssets: (ids) => StorageService.getStudioMediaAssetsByIds(ids),
+    if (isModeBOperatingMode(settingsRef.current.operatingMode)) {
+      const actionResult = await getModeBCoordinator().runExclusiveAction('Mengganti Preset Mode B', async () => {
+        const liveCheck = await applyLiveSceneChangeToModeB({
+          elements: target.elements,
+          targetPreset: target,
+          activePreset,
+          modeBStatus: modeBStatusRef.current,
+          resolveAssets: (ids) => StorageService.getStudioMediaAssetsByIds(ids),
+        });
+        if (!liveCheck.allowed) {
+          if (liveCheck.message) setModeBNoticeBanner(liveCheck.message);
+          return;
+        }
+        if (liveCheck.applied && liveCheck.message) {
+          setModeBNoticeBanner(liveCheck.message);
+        }
+
+        setActivePresetId(presetId);
+        const sanitizedElements = ensureUniqueElementIds(target.elements);
+        setStudioElements(sanitizedElements);
+        const updatedSettings = {
+          ...settingsRef.current,
+          canvasOrientation: target.canvasOrientation,
+        };
+        settingsRef.current = updatedSettings;
+        setSettings(updatedSettings);
+        await StorageService.saveActivePresetId(presetId);
+        await StorageService.saveStudioElements(sanitizedElements);
+        await StorageService.saveSettings(updatedSettings);
       });
-      if (!liveCheck.allowed) {
-        if (liveCheck.message) setModeBNoticeBanner(liveCheck.message);
-        return;
+
+      if (!actionResult.acquired) {
+        setModeBNoticeBanner(actionResult.reason);
       }
-      if (liveCheck.applied && liveCheck.message) {
-        setModeBNoticeBanner(liveCheck.message);
-      }
+      return;
     }
 
     setActivePresetId(presetId);
     const sanitizedElements = ensureUniqueElementIds(target.elements);
     setStudioElements(sanitizedElements);
-    const updatedSettings = { ...settings, canvasOrientation: target.canvasOrientation };
+    const updatedSettings = {
+      ...settingsRef.current,
+      canvasOrientation: target.canvasOrientation,
+    };
+    settingsRef.current = updatedSettings;
     setSettings(updatedSettings);
     await StorageService.saveActivePresetId(presetId);
     await StorageService.saveStudioElements(sanitizedElements);
@@ -1697,16 +1794,21 @@ export default function App() {
     let modeBListenerHandle: { remove: () => Promise<void> } | null = null;
 
     const syncModeBState = () => {
+      const capturedRevision = getModeBCoordinator().getRevision();
       void getModeBStreamStatus()
         .then((snapshot) => {
-          if (!cancelled) setModeBStatus(snapshot);
+          if (!cancelled) {
+            getModeBCoordinator().commitPromiseSnapshotIfUnchanged(capturedRevision, snapshot);
+          }
         })
         .catch(() => {});
     };
 
     syncModeBState();
     void onModeBStreamState((snapshot) => {
-      if (!cancelled) setModeBStatus(snapshot);
+      if (!cancelled) {
+        getModeBCoordinator().commitNativeEvent(snapshot);
+      }
     })
       .then((handle) => {
         if (!handle) return;
@@ -1836,12 +1938,18 @@ export default function App() {
     }
   };
 
-  const handleStopModeASession = async () => {
+  const stopModeASessionVerified = async (): Promise<boolean> => {
     await tiktokLiveConnector.disconnect();
     await hideFloatingHud();
     const res = await stopCompanion();
-    setCompanionRunning(!!res?.isRunning);
-    setModeASessionMode('inactive');
+    const stillRunning = !!res?.isRunning;
+    setCompanionRunning(stillRunning);
+    setModeASessionMode(stillRunning ? 'without_live_connection' : 'inactive');
+    return !stillRunning && !tiktokLiveConnector.isActiveSession();
+  };
+
+  const handleStopModeASession = async () => {
+    await stopModeASessionVerified();
   };
 
   const handleToggleCompanion = async () => {

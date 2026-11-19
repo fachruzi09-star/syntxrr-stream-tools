@@ -9,6 +9,7 @@ import android.app.Service;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
@@ -97,6 +98,8 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
     };
     private static WeakReference<Listener> listenerRef = new WeakReference<>(null);
     private static volatile WeakReference<ModeBStreamService> activeInstance = new WeakReference<>(null);
+    private static final ModeBSessionReadinessPolicy.Tracker READINESS_TRACKER =
+            new ModeBSessionReadinessPolicy.Tracker();
     private static volatile String lastStatus = "idle";
     private static volatile String lastMessage = "Mode B belum dimulai.";
     private static volatile boolean lastStreaming = false;
@@ -221,6 +224,8 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
     public static String getLastMessage() { return lastMessage; }
     public static boolean isLastStreaming() { return lastStreaming; }
     public static long getLastBitrateKbps() { return lastBitrateKbps; }
+    public static boolean canStartNewSession() { return READINESS_TRACKER.canStartNewSession(); }
+    public static String getNewSessionBlockMessage() { return READINESS_TRACKER.getBlockedReason(); }
 
     public static boolean canRequestScreenReshare() {
         ModeBStreamService service = activeInstance.get();
@@ -347,6 +352,10 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
         try {
             if (!resetAfterCompletedSession()) {
                 publish("error", "Sesi siaran sebelumnya belum selesai dibersihkan. Coba hentikan lalu mulai lagi.", false, 0);
+                return START_NOT_STICKY;
+            }
+            if (READINESS_TRACKER.tryBeginSession() < 0L) {
+                publish("error", READINESS_TRACKER.getBlockedReason(), false, 0);
                 return START_NOT_STICKY;
             }
             publish("starting", "Menyiapkan izin capture, audio, dan encoder.", false, 0);
@@ -2453,6 +2462,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
 
     /** Allows a stopped service instance to begin a fresh consent-backed projection session. */
     private boolean resetAfterCompletedSession() {
+        if (!READINESS_TRACKER.canStartNewSession()) return false;
         if (!stopRequested.get()) return stream == null && mediaProjection == null;
         if (!cleanedUp.get() || !assetCleanupCompleted || !streamTeardownApiCompleted) return false;
         stream = null;
@@ -2547,6 +2557,9 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
 
     private void cleanupResources() {
         if (!cleanedUp.compareAndSet(false, true)) return;
+        final long cleanupEpoch = READINESS_TRACKER.beginCleanup();
+        final Context appContext = getApplicationContext();
+        final AtomicBoolean asyncReadinessNotifyReady = new AtomicBoolean(false);
         sessionWasLive = false;
         ++streamGeneration;
         stopStreamHealthMonitor();
@@ -2737,6 +2750,8 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
             streamTeardownApiFailure = streamTeardownApiFailure.isEmpty()
                     ? detail : streamTeardownApiFailure + "; " + detail;
         }
+        READINESS_TRACKER.recordStreamTeardownResult(
+                cleanupEpoch, streamTeardownApiCompleted, streamTeardownApiFailure);
         if (interruptedSceneCallback != null) {
             try { interruptedSceneCallback.onResult(false, "Sesi Mode B dihentikan sebelum pergantian scene selesai."); } catch (Exception ignored) { }
         }
@@ -2781,12 +2796,16 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                     @Override public void run() {
                         boolean deleted = false;
                         try {
-                            deleted = ModeBAssetNamespace.deleteAll(getApplicationContext());
+                            deleted = ModeBAssetNamespace.deleteAll(appContext);
                         } catch (RuntimeException ignored) {
                             // Retry transient filesystem failures; never acknowledge them as done.
                         }
                         if (deleted) {
                             assetCleanupCompleted = true;
+                            boolean becameReady = READINESS_TRACKER.markAssetCleanupSucceeded(cleanupEpoch);
+                            if (asyncReadinessNotifyReady.get() && becameReady && !lastStreaming) {
+                                publish(lastStatus, lastMessage, false, 0);
+                            }
                             return;
                         }
 
@@ -2795,7 +2814,19 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                             long delayMs = ModeBAssetCleanupRetryPolicy.retryDelayMs(retriesScheduled);
                             retriesScheduled++;
                             // A rejected retry also leaves cleanup incomplete (fail closed).
-                            MAIN.postDelayed(this, delayMs);
+                            if (!MAIN.postDelayed(this, delayMs)) {
+                                READINESS_TRACKER.markAssetCleanupFailed(
+                                        cleanupEpoch, "Gagal menjadwalkan ulang pembersihan cache aset.");
+                                if (asyncReadinessNotifyReady.get() && !lastStreaming) {
+                                    publish("error", READINESS_TRACKER.getBlockedReason(), false, 0);
+                                }
+                            }
+                        } else {
+                            READINESS_TRACKER.markAssetCleanupFailed(
+                                    cleanupEpoch, "Cache aset Mode B gagal dibersihkan setelah batas retry.");
+                            if (asyncReadinessNotifyReady.get() && !lastStreaming) {
+                                publish("error", READINESS_TRACKER.getBlockedReason(), false, 0);
+                            }
                         }
                     }
                 }
@@ -2834,6 +2865,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                 currentProjection.stop();
             } catch (Exception ignored) { }
         }
+        asyncReadinessNotifyReady.set(true);
     }
 
     private void clearOverlayAssetDirectory() {

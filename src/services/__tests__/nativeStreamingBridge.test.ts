@@ -449,6 +449,23 @@ async function runTests(): Promise<void> {
   mock.emitState({ status: 'idle', message: 'Idle', isStreaming: false, bitrateKbps: 0, timestamp: 3000 });
   assertEqual(isModeBSceneMutationLocked(), false, 'idle streamState unlocks Mode B scene mutations');
 
+  // Bridge never fabricates canStartNewSession=true when omitted or on browser fallback
+  assertEqual(stopRes.canStartNewSession, false, 'stopModeBStream does not fabricate readiness true when omitted');
+  const readPluginWithFlag = createMockPlugin({
+    async getStatus() {
+      return {
+        status: 'stopped',
+        message: 'Cleanup selesai',
+        isStreaming: false,
+        bitrateKbps: 0,
+        canStartNewSession: true,
+      };
+    },
+  });
+  __setNativeStreamingBridgeTestAdapter({ plugin: readPluginWithFlag.plugin, isNativeAvailable: true });
+  const flaggedStatus = await getModeBStreamStatus();
+  assertEqual(flaggedStatus.canStartNewSession, true, 'getModeBStreamStatus preserves native canStartNewSession=true');
+
   // Partial removal keeps native handle alive until last subscriber removes
   await subA1?.remove();
   await subA2?.remove();
@@ -458,6 +475,8 @@ async function runTests(): Promise<void> {
   assertEqual(mock.getListenerCount(), 0, 'no leaked native listeners remain');
 
   await __resetNativeStreamingBridgeForTests();
+  const browserFallbackStatus = await getModeBStreamStatus();
+  assertEqual(browserFallbackStatus.canStartNewSession, false, 'non-Android status returns canStartNewSession=false');
   console.log(`Native streaming bridge tests passed: ${assertionCount} assertions.`);
 }
 

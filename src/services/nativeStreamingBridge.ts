@@ -58,6 +58,7 @@ export interface ModeBStreamSnapshot {
   message: string;
   isStreaming: boolean;
   bitrateKbps: number;
+  canStartNewSession?: boolean;
   timestamp?: number;
 }
 
@@ -118,6 +119,7 @@ export interface NativeStreamingPluginInterface {
   stopStream(): Promise<{
     success: boolean;
     status: ModeBStreamStatus;
+    canStartNewSession?: boolean;
   }>;
   requestScreenReshare(): Promise<{
     success: boolean;
@@ -896,6 +898,9 @@ export async function setModeBHostWait(enabled: boolean): Promise<ModeBStreamSna
         (enabled ? 'Layar tunggu ditampilkan.' : 'Tampilan LIVE dilanjutkan.'),
       isStreaming: snapshot.isStreaming === true,
       bitrateKbps: typeof snapshot.bitrateKbps === 'number' ? snapshot.bitrateKbps : 0,
+      ...(typeof snapshot.canStartNewSession === 'boolean'
+        ? { canStartNewSession: snapshot.canStartNewSession }
+        : {}),
       timestamp: Date.now(),
     };
   } catch (error) {
@@ -904,6 +909,7 @@ export async function setModeBHostWait(enabled: boolean): Promise<ModeBStreamSna
       message: error instanceof Error ? error.message : 'Layar tunggu tidak dapat diubah.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   }
 }
@@ -1019,6 +1025,7 @@ export async function startModeBStream(options: StartModeBStreamOptions): Promis
         (accepted ? 'Memulai capture dan encoder native.' : 'Encoder native gagal dimulai.'),
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   } catch (error) {
     modeBOverlayForwardingActive = false;
@@ -1029,6 +1036,7 @@ export async function startModeBStream(options: StartModeBStreamOptions): Promis
       message: error instanceof Error ? error.message : 'Gagal memulai encoder native.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   }
 }
@@ -1086,6 +1094,7 @@ export async function stopModeBStream(): Promise<ModeBStreamSnapshot> {
       message: 'Encoder native tidak aktif di browser.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   }
   try {
@@ -1098,6 +1107,7 @@ export async function stopModeBStream(): Promise<ModeBStreamSnapshot> {
       message: 'Permintaan berhenti dikirim ke encoder native.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: result?.canStartNewSession === true ? true : false,
     };
   } catch (error) {
     modeBOverlayForwardingActive = false;
@@ -1107,6 +1117,7 @@ export async function stopModeBStream(): Promise<ModeBStreamSnapshot> {
       message: error instanceof Error ? error.message : 'Gagal menghentikan encoder native.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   }
 }
@@ -1118,6 +1129,7 @@ export async function getModeBStreamStatus(): Promise<ModeBStreamSnapshot> {
       message: 'Mode B native belum tersedia di browser.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   }
   try {
@@ -1131,6 +1143,7 @@ export async function getModeBStreamStatus(): Promise<ModeBStreamSnapshot> {
       message: error instanceof Error ? error.message : 'Tidak dapat membaca status encoder.',
       isStreaming: false,
       bitrateKbps: 0,
+      canStartNewSession: false,
     };
   }
 }

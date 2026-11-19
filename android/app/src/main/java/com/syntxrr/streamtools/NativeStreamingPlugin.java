@@ -197,6 +197,10 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
 
     @PluginMethod
     public void startStream(PluginCall call) {
+        if (!ModeBStreamService.canStartNewSession()) {
+            call.reject(ModeBStreamService.getNewSessionBlockMessage());
+            return;
+        }
         String audioSource = call.getString("audioSource", "mix");
         if (!ModeBStreamPolicy.isSupportedAudioSource(audioSource)) {
             call.reject("Sumber audio Mode B tidak dikenali.");
@@ -256,6 +260,10 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
     }
 
     private void launchScreenCapture(PluginCall call) {
+        if (!ModeBStreamService.canStartNewSession()) {
+            call.reject(ModeBStreamService.getNewSessionBlockMessage());
+            return;
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             call.reject("Mode B memerlukan Android 5.0 atau lebih baru.");
             return;
@@ -338,6 +346,11 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
         }
         serviceIntent.putExtra(ModeBStreamService.EXTRA_SCREENSAVER, screensaverJson);
 
+        if (!ModeBStreamService.canStartNewSession()) {
+            call.reject(ModeBStreamService.getNewSessionBlockMessage());
+            return;
+        }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(getContext(), serviceIntent);
@@ -363,12 +376,14 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
             JSObject result = new JSObject();
             result.put("success", true);
             result.put("status", "stopping");
+            result.put("canStartNewSession", ModeBStreamService.canStartNewSession());
             call.resolve(result);
         } catch (Exception exception) {
             boolean stopped = getContext().stopService(new Intent(getContext(), ModeBStreamService.class));
             JSObject result = new JSObject();
             result.put("success", stopped);
             result.put("status", stopped ? "stopped" : ModeBStreamService.getLastStatus());
+            result.put("canStartNewSession", ModeBStreamService.canStartNewSession());
             call.resolve(result);
         }
     }
@@ -587,6 +602,7 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
         result.put("message", ModeBStreamService.getLastMessage());
         result.put("isStreaming", ModeBStreamService.isLastStreaming());
         result.put("bitrateKbps", ModeBStreamService.getLastBitrateKbps());
+        result.put("canStartNewSession", ModeBStreamService.canStartNewSession());
         call.resolve(result);
     }
 
@@ -597,6 +613,7 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
         event.put("message", message);
         event.put("isStreaming", streaming);
         event.put("bitrateKbps", bitrateKbps);
+        event.put("canStartNewSession", ModeBStreamService.canStartNewSession());
         event.put("timestamp", System.currentTimeMillis());
         notifyListeners("streamState", event);
     }
