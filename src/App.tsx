@@ -134,7 +134,7 @@ import {
   hudEventSourceStatus,
 } from './services/hudController';
 import type { HudChatEntry } from './services/hudController';
-import { applyTheme } from './theme/themeEngine';
+import { applyTheme, getThemeMeta } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 
 export default function App() {
