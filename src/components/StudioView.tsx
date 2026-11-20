@@ -2653,7 +2653,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 const res = await onApplyLiveSceneToModeB(elements, activePreset);
                 setModeBLiveApplyFeedback(res);
               }}
-              className="shrink-0 px-3.5 py-2 rounded-xl bg-sx-success hover:bg-sx-success text-white text-xs font-bold shadow transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="shrink-0 px-3.5 py-2 rounded-xl bg-sx-success hover:bg-sx-success/90 text-white text-xs font-bold shadow transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isModeBActionPending ? 'Menerapkan...' : 'Terapkan Perubahan ke LIVE'}
             </button>
@@ -3531,10 +3531,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             </span>
                             <span className="font-bold text-sx-text truncate block text-[11px] mt-0.5">
                               {selectedElement.properties.localFileName
-                                ? `📁 ${selectedElement.properties.localFileName}`
+                                ? `Berkas: ${selectedElement.properties.localFileName}`
                                 : selectedElement.properties.audioUrl
-                                ? `🌐 ${selectedElement.properties.audioUrl.slice(0, 35)}...`
-                                : '🎵 Sample BGM Bawaan'}
+                                ? `URL: ${selectedElement.properties.audioUrl.slice(0, 35)}...`
+                                : 'Sample BGM bawaan'}
                             </span>
                           </div>
                           <div className="shrink-0">
@@ -4164,7 +4164,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           addedAt: Date.now(),
                         });
                       }}
-                      className="flex-1 py-1.5 bg-sx-success hover:bg-sx-success text-white rounded text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex-1 py-1.5 bg-sx-success hover:bg-sx-success/90 text-white rounded text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-3.5 h-3.5" /> Pasang Sebagai Elemen Baru
                     </button>
