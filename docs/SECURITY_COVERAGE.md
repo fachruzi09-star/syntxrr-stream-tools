@@ -5,7 +5,7 @@ Status keseluruhan: **INCOMPLETE / BELUM LENGKAP.**
 Dokumen ini mencatat apa yang benar-benar diperiksa, apa yang belum tercakup, dan prasyarat untuk
 melengkapinya. Jangan pernah menyebut hasil ini sebagai "scan bersih" atau "dependency aman".
 
-Diperbarui pada branch `appjet` pada commit `7011f45` (setelah perbaikan kontinuitas data Floating HUD).
+Diperbarui pada branch `appjet` setelah Batch 7.1A — pemeriksaan ulang terakhir pada HEAD `5af5a46` (2026-11-20).
 
 ## 1. Yang sudah diperiksa (npm / JavaScript)
 
@@ -13,10 +13,10 @@ Diperbarui pada branch `appjet` pada commit `7011f45` (setelah perbaikan kontinu
 |---|---|
 | Scanner | OSV-Scanner 2.7.0 (dikelola AppJet, policy `workspace-dependencies-v1`) |
 | Sumber data | `package.json` + `bun.lock` |
-| Paket diperiksa | 353 |
+| Paket diperiksa | 357 |
 | Temuan | 0 (0 blocking) |
 | Status | `incomplete` |
-| Job bukti terakhir | `98c0fc9328fb75ab7d52f19538683c9f` (revisi 11; status tetap `incomplete`) |
+| Job bukti terakhir | `dade552865068976d63b6487b933302c` (revisi 14, Batch 7.1A; status tetap `incomplete`) |
 
 `package.json` dan `bun.lock` terakhir berubah pada commit `c7d0622` (nama paket menjadi
 `syntxrr-stream`, versi `1.0.0`; `bun.lock` ikut menyesuaikan satu baris), dan tidak berubah sampai
@@ -24,10 +24,18 @@ Diperbarui pada branch `appjet` pada commit `7011f45` (setelah perbaikan kontinu
 `package.json` dan ter-resolve `0.28.2` di `bun.lock`, sehingga `bun install --frozen-lockfile`
 konsisten dan bukti npm di atas berlaku untuk kode saat ini.
 
-Catatan penting: pemindaian terakhir dijalankan ulang sekali setelah pekerjaan Floating HUD dan
-menghasilkan cakupan yang identik (353 paket npm, 0 temuan, tetap `incomplete`). Karena file
-dependency tidak berubah, scan berikutnya tidak boleh diulang tanpa perubahan `package.json` atau
-`bun.lock`; mengulang perintah yang sama tidak akan mengubah status menjadi lengkap.
+Catatan penting: pemindaian pernah dijalankan ulang setelah pekerjaan Floating HUD dan sekali lagi
+pada Batch 7.1A (revisi 14). Cakupannya tetap sama: hanya ekosistem **npm**, 0 temuan, status tetap
+`incomplete`.
+
+Angka paket yang dilaporkan berbeda antar jalankan (353 → 357) walaupun `package.json` dan
+`bun.lock` tidak berubah sejak `c7d0622`. Penyebab pastinya tidak dapat dipastikan dari workspace
+ini (kemungkinan perbedaan snapshot graph/advisory di sisi scanner), sehingga angka tersebut harus
+dibaca sebagai laporan scanner pada saat itu — bukan bukti bahwa dependency aplikasi berubah.
+
+Karena file dependency tidak berubah, scan berikutnya tidak boleh diulang tanpa perubahan
+`package.json` atau `bun.lock`; mengulang perintah yang sama tidak akan mengubah status menjadi
+lengkap.
 
 ## 2. Yang belum tercakup — dan penyebabnya
 
@@ -52,6 +60,11 @@ Kemampuan yang tidak tersedia di lingkungan ini, dinyatakan eksplisit:
    meminta autentikasi. Pencarian kredensial tidak diizinkan.
 
 Keduanya prasyarat eksternal di luar repository, bukan cacat kode aplikasi.
+
+Diverifikasi ulang 2026-11-20 (Batch 7.1A): `ANDROID_HOME` dan `ANDROID_SDK_ROOT` tidak diset, tidak
+ada direktori Android SDK (`/opt/android*`, `/usr/lib/android*`, `/root/Android`), `gh auth status`
+melaporkan "not logged into any GitHub hosts", dan `GH_TOKEN` tidak diset. Jadi kedua prasyarat ini
+masih terbuka, bukan asumsi lama.
 
 ## 3. Audit classpath build (manual, sebelumnya)
 
@@ -132,7 +145,7 @@ tidak boleh mengutip angka advisory Maven seolah-olah baru diverifikasi.
 ## 6. Aturan pelaporan
 
 - Jangan menyatakan "dependency aman" selama status masih `incomplete`.
-- Selalu sebutkan cakupan secara eksplisit: npm 353 paket (0 temuan) + Maven/Gradle belum
+- Selalu sebutkan cakupan secara eksplisit: npm 357 paket (0 temuan) + Maven/Gradle belum
   diverifikasi oleh scanner.
 - Scan hanya mencakup paket yang dilaporkan dan snapshot advisory pada saat pemindaian; itu bukan
   bukti keamanan seluruh aplikasi.
