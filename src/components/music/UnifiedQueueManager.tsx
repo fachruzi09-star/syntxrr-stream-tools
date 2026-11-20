@@ -10,9 +10,6 @@ import {
   ExternalLink,
   Play,
   FileMusic,
-  User,
-  Filter,
-  AlertTriangle,
   Info,
 } from 'lucide-react';
 
@@ -82,23 +79,23 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
       case 'local':
         return {
           label: 'Local File',
-          className: 'bg-emerald-950/80 text-emerald-400 border border-emerald-800',
+          className: 'bg-[var(--app-ok-soft)] text-[var(--app-ok)] border border-emerald-500/30',
         };
       case 'youtube':
         return {
           label: 'YouTube',
-          className: 'bg-red-950/80 text-red-400 border border-red-800',
+          className: 'bg-[var(--app-error-soft)] text-[var(--app-error)] border border-rose-500/30',
         };
       case 'spotify':
         return {
           label: 'Spotify',
-          className: 'bg-emerald-950/80 text-emerald-400 border border-emerald-700',
+          className: 'bg-[var(--app-ok-soft)] text-[var(--app-ok)] border border-emerald-500/30',
         };
       case 'viewer_request':
       default:
         return {
           label: 'Viewer Request',
-          className: 'bg-blue-950/80 text-blue-400 border border-blue-800',
+          className: 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border border-[var(--app-accent-border)]',
         };
     }
   };
@@ -106,28 +103,28 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
   const getStatusBadge = (status: QueueItemStatus) => {
     switch (status) {
       case 'playing':
-        return 'text-emerald-400 font-bold';
+        return 'text-[var(--app-ok)] font-bold';
       case 'approved':
-        return 'text-blue-400 font-semibold';
+        return 'text-[var(--app-accent-text)] font-semibold';
       case 'pending':
-        return 'text-amber-400 font-semibold';
+        return 'text-[var(--app-warn)] font-semibold';
       case 'rejected':
-        return 'text-rose-400 line-through';
+        return 'text-[var(--app-error)] line-through';
       case 'completed':
-        return 'text-slate-500';
+        return 'text-[var(--app-text-muted)]';
     }
   };
 
   return (
     <div className="space-y-4">
       {/* Header and Filter Bar */}
-      <div className="p-4 rounded-2xl bg-[#0e1626] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="p-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <ListMusic className="w-4 h-4 text-blue-400" />
+          <h3 className="text-sm font-display font-bold text-[var(--app-text)] flex items-center gap-2">
+            <ListMusic className="w-4 h-4 text-[var(--app-accent-text)]" />
             Unified Request Queue ({queue.length} items)
           </h3>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-[var(--app-text-secondary)]">
             Orchestrating local audio, YouTube, Spotify, and viewer submissions in one place
           </p>
         </div>
@@ -137,7 +134,8 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
           <select
             value={filterSource}
             onChange={(e) => setFilterSource(e.target.value)}
-            className="px-2.5 py-1.5 rounded-lg bg-[#080c16] border border-slate-700 text-xs text-slate-300 focus:outline-none"
+            aria-label="Filter by source"
+            className="min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
           >
             <option value="all">All Sources</option>
             <option value="local">Local Audio</option>
@@ -150,7 +148,8 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-2.5 py-1.5 rounded-lg bg-[#080c16] border border-slate-700 text-xs text-slate-300 focus:outline-none"
+            aria-label="Filter by status"
+            className="min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
           >
             <option value="all">All Statuses</option>
             <option value="pending">Pending</option>
@@ -161,8 +160,9 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
           </select>
 
           <button
+            type="button"
             onClick={handleClearCompleted}
-            className="min-h-[34px] px-2.5 rounded-lg bg-[#080c16] hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white text-xs transition-colors"
+            className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:border-[var(--app-border-strong)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] text-xs font-semibold transition-colors"
             title="Clean up completed and rejected items"
           >
             Clean Completed
@@ -172,12 +172,12 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
 
       {/* Queue List */}
       {filteredQueue.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-[#0e1626] border border-slate-800 text-center space-y-2">
-          <ListMusic className="w-8 h-8 text-slate-600 mx-auto" />
-          <div className="text-sm font-semibold text-slate-300">
+        <div className="p-8 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] text-center space-y-2">
+          <ListMusic className="w-8 h-8 text-[var(--app-text-muted)] mx-auto" />
+          <div className="text-sm font-display font-bold text-[var(--app-text)]">
             No items in queue matching your filter
           </div>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          <p className="text-xs text-[var(--app-text-secondary)] max-w-sm mx-auto">
             Add local songs, search YouTube or Spotify catalogs, or submit requests via the Viewer Portal tab.
           </p>
         </div>
@@ -192,37 +192,39 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
                 key={item.id}
                 className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
                   isPlaying
-                    ? 'bg-blue-950/40 border-blue-500/80 shadow-md ring-1 ring-blue-500/40'
-                    : 'bg-[#0e1626] border-slate-800 hover:border-slate-700'
+                    ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] shadow-sm'
+                    : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)]'
                 }`}
               >
                 {/* Left: Reorder Controls + Info */}
                 <div className="flex items-start sm:items-center gap-3 min-w-0">
                   {/* Position number & up/down */}
-                  <div className="flex flex-col items-center justify-center shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
+                      type="button"
                       onClick={() => handleMoveUp(index)}
                       disabled={index === 0}
-                      className="p-1 text-slate-500 hover:text-white disabled:opacity-20 transition-colors"
+                      className="min-h-[44px] min-w-[44px] rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-muted)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] disabled:opacity-25 flex items-center justify-center transition-colors"
                       title="Move up in queue"
                     >
-                      <ArrowUp className="w-3.5 h-3.5" />
+                      <ArrowUp className="w-4 h-4" />
                     </button>
-                    <span className="font-mono text-xs font-bold text-slate-400">
+                    <span className="font-mono-num text-xs font-bold text-[var(--app-text-secondary)] min-w-[26px] text-center">
                       #{index + 1}
                     </span>
                     <button
+                      type="button"
                       onClick={() => handleMoveDown(index)}
                       disabled={index === queue.length - 1}
-                      className="p-1 text-slate-500 hover:text-white disabled:opacity-20 transition-colors"
+                      className="min-h-[44px] min-w-[44px] rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-muted)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] disabled:opacity-25 flex items-center justify-center transition-colors"
                       title="Move down in queue"
                     >
-                      <ArrowDown className="w-3.5 h-3.5" />
+                      <ArrowDown className="w-4 h-4" />
                     </button>
                   </div>
 
                   {/* Thumbnail / Source Icon */}
-                  <div className="relative w-11 h-11 rounded-lg bg-black/60 border border-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
+                  <div className="relative w-11 h-11 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-center justify-center shrink-0 overflow-hidden">
                     {item.thumbnailUrl ? (
                       <img
                         src={item.thumbnailUrl}
@@ -231,16 +233,16 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
                         referrerPolicy="no-referrer"
                       />
                     ) : item.source === 'local' ? (
-                      <FileMusic className="w-5 h-5 text-emerald-400" />
+                      <FileMusic className="w-5 h-5 text-[var(--app-ok)]" />
                     ) : (
-                      <ListMusic className="w-5 h-5 text-blue-400" />
+                      <ListMusic className="w-5 h-5 text-[var(--app-accent-text)]" />
                     )}
                   </div>
 
                   {/* Title & Requester */}
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${badge.className}`}>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badge.className}`}>
                         {badge.label}
                       </span>
                       <span className={`text-[10px] capitalize ${getStatusBadge(item.status)}`}>
@@ -248,20 +250,18 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
                       </span>
                     </div>
 
-                    <div className="text-xs font-bold text-white truncate mt-1">
+                    <div className="text-xs font-bold text-[var(--app-text)] truncate mt-1">
                       {item.title}
                     </div>
 
-                    <div className="text-[11px] text-slate-400 truncate flex items-center gap-1.5 mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-secondary)] truncate flex items-center gap-1.5 mt-0.5">
                       <span>{item.artist || 'Unknown Artist'}</span>
                       <span>·</span>
-                      <span className="text-slate-300">
-                        Req by {item.requesterName}
-                      </span>
+                      <span className="text-[var(--app-text)]">Req by {item.requesterName}</span>
                       {item.notes && (
                         <>
                           <span>·</span>
-                          <span className="text-blue-300 italic truncate max-w-[150px]">
+                          <span className="text-[var(--app-accent-text)] italic truncate max-w-[150px]">
                             &quot;{item.notes}&quot;
                           </span>
                         </>
@@ -271,12 +271,13 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
                 </div>
 
                 {/* Right: Actions */}
-                <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80 w-full sm:w-auto justify-end">
+                <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-auto shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[var(--app-border)] w-full sm:w-auto justify-end">
                   {/* Local audio playback action */}
                   {item.source === 'local' && onPlayLocalItem && (
                     <button
+                      type="button"
                       onClick={() => onPlayLocalItem(item)}
-                      className="min-h-[34px] px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 transition-colors"
+                      className="min-h-[44px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
                       title="Play in local audio engine"
                     >
                       <Play className="w-3.5 h-3.5" /> Play
@@ -286,8 +287,9 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
                   {/* External app link for YouTube / Spotify */}
                   {item.externalUrl && (
                     <button
+                      type="button"
                       onClick={() => window.open(item.externalUrl, '_blank', 'noopener,noreferrer')}
-                      className="min-h-[34px] px-2 rounded-lg bg-[#080c16] hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center gap-1 transition-colors"
+                      className="min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:border-[var(--app-border-strong)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] text-xs font-semibold flex items-center gap-1.5 transition-colors"
                       title="Open in official app/browser"
                     >
                       <ExternalLink className="w-3.5 h-3.5" /> Open
@@ -298,38 +300,42 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
                   {item.status === 'pending' && (
                     <>
                       <button
+                        type="button"
                         onClick={() => handleUpdateStatus(item.id, 'approved')}
-                        className="min-h-[34px] px-2 rounded-lg bg-blue-950/80 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-800 text-xs font-semibold flex items-center gap-1 transition-colors"
+                        className="min-h-[44px] px-3 rounded-xl bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-ink)] border border-[var(--app-accent-border)] text-xs font-bold flex items-center gap-1.5 transition-colors"
                         title="Approve request"
                       >
-                        <CheckCircle className="w-3.5 h-3.5" /> Approve
+                        <CheckCircle className="w-4 h-4" /> Approve
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleUpdateStatus(item.id, 'rejected')}
-                        className="min-h-[34px] px-2 rounded-lg bg-rose-950/50 text-rose-400 hover:bg-rose-900/60 border border-rose-900/60 text-xs flex items-center gap-1 transition-colors"
+                        className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] text-[var(--app-error)] hover:border-rose-500/50 border border-rose-500/30 text-xs flex items-center justify-center transition-colors"
                         title="Reject request"
                       >
-                        <XCircle className="w-3.5 h-3.5" />
+                        <XCircle className="w-4 h-4" />
                       </button>
                     </>
                   )}
 
                   {item.status === 'approved' && (
                     <button
+                      type="button"
                       onClick={() => handleUpdateStatus(item.id, 'completed')}
-                      className="min-h-[34px] px-2 rounded-lg bg-[#080c16] text-slate-400 hover:text-emerald-400 border border-slate-800 text-xs flex items-center gap-1 transition-colors"
+                      className="min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] text-[var(--app-text-secondary)] hover:text-[var(--app-ok)] border border-[var(--app-border)] text-xs font-semibold flex items-center gap-1.5 transition-colors"
                       title="Mark as completed/played"
                     >
-                      <CheckCircle className="w-3.5 h-3.5" /> Done
+                      <CheckCircle className="w-4 h-4" /> Done
                     </button>
                   )}
 
                   <button
+                    type="button"
                     onClick={() => handleRemove(item.id)}
-                    className="min-h-[34px] min-w-[34px] rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 flex items-center justify-center transition-colors"
+                    className="min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-error)] hover:bg-[var(--app-error-soft)] flex items-center justify-center transition-colors"
                     title="Remove from queue"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -339,10 +345,10 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
       )}
 
       {/* Broadcast Audio Separation Notice */}
-      <div className="p-3.5 rounded-xl bg-[#0a1120] border border-blue-900/40 text-xs text-slate-300 flex items-start gap-2.5">
-        <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+      <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] flex items-start gap-2.5">
+        <Info className="w-4 h-4 text-[var(--app-accent-text)] shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          <strong>Audio Routing Integrity:</strong> YouTube and Spotify entries are stored as metadata cards for on-screen overlays and viewer management. Only authorized local audio files loaded into the Local Audio Engine are decoded inside the application.
+          <strong className="text-[var(--app-text)]">Audio Routing Integrity:</strong> YouTube and Spotify entries are stored as metadata cards for on-screen overlays and viewer management. Only authorized local audio files loaded into the Local Audio Engine are decoded inside the application.
         </p>
       </div>
     </div>

@@ -5,7 +5,6 @@ import {
   FrameRate,
   PerformanceProfile,
   AppLanguage,
-  AppTheme,
   HudPosition,
   ModeBAudioSource,
 } from '../types';
@@ -47,10 +46,7 @@ import {
   Layers,
   Lock,
   Wifi,
-  LayoutGrid,
   ChevronRight,
-  ArrowLeft,
-  Wrench,
 } from 'lucide-react';
 import {
   isNativeAndroid,
@@ -64,7 +60,6 @@ import {
   updateFloatingHud,
   hideFloatingHud,
 } from '../services/nativeCompanionBridge';
-import { applyTheme } from '../theme/themeEngine';
 import { useTranslation } from '../i18n/I18nContext';
 
 /* ============================================================================
@@ -458,8 +453,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const saveRequestIdRef = useRef(0);
   const isMountedRef = useRef(true);
 
-  // Category selection: null = System Configuration Overview
-  const [activeCategory, setActiveCategory] = useState<SettingsCategoryId | null>(null);
+  // Category selection: starts directly on General configuration workspace
+  const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>('general');
 
   // Device performance test
   const [deviceTest, setDeviceTest] = useState<DeviceTestResult | null>(null);
@@ -1052,19 +1047,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ? settings.modeBAudioSource
       : 'mix';
 
-  const activeThemeLabel = (() => {
-    switch (settings.theme) {
-      case 'navy_dark':
-        return 'Navy Dark';
-      case 'obsidian_dark':
-        return 'Obsidian';
-      case 'cyber_slate':
-        return 'Cyber Slate';
-      default:
-        return 'Flagship Dark';
-    }
-  })();
-
   const activeModeShort =
     settings.operatingMode === 'MODE_B_STREAMING_ENCODER'
       ? 'Mode B · Encoder RTMP'
@@ -1119,9 +1101,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       shortTitle: isEnglish ? 'General' : 'Umum',
       title: t('settings.secA.title', 'Umum (General)'),
       description: isEnglish
-        ? 'Language, theme, haptics & safety'
-        : 'Bahasa, tema, getar & konfirmasi',
-      liveSummary: `${(settings.language ?? 'id-ID') === 'en-US' ? 'English' : 'Indonesia'} · ${activeThemeLabel}`,
+        ? 'Language, haptics & safety'
+        : 'Bahasa, getar & konfirmasi',
+      liveSummary: `${(settings.language ?? 'id-ID') === 'en-US' ? 'English' : 'Indonesia'} · ${
+        settings.hapticFeedback
+          ? isEnglish
+            ? 'Haptics On'
+            : 'Getar Aktif'
+          : isEnglish
+          ? 'Haptics Off'
+          : 'Getar Nonaktif'
+      }`,
     },
     {
       id: 'audio',
@@ -1260,20 +1250,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         className="lg:hidden -mx-1 px-1 overflow-x-auto"
       >
         <div className="flex items-center gap-2 pb-1 min-w-max">
-          <button
-            type="button"
-            onClick={() => setActiveCategory(null)}
-            aria-current={activeCategory === null ? 'page' : undefined}
-            className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-2 transition-colors ${
-              activeCategory === null
-                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)] font-bold'
-                : 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-            }`}
-          >
-            <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-            <span>{isEnglish ? 'Overview' : 'Ringkasan'}</span>
-          </button>
-
           {categories.map((cat) => {
             const Icon = cat.icon;
             const active = activeCategory === cat.id;
@@ -1306,45 +1282,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-2 space-y-1"
             style={{ boxShadow: 'var(--app-shadow)' }}
           >
-            <button
-              type="button"
-              onClick={() => setActiveCategory(null)}
-              aria-current={activeCategory === null ? 'page' : undefined}
-              className={`w-full min-h-[48px] px-3 py-2.5 rounded-xl border text-left flex items-center gap-3 transition-colors ${
-                activeCategory === null
-                  ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
-                  : 'bg-transparent border-transparent text-[var(--app-text-secondary)] hover:bg-[var(--app-surface-muted)] hover:text-[var(--app-text)]'
-              }`}
-            >
-              <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${
-                  activeCategory === null
-                    ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
-                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
-                }`}
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold leading-tight truncate">
-                  {isEnglish ? 'Configuration Overview' : 'Ringkasan Konfigurasi'}
-                </div>
-                <div className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">
-                  {isEnglish
-                    ? 'Active baseline & 6 system domains'
-                    : 'Kondisi aktif & 6 domain sistem'}
-                </div>
-              </div>
-              {activeCategory === null && (
-                <span
-                  aria-hidden="true"
-                  className="w-1.5 h-5 rounded-full bg-[var(--app-accent)] shrink-0"
-                />
-              )}
-            </button>
-
-            <div className="my-1.5 border-t border-[var(--app-border)]" aria-hidden="true" />
-
             {categories.map((cat) => {
               const Icon = cat.icon;
               const active = activeCategory === cat.id;
@@ -1397,164 +1334,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         {/* B. MAIN CONFIGURATION WORKSPACE */}
         <div className="lg:col-span-8 space-y-4 sm:space-y-5 min-w-0">
-          {/* Active Category Workspace Context Bar (Mobile & Desktop) */}
-          {activeCategory !== null && activeCategoryMeta && (
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
-              <button
-                type="button"
-                onClick={() => setActiveCategory(null)}
-                className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-text)] inline-flex items-center gap-2 transition-colors"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
-                <span>{isEnglish ? 'All Categories' : 'Semua Kategori'}</span>
-              </button>
-
+          {/* Active Category Workspace Context Strip */}
+          {activeCategoryMeta && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-1.5 h-4 rounded-full bg-[var(--app-accent)] shrink-0" aria-hidden="true" />
+                <span className="font-display text-xs font-bold text-[var(--app-text)] truncate">
+                  {activeCategoryMeta.title}
+                </span>
+              </div>
               <div className="text-[11px] font-mono-num text-[var(--app-text-muted)] truncate">
                 {activeCategoryMeta.liveSummary}
               </div>
-            </div>
-          )}
-
-          {/* ================= 3. SYSTEM CONFIGURATION OVERVIEW ================= */}
-          {activeCategory === null && (
-            <div className="space-y-4 sm:space-y-5">
-              {/* Live Configuration Baseline Snapshot (Real Settings, Storage, Runtime) */}
-              <section
-                className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden"
-                style={{ boxShadow: 'var(--app-shadow)' }}
-              >
-                <div className="px-4 sm:px-5 py-3 bg-[var(--app-surface-muted)] border-b border-[var(--app-border)] flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                    <span className="font-display text-sm font-bold text-[var(--app-text)]">
-                      {isEnglish
-                        ? 'System Configuration Overview'
-                        : 'Ringkasan Konfigurasi Sistem'}
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-                    v{APP_VERSION} ·{' '}
-                    {nativeAndroid
-                      ? t('settings.about.runtimeApk', 'Android (APK)')
-                      : t('settings.about.runtimeWeb', 'Browser / Desktop')}
-                  </span>
-                </div>
-
-                <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {isEnglish ? 'Output Profile' : 'Profil Output'}
-                    </div>
-                    <div className="font-mono-num font-bold text-[var(--app-text)] mt-1 truncate">
-                      {settings.targetResolution} · {settings.frameRate} FPS
-                    </div>
-                    <div className="text-[11px] font-mono-num text-[var(--app-text-muted)] mt-0.5 truncate">
-                      {settings.videoBitrateKbps} / {settings.audioBitrateKbps} Kbps
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {isEnglish ? 'Locale & Theme' : 'Bahasa & Tema'}
-                    </div>
-                    <div className="font-semibold text-[var(--app-text)] mt-1 truncate">
-                      {(settings.language ?? 'id-ID') === 'en-US' ? 'English' : 'Indonesia'}
-                    </div>
-                    <div className="text-[11px] text-[var(--app-accent-text)] mt-0.5 truncate">
-                      {activeThemeLabel}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {isEnglish ? 'Storage Quota' : 'Penyimpanan Lokal'}
-                    </div>
-                    <div className="font-mono-num font-bold text-[var(--app-text)] mt-1 truncate">
-                      {storageInfo ? formatBytes(storageInfo.usage) : '—'}
-                    </div>
-                    <div className="text-[11px] font-mono-num text-[var(--app-text-muted)] mt-0.5 truncate">
-                      {storageInfo
-                        ? `/ ${formatBytes(storageInfo.quota)}`
-                        : isEnglish
-                        ? 'Estimate unavailable'
-                        : 'Estimasi tidak terbaca'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {isEnglish ? 'RTMP Endpoint' : 'Endpoint RTMP'}
-                    </div>
-                    <div
-                      className="font-semibold mt-1 truncate"
-                      style={{
-                        color: rtmpValidation.valid ? 'var(--app-ok)' : 'var(--app-warn)',
-                      }}
-                    >
-                      {rtmpValidation.valid
-                        ? isEnglish
-                          ? 'Configured'
-                          : 'Terkonfigurasi'
-                        : isEnglish
-                        ? 'Needs Setup'
-                        : 'Belum Lengkap'}
-                    </div>
-                    <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5 truncate">
-                      {settings.hudEnabled
-                        ? isEnglish
-                          ? 'HUD preference: On'
-                          : 'Preferensi HUD: Aktif'
-                        : isEnglish
-                        ? 'HUD preference: Off'
-                        : 'Preferensi HUD: Nonaktif'}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Six Configuration Domains (1-col on narrow mobile, 2-col on tablet/desktop, zero empty placeholder boxes) */}
-              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
-                    {isEnglish ? 'Configuration Categories' : 'Kategori Konfigurasi'}
-                  </h2>
-                  <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-                    6 {isEnglish ? 'modules' : 'modul'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {categories.map((cat) => {
-                    const Icon = cat.icon;
-                    return (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onClick={() => setActiveCategory(cat.id)}
-                        className="group min-h-[72px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex items-start gap-3 transition-colors min-w-0"
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] group-hover:border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0 mt-0.5">
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0 flex-1 space-y-0.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-[var(--app-text)] truncate">
-                              {cat.title}
-                            </span>
-                            <ChevronRight className="w-3.5 h-3.5 text-[var(--app-text-muted)] group-hover:text-[var(--app-accent-text)] shrink-0" />
-                          </div>
-                          <p className="text-[11px] text-[var(--app-text-muted)] leading-snug line-clamp-2">
-                            {cat.description}
-                          </p>
-                          <div className="pt-1 text-[10px] font-mono-num text-[var(--app-text-secondary)] truncate">
-                            {cat.liveSummary}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
             </div>
           )}
 
@@ -1566,7 +1357,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 title={t('settings.secA.title', 'Umum (General)')}
                 subtitle={t(
                   'settings.secA.subtitle',
-                  'Bahasa, tema tampilan, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran'
+                  'Bahasa antarmuka, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran'
                 )}
               >
                 <FieldRow
@@ -1585,46 +1376,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     columns="grid-cols-2"
                     value={(settings.language ?? 'id-ID') as AppLanguage}
                     onChange={(value) => handleUpdate('language', value)}
-                  />
-                </FieldRow>
-
-                <FieldRow
-                  title={t('settings.theme.title', 'Tema Tampilan')}
-                  description={t(
-                    'settings.theme.desc',
-                    'Tema visual instan. Mengubah warna latar, panel, kartu, border, dan aksen di seluruh aplikasi.'
-                  )}
-                  status="functional"
-                >
-                  <Segmented<AppTheme>
-                    columns="grid-cols-1 sm:grid-cols-2"
-                    options={[
-                      { value: 'd_plus_dark', label: 'Flagship Dark', hint: '#F2C230' },
-                      {
-                        value: 'navy_dark',
-                        label: 'Navy Dark',
-                        hint: isEnglish ? 'Classic' : 'Klasik',
-                      },
-                      {
-                        value: 'obsidian_dark',
-                        label: 'Obsidian',
-                        hint: isEnglish ? 'Pure Black' : 'Gelap pekat',
-                      },
-                      {
-                        value: 'cyber_slate',
-                        label: 'Cyber Slate',
-                        hint: isEnglish ? 'High Contrast' : 'Kontras tinggi',
-                      },
-                    ]}
-                    value={
-                      (settings.theme === 'd_plus_light'
-                        ? 'd_plus_dark'
-                        : settings.theme ?? 'd_plus_dark') as AppTheme
-                    }
-                    onChange={(value) => {
-                      applyTheme(value);
-                      handleUpdate('theme', value);
-                    }}
                   />
                 </FieldRow>
 

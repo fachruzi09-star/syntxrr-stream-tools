@@ -232,7 +232,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                   <div className="flex items-center justify-between text-[11px] text-[var(--app-text-muted)] border-b border-[var(--app-border)] pb-1.5">
                     <span>{t('mode.permStatus', 'Izin Android SYSTEM_ALERT_WINDOW')}</span>
                     <span className="text-[var(--app-text-secondary)] font-semibold">
-                      {t('mode.permSimulated', 'Diperiksa di APK Android')}
+                      {t('mode.permSimulated', 'Periksa di Setelan Android')}
                     </span>
                   </div>
                   <p className="leading-relaxed">

@@ -1,25 +1,10 @@
 /**
  * FloatingHudPanel.tsx
  *
- * Launcher + panel untuk bubble Floating HUD native.
- *
- * Perilaku (revisi akhir):
- * - Bubble adalah master toggle. Saat bubble ditekan, komponen ini muncul sebagai
- *   launcher enam ikon kecil (Chat, Soundboard, Music, Audio Mixer, Live Control,
- *   Settings) di sisi layar yang sama dengan bubble.
- * - Menekan salah satu ikon membuka HANYA panel fitur itu, berukuran kompak,
- *   dengan scroll internal bila isinya panjang.
- * - Tidak ada backdrop penuh layar, tidak ada dimming, tidak ada modal takeover,
- *   sehingga area menonton TikTok LIVE tetap terpakai.
- * - Panel tidak pernah bertumpuk: memilih ikon lain menggantikan panel sebelumnya.
- *
- * Prinsip lain:
- * - Hanya membungkus state/handler yang SUDAH ada di App.tsx. Tidak ada logika
- *   soundboard, musik, atau mixer yang diduplikasi di sini.
- * - Tidak mengarang kemampuan native. Mode A tidak pernah menampilkan kontrol
- *   start/pause/stop TikTok LIVE karena siaran tetap dipegang aplikasi TikTok.
- * - Mode B menggunakan native RTMP encoder pada APK Android; panel fallback web
- *   tidak dapat menjalankan kontrol encoder native tersebut.
+ * Launcher + panel untuk bubble Floating HUD native (D+ Flagship Tokenized).
+ * - Bubble adalah master toggle. Membuka launcher enam ikon kompak di sisi layar bubble.
+ * - Tidak ada backdrop penuh layar, tidak ada dimming, tidak ada modal takeover.
+ * - Membungkus state/handler yang sudah ada di App.tsx tanpa duplikasi logika.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -39,7 +24,13 @@ import {
   UserPlus,
   ListMusic,
 } from 'lucide-react';
-import { isModeAOperatingMode, type AlertEvent, type OperatingMode, type SongRequest, type SoundboardItem } from '../types';
+import {
+  isModeAOperatingMode,
+  type AlertEvent,
+  type OperatingMode,
+  type SongRequest,
+  type SoundboardItem,
+} from '../types';
 
 export type HudPanelId = 'chat' | 'soundboard' | 'music' | 'mixer' | 'live' | 'settings';
 
@@ -71,9 +62,12 @@ export interface FloatingHudPanelProps {
   onOpenSettingsPage: () => void;
 }
 
-const PANEL_META: Record<HudPanelId, { label: string; icon: React.ComponentType<{ className?: string }> }> = {
+const PANEL_META: Record<
+  HudPanelId,
+  { label: string; icon: React.ComponentType<{ className?: string }> }
+> = {
   chat: { label: 'Chat', icon: MessageCircle },
-  soundboard: { label: 'Soundboard', icon: Volume2 },
+  soundboard: { label: 'SFX', icon: Volume2 },
   music: { label: 'Music', icon: Music2 },
   mixer: { label: 'Mixer', icon: SlidersHorizontal },
   live: { label: 'Live', icon: Radio },
@@ -81,10 +75,10 @@ const PANEL_META: Record<HudPanelId, { label: string; icon: React.ComponentType<
 };
 
 function alertIcon(type: string) {
-  if (type === 'gift') return <Gift className="w-4 h-4 text-amber-400" />;
-  if (type === 'follow') return <UserPlus className="w-4 h-4 text-sky-400" />;
-  if (type === 'like') return <Heart className="w-4 h-4 text-pink-400" />;
-  return <MessageCircle className="w-4 h-4 text-slate-400" />;
+  if (type === 'gift') return <Gift className="w-4 h-4 text-[var(--app-accent-text)]" />;
+  if (type === 'follow' || type === 'follower') return <UserPlus className="w-4 h-4 text-sky-400" />;
+  if (type === 'like') return <Heart className="w-4 h-4 text-rose-400" />;
+  return <MessageCircle className="w-4 h-4 text-[var(--app-text-muted)]" />;
 }
 
 function clampPercent(value: number, min = 0, max = 100) {
@@ -118,16 +112,13 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
     () => (enabledPanels.length > 0 ? enabledPanels : (['chat'] as HudPanelId[])),
     [enabledPanels]
   );
-  // null = launcher saja (belum ada panel fitur yang dipilih).
   const [activePanel, setActivePanel] = useState<HudPanelId | null>(null);
   const [mutedVolume, setMutedVolume] = useState<number | null>(null);
 
-  // Master toggle dari bubble: setiap kali HUD ditutup, kembali ke kondisi launcher.
   useEffect(() => {
     if (!open) setActivePanel(null);
   }, [open]);
 
-  // Jika pengguna mematikan panel yang sedang terbuka di Settings, tutup panel itu.
   useEffect(() => {
     if (activePanel !== null && !availablePanels.includes(activePanel)) {
       setActivePanel(null);
@@ -136,7 +127,10 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
 
   if (!open) return null;
 
-  const quickSounds = sounds.filter((s) => s.isFavorite).concat(sounds.filter((s) => !s.isFavorite)).slice(0, 6);
+  const quickSounds = sounds
+    .filter((s) => s.isFavorite)
+    .concat(sounds.filter((s) => !s.isFavorite))
+    .slice(0, 6);
   const recentAlerts = alerts.slice(0, 12);
 
   const handleMuteToggle = () => {
@@ -145,7 +139,8 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
       setMutedVolume(currentPercent);
       onMixerChange('audioVolume', 0);
     } else {
-      const restorePercent = mutedVolume !== null && mutedVolume > 0 ? clampPercent(mutedVolume, 1, 100) : 85;
+      const restorePercent =
+        mutedVolume !== null && mutedVolume > 0 ? clampPercent(mutedVolume, 1, 100) : 85;
       onMixerChange('audioVolume', restorePercent);
       setMutedVolume(null);
     }
@@ -157,18 +152,23 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
         return (
           <div className="space-y-2">
             {recentAlerts.length === 0 ? (
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Belum ada event masuk. Chat, gift, dan follow akan muncul di sini setelah Mode A
-                menerima event dari sumbernya.
+              <p className="text-xs text-[var(--app-text-muted)] leading-relaxed">
+                Belum ada event masuk. Chat, gift, dan follow akan muncul di sini setelah Mode A menerima event.
               </p>
             ) : (
               recentAlerts.map((event) => (
-                <div key={event.id} className="flex items-start gap-2 text-xs">
+                <div
+                  key={event.id}
+                  className="flex items-start gap-2 text-xs py-1.5 border-b border-[var(--app-border)] last:border-b-0"
+                >
                   <span className="mt-0.5 shrink-0">{alertIcon(event.type)}</span>
                   <div className="min-w-0">
-                    <span className="font-semibold text-slate-200">{event.username}</span>
+                    <span className="font-semibold text-[var(--app-text)]">{event.username}</span>
                     {event.message || event.detail ? (
-                      <span className="text-slate-400"> — {event.message || event.detail}</span>
+                      <span className="text-[var(--app-text-secondary)]">
+                        {' '}
+                        — {event.message || event.detail}
+                      </span>
                     ) : null}
                   </div>
                 </div>
@@ -179,9 +179,11 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
 
       case 'soundboard':
         return (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {quickSounds.length === 0 ? (
-              <p className="text-xs text-slate-500">Belum ada sound. Tambahkan lewat Studio → Soundboard.</p>
+              <p className="text-xs text-[var(--app-text-muted)]">
+                Belum ada sound. Tambahkan lewat Studio → Soundboard.
+              </p>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {quickSounds.map((sound) => (
@@ -189,16 +191,20 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                     key={sound.id}
                     type="button"
                     onClick={() => onPlaySound(sound.id)}
-                    className="px-3 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-left transition-colors"
+                    className="min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left transition-colors"
                   >
-                    <span className="block text-xs font-medium text-slate-100 truncate">{sound.name}</span>
-                    <span className="block text-[10px] text-slate-500">{sound.durationSec}s</span>
+                    <span className="block text-xs font-semibold text-[var(--app-text)] truncate">
+                      {sound.name}
+                    </span>
+                    <span className="block text-[10px] font-mono-num text-[var(--app-text-muted)]">
+                      {sound.durationSec}s
+                    </span>
                   </button>
                 ))}
               </div>
             )}
-            <p className="text-[10px] text-slate-500 pt-1">
-              Slot dan isi sound dikelola di Studio agar tidak ada dua tempat pengaturan.
+            <p className="text-[10px] text-[var(--app-text-muted)] pt-0.5 leading-relaxed">
+              Slot dan isi sound dikelola terpusat di Studio.
             </p>
           </div>
         );
@@ -211,41 +217,43 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                 type="button"
                 onClick={onTogglePlayMusic}
                 disabled={!nowPlaying}
-                className="w-11 h-11 shrink-0 rounded-full bg-violet-600 hover:bg-violet-500 disabled:bg-slate-800 disabled:text-slate-600 text-white flex items-center justify-center transition-colors"
+                className="w-11 h-11 shrink-0 rounded-full bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:bg-[var(--app-surface-elevated)] disabled:text-[var(--app-text-muted)] text-[var(--app-accent-ink)] flex items-center justify-center transition-colors"
                 aria-label={isPlayingMusic ? 'Jeda musik' : 'Putar musik'}
               >
                 {isPlayingMusic ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
               </button>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-100 truncate">
+                <p className="text-sm font-semibold text-[var(--app-text)] truncate">
                   {nowPlaying ? nowPlaying.title : 'Tidak ada lagu aktif'}
                 </p>
-                <p className="text-xs text-slate-500 truncate">
-                  {nowPlaying ? nowPlaying.artist : 'Pilih lagu di Music'}
+                <p className="text-xs text-[var(--app-text-muted)] truncate">
+                  {nowPlaying ? nowPlaying.artist : 'Pilih lagu di Studio Music'}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <ListMusic className="w-3.5 h-3.5" />
-              <span>{queueCount} item di queue</span>
+            <div className="flex items-center gap-1.5 text-[11px] font-mono-num text-[var(--app-text-muted)]">
+              <ListMusic className="w-3.5 h-3.5 text-[var(--app-accent-text)]" />
+              <span>{queueCount} item di antrean</span>
             </div>
           </div>
         );
 
       case 'mixer':
         return (
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             {(
               [
-                { key: 'audioVolume' as HudMixerKey, label: 'Master', value: masterVolume },
-                { key: 'soundboardVolume' as HudMixerKey, label: 'Soundboard', value: soundboardVolume },
-                { key: 'micGain' as HudMixerKey, label: 'Mic', value: micGain, max: 200 },
-              ]
+                { key: 'audioVolume', label: 'Master', value: masterVolume },
+                { key: 'soundboardVolume', label: 'Soundboard', value: soundboardVolume },
+                { key: 'micGain', label: 'Mic Gain', value: micGain, max: 200 },
+              ] satisfies { key: HudMixerKey; label: string; value: number; max?: number }[]
             ).map((row) => (
               <div key={row.key} className="space-y-1.5">
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-300">{row.label}</span>
-                  <span className="font-mono text-slate-500">{clampPercent(row.value, 0, row.max ?? 100)}%</span>
+                  <span className="text-[var(--app-text-secondary)] font-medium">{row.label}</span>
+                  <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
+                    {clampPercent(row.value, 0, row.max ?? 100)}%
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -253,7 +261,7 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                   max={row.max ?? 100}
                   value={clampPercent(row.value, 0, row.max ?? 100)}
                   onChange={(e) => onMixerChange(row.key, Number(e.target.value))}
-                  className="w-full accent-violet-500"
+                  className="w-full h-2 rounded-lg cursor-pointer accent-[var(--app-accent)]"
                   aria-label={`Volume ${row.label}`}
                 />
               </div>
@@ -261,19 +269,19 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
             <button
               type="button"
               onClick={handleMuteToggle}
-              className={`w-full py-2 rounded-xl border text-xs font-medium transition-colors ${
+              className={`w-full min-h-[44px] py-2 rounded-xl border text-xs font-bold transition-colors ${
                 masterVolume === 0
-                  ? 'bg-red-950/60 border-red-800 text-red-300 hover:bg-red-900/60'
-                  : 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700'
+                  ? 'bg-rose-950/60 border-rose-700 text-rose-200 hover:bg-rose-900/60'
+                  : 'bg-[var(--app-surface-elevated)] border-[var(--app-border)] text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
               }`}
             >
               <span className="inline-flex items-center gap-1.5">
                 {masterVolume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                {masterVolume === 0 ? 'Unmute' : 'Mute'}
+                {masterVolume === 0 ? 'Unmute Master' : 'Mute Master'}
               </span>
             </button>
-            <p className="text-[10px] text-slate-500 leading-relaxed">
-              Mute menurunkan volume master ke 0. Efeknya mengikuti pemutar audio yang sedang aktif.
+            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+              Mute menurunkan volume master ke 0 pada pemutar audio aktif.
             </p>
           </div>
         );
@@ -283,27 +291,26 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
           <div className="space-y-3">
             {isModeAOperatingMode(operatingMode) ? (
               <>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Mode A adalah pendamping TikTok LIVE. Siaran tetap dijalankan dan dikendalikan oleh
-                  aplikasi TikTok resmi — tidak ada start, pause, atau stop LIVE dari sini.
+                <p className="text-xs text-[var(--app-text-secondary)] leading-relaxed">
+                  Mode A adalah pendamping TikTok LIVE. Siaran dikendalikan oleh aplikasi TikTok resmi — tidak ada start, pause, atau stop LIVE dari sini.
                 </p>
                 <button
                   type="button"
                   onClick={onToggleCompanion}
                   disabled={!isNativeAndroid}
-                  className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs font-semibold transition-colors"
+                  className="w-full min-h-[44px] py-2.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:bg-[var(--app-surface-elevated)] disabled:text-[var(--app-text-muted)] text-[var(--app-accent-ink)] text-xs font-bold transition-colors"
                 >
                   {companionRunning ? 'Hentikan Companion' : 'Jalankan Companion'}
                 </button>
                 {!isNativeAndroid && (
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Mode A Companion memerlukan APK Android native. Tampilan web/preview tidak dapat menjalankan layanan overlay native.
+                  <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                    Mode A Companion memerlukan APK Android native untuk overlay service.
                   </p>
                 )}
               </>
             ) : (
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Mode B menggunakan native RTMP encoder pada APK Android. Tampilan web/preview tidak dapat menjalankan kontrol encoder native.
+              <p className="text-xs text-[var(--app-text-secondary)] leading-relaxed">
+                Mode B menggunakan native RTMP encoder pada APK Android. Preview browser tidak menjalankan encoder native.
               </p>
             )}
           </div>
@@ -312,7 +319,7 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
       case 'settings':
         return (
           <div className="space-y-3">
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <p className="text-xs text-[var(--app-text-secondary)] leading-relaxed">
               Ukuran bubble, opacity, posisi, dan pilihan panel diatur di halaman Setelan.
             </p>
             <button
@@ -321,7 +328,7 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                 onOpenSettingsPage();
                 onClose();
               }}
-              className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-100 text-xs font-semibold transition-colors"
+              className="w-full min-h-[44px] py-2.5 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold transition-colors"
             >
               Buka Setelan
             </button>
@@ -342,8 +349,10 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
       aria-label="Floating HUD"
     >
       {activePanel === null ? (
-        /* ===== Launcher: enam ikon kecil, bukan enam panel besar ===== */
-        <div className="pointer-events-auto grid grid-cols-3 gap-1 p-1.5 rounded-2xl bg-[#0e1626]/95 border border-slate-700 shadow-xl">
+        <div
+          className="pointer-events-auto grid grid-cols-3 gap-1.5 p-2 rounded-2xl bg-[var(--app-surface)]/95 backdrop-blur-md border border-[var(--app-border-strong)]"
+          style={{ boxShadow: 'var(--app-shadow)' }}
+        >
           {availablePanels.map((panel) => {
             const meta = PANEL_META[panel];
             const Icon = meta.icon;
@@ -353,31 +362,34 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                 type="button"
                 onClick={() => setActivePanel(panel)}
                 aria-label={meta.label}
-                className="w-12 h-11 flex flex-col items-center justify-center gap-0.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 active:bg-slate-700 transition-colors"
+                className="min-w-[52px] min-h-[46px] flex flex-col items-center justify-center gap-1 rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-accent-text)] hover:bg-[var(--app-surface-elevated)] active:bg-[var(--app-surface-hover)] transition-colors"
               >
                 <Icon className="w-4 h-4" />
-                <span className="text-[8px] leading-none">{meta.label}</span>
+                <span className="text-[10px] font-medium leading-none">{meta.label}</span>
               </button>
             );
           })}
         </div>
       ) : (
-        /* ===== Satu panel fitur aktif, kompak, scroll internal ===== */
-        <div className="pointer-events-auto w-[17rem] max-w-[calc(100vw-1.5rem)] rounded-2xl bg-[#0e1626]/95 border border-slate-700 shadow-xl overflow-hidden">
-          <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-1">
-            <span className="text-[10px] uppercase tracking-wide text-slate-500">Floating HUD</span>
+        <div
+          className="pointer-events-auto w-[18.5rem] max-w-[calc(100vw-1.5rem)] rounded-2xl bg-[var(--app-surface)]/95 backdrop-blur-md border border-[var(--app-border-strong)] overflow-hidden"
+          style={{ boxShadow: 'var(--app-shadow)' }}
+        >
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--app-border)] bg-[var(--app-surface-muted)]">
+            <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--app-accent-text)]">
+              Floating HUD
+            </span>
             <button
               type="button"
               onClick={onClose}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+              className="min-w-[44px] min-h-[44px] -my-2 -mr-1.5 flex items-center justify-center rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-elevated)] transition-colors"
               aria-label="Tutup panel"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Strip launcher tetap ringkas dan bisa dipakai berpindah panel */}
-          <div className="flex items-center gap-1 px-2 pb-1.5 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1 px-2.5 py-2 border-b border-[var(--app-border)] overflow-x-auto no-scrollbar">
             {availablePanels.map((panel) => {
               const meta = PANEL_META[panel];
               const Icon = meta.icon;
@@ -389,10 +401,10 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                   onClick={() => setActivePanel(panel)}
                   aria-label={meta.label}
                   aria-pressed={isActive}
-                  className={`shrink-0 w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                  className={`shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border transition-colors ${
                     isActive
-                      ? 'bg-violet-600 text-white'
-                      : 'bg-slate-800/70 text-slate-400 hover:text-slate-100'
+                      ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                      : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -401,7 +413,7 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
             })}
           </div>
 
-          <div className="px-3 pb-3 pt-1 max-h-[42vh] overflow-y-auto">{renderPanel()}</div>
+          <div className="px-3.5 py-3 max-h-[42vh] overflow-y-auto">{renderPanel()}</div>
         </div>
       )}
     </div>

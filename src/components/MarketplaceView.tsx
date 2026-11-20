@@ -14,10 +14,6 @@ import {
   Plus,
   Layers,
   Sparkles,
-  ArrowRight,
-  Eye,
-  Sliders,
-  ExternalLink,
 } from 'lucide-react';
 
 interface MarketplaceViewProps {
@@ -32,9 +28,8 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   onNavigateToStudio,
 }) => {
   const [activeFilter, setActiveFilter] = useState<MarketplaceFilter>('all');
-  const [activeCategory, setActiveCategory] = useState<'all' | MarketplaceCategory>('all');
+  const [activeCategory] = useState<'all' | MarketplaceCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedItem, setSelectedItem] = useState<MarketplaceItem | null>(null);
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -55,65 +50,67 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   const handleInstall = (item: MarketplaceItem) => {
     onInstallElements(item.elementsPayload);
     setInstalledIds((prev) => new Set([...prev, item.id]));
-    setToastMessage(`"${item.name}" berhasil dipasang ke Studio!`);
-    setTimeout(() => setToastMessage(null), 3000);
+    setToastMessage(`"${item.name}" berhasil dipasang ke Studio.`);
+    window.setTimeout(() => setToastMessage(null), 3000);
   };
 
   return (
-    <div className="space-y-6 pb-20">
-      {/* Toast Notification */}
+    <div className="space-y-5 pb-6">
       {toastMessage && (
-        <div className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-[#1E3A8A] border border-[#38BDF8] text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center space-x-2 text-sm font-medium animate-bounce">
-          <Check className="w-4 h-4 text-[#38BDF8]" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-[var(--app-surface-elevated)] border border-[var(--app-accent-border)] text-[var(--app-text)] px-4 py-2 rounded-xl shadow-[var(--app-shadow)] flex items-center gap-2.5 text-xs sm:text-sm font-medium max-w-[92vw]"
+        >
+          <Check className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
           <span>{toastMessage}</span>
           <button
+            type="button"
             onClick={onNavigateToStudio}
-            className="ml-2 bg-[#2563EB] hover:bg-blue-600 px-2 py-0.5 rounded text-xs text-white underline font-semibold"
+            className="min-h-[36px] px-2.5 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs text-[var(--app-accent-ink)] font-bold shrink-0"
           >
-            Buka Studio →
+            Buka Studio
           </button>
         </div>
       )}
 
-      {/* Top Banner */}
-      <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center space-x-2 mb-1.5">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1e293b] text-blue-400 border border-blue-500/20 flex items-center space-x-1">
+      {/* Header Banner */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--app-text-muted)]">
+              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)] inline-flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Katalog Widget & Scene Siap Pakai</span>
+                <span>Katalog Widget &amp; Scene</span>
               </span>
-              <span className="text-xs text-slate-400">
-                {items.length} Aset Desain Terkurasi
+              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
+                /
               </span>
+              <span className="font-mono-num">{items.length} Paket Desain Terkurasi</span>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">
-              Marketplace Widget & Template Siaran
+            <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight mt-0.5">
+              Marketplace Widget &amp; Template
             </h1>
-            <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Unduh dan gunakan paket overlay, alert widget, goal counter, dan layout scene siap pakai yang dirancang khusus untuk mobile streaming studio.
+            <p className="text-xs sm:text-sm text-[var(--app-text-muted)] mt-1 max-w-2xl leading-relaxed">
+              Pasang paket overlay, alert widget, goal counter, dan layout scene siap pakai langsung ke Studio Canvas.
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={onNavigateToStudio}
-              className="px-4 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] border border-[#334155] text-white font-medium text-xs flex items-center space-x-2 transition"
-            >
-              <Layers className="w-4 h-4 text-blue-400" />
-              <span>Buka Studio Canvas</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onNavigateToStudio}
+            className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-2 transition-colors self-start md:self-auto shrink-0"
+          >
+            <Layers className="w-4 h-4 text-[var(--app-accent-text)]" />
+            <span>Buka Studio Canvas</span>
+          </button>
         </div>
 
-        {/* Filters bar */}
-        <div className="mt-6 flex flex-col md:flex-row md:items-center justify-between gap-3 pt-4 border-t border-[#1e293b]">
-          <div className="flex flex-wrap gap-1.5">
+        <div className="pt-3 border-t border-[var(--app-border)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
             {(
               [
-                { id: 'all', label: 'Semua Kategori' },
+                { id: 'all', label: 'Semua' },
                 { id: 'song_request', label: 'Now Playing' },
                 { id: 'chat_message', label: 'Kotak Chat' },
                 { id: 'counter', label: 'Progress Goal' },
@@ -123,11 +120,12 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
             ).map((filt) => (
               <button
                 key={filt.id}
+                type="button"
                 onClick={() => setActiveFilter(filt.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${
                   activeFilter === filt.id
-                    ? 'bg-[#2563EB] text-white shadow'
-                    : 'bg-[#080c16] text-slate-400 hover:text-white border border-[#1e293b]'
+                    ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                 }`}
               >
                 {filt.label}
@@ -135,84 +133,81 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
             ))}
           </div>
 
-          <div className="relative w-full md:w-64">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="relative w-full lg:w-64">
+            <Search className="w-4 h-4 text-[var(--app-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari widget, scene, kreator..."
-              className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+              aria-label="Cari paket marketplace"
+              className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl pl-10 pr-3.5 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none"
             />
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Grid of Marketplace Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      {/* Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredItems.map((item) => {
           const isInstalled = installedIds.has(item.id) || item.isInstalled;
 
           return (
             <div
               key={item.id}
-              className="bg-[#0e172a] border border-[#1e293b] rounded-2xl overflow-hidden hover:border-slate-600 transition flex flex-col justify-between group shadow-lg"
+              className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] overflow-hidden transition-colors flex flex-col justify-between"
             >
-              {/* Card Thumbnail Gradient */}
               <div
                 className={`h-36 bg-gradient-to-br ${item.previewGradient} relative p-4 flex flex-col justify-between`}
               >
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-black/40 backdrop-blur-md text-white border border-white/10">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-black/50 backdrop-blur-sm text-white border border-white/15">
                     {item.category.toUpperCase()}
                   </span>
-                  <div className="flex items-center space-x-1 px-2 py-0.5 rounded bg-black/40 backdrop-blur-md text-amber-300 text-xs font-bold border border-white/10">
-                    <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-black/50 backdrop-blur-sm text-[var(--app-accent)] text-xs font-bold font-mono-num border border-white/15">
+                    <Star className="w-3.5 h-3.5 fill-current" />
                     <span>{item.rating}</span>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-white drop-shadow-md">
+                  <h2 className="font-display text-base font-bold text-white drop-shadow-sm">
                     {item.name}
-                  </h3>
-                  <span className="text-[11px] text-blue-200">
-                    Oleh {item.author}
-                  </span>
+                  </h2>
+                  <span className="text-[11px] text-white/80">Oleh {item.author}</span>
                 </div>
               </div>
 
-              {/* Card Body */}
-              <div className="p-4 flex-1 flex flex-col justify-between">
-                <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed mb-4">
+              <div className="p-4 flex-1 flex flex-col justify-between space-y-4">
+                <p className="text-xs text-[var(--app-text-secondary)] line-clamp-3 leading-relaxed">
                   {item.description}
                 </p>
 
-                <div className="flex items-center justify-between pt-3 border-t border-[#1e293b] text-xs text-slate-400">
-                  <div className="flex items-center space-x-1">
-                    <Download className="w-3.5 h-3.5 text-slate-500" />
+                <div className="flex items-center justify-between pt-3 border-t border-[var(--app-border)] text-xs text-[var(--app-text-muted)] font-mono-num">
+                  <div className="flex items-center gap-1.5">
+                    <Download className="w-3.5 h-3.5" />
                     <span>{item.downloads.toLocaleString()} unduhan</span>
                   </div>
 
-                  <span className="text-[11px] font-mono text-blue-400">
+                  <span className="text-[11px] text-[var(--app-accent-text)] font-bold">
                     {item.elementsPayload.length} elemen
                   </span>
                 </div>
               </div>
 
-              {/* Card Action Footer */}
-              <div className="p-4 bg-[#080c16]/50 border-t border-[#1e293b]">
+              <div className="px-4 py-3 bg-[var(--app-surface-muted)] border-t border-[var(--app-border)]">
                 <button
+                  type="button"
                   onClick={() => handleInstall(item)}
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center space-x-1.5 transition active:scale-95 shadow ${
+                  className={`w-full min-h-[44px] rounded-xl font-bold text-xs inline-flex items-center justify-center gap-2 transition-colors ${
                     isInstalled
-                      ? 'bg-[#1e293b] hover:bg-[#2563EB] text-slate-200 hover:text-white border border-[#334155]'
-                      : 'bg-[#2563EB] hover:bg-blue-600 text-white shadow-blue-600/25'
+                      ? 'bg-[var(--app-surface)] hover:bg-[var(--app-accent)] text-[var(--app-text)] hover:text-[var(--app-accent-ink)] border border-[var(--app-border-strong)] hover:border-[var(--app-accent)]'
+                      : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
                   }`}
                 >
                   {isInstalled ? (
                     <>
-                      <Check className="w-4 h-4 text-emerald-400" />
+                      <Check className="w-4 h-4 text-[var(--app-ok)]" />
                       <span>Pasang Ulang ke Studio</span>
                     </>
                   ) : (
@@ -228,10 +223,12 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
         })}
 
         {filteredItems.length === 0 && (
-          <div className="col-span-3 text-center py-16 bg-[#0e172a] border border-[#1e293b] rounded-2xl text-slate-400">
-            <ShoppingBag className="w-10 h-10 text-slate-500 mx-auto mb-2 opacity-50" />
-            <p className="text-sm font-semibold">Tidak ada widget yang cocok</p>
-            <p className="text-xs text-slate-500 mt-1">Coba gunakan filter pencarian lainnya.</p>
+          <div className="md:col-span-2 lg:col-span-3 text-center py-14 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl text-[var(--app-text-muted)]">
+            <ShoppingBag className="w-9 h-9 mx-auto mb-2 opacity-40" />
+            <p className="text-sm font-semibold text-[var(--app-text-secondary)]">
+              Tidak ada widget yang cocok
+            </p>
+            <p className="text-xs mt-1">Coba kata kunci atau kategori lain.</p>
           </div>
         )}
       </div>

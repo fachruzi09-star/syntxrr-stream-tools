@@ -1029,7 +1029,7 @@ export default function App() {
       createdAt: Date.now(),
       isFavorite: false,
       description: 'Preset tersimpan dari Studio Canvas',
-      thumbnailColor: '#2563EB',
+      thumbnailColor: '#F2C230',
     });
     const updated = [newPreset, ...presets];
     setPresets(updated);
@@ -2630,18 +2630,15 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080c16] flex flex-col items-center justify-center space-y-4">
-        <div className="relative">
-          <div className="w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center animate-pulse">
-            <Radio className="w-6 h-6 text-blue-400" />
-          </div>
-          <div className="absolute -inset-1 rounded-xl bg-blue-500/20 blur-md -z-10 animate-ping" />
+      <div className="min-h-screen bg-[var(--app-bg)] flex flex-col items-center justify-center space-y-4 px-6">
+        <div className="w-14 h-14 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-accent-border)] flex items-center justify-center shadow-[var(--app-shadow)]">
+          <Radio className="w-6 h-6 text-[var(--app-accent-text)]" />
         </div>
         <div className="text-center space-y-1">
-          <div className="text-sm font-extrabold text-white tracking-wider">
+          <div className="font-display text-sm font-extrabold text-[var(--app-text)] tracking-wider">
             SYNTXRR STREAM
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-[var(--app-text-muted)]">
             Memuat lingkungan Mobile Streaming Studio...
           </div>
         </div>
@@ -2792,12 +2789,20 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3.5 pt-4 pb-24 sm:px-6 sm:pt-6 lg:px-8 xl:pb-8">
         {modeBNoticeBanner && (
-          <div className="mb-4 p-3 rounded-xl bg-amber-950/50 border border-amber-600/60 text-xs text-amber-200 flex items-center justify-between gap-3">
-            <span>{modeBNoticeBanner}</span>
+          <div
+            role="status"
+            className="mb-4 p-3 rounded-xl border text-xs flex items-center justify-between gap-3"
+            style={{
+              backgroundColor: 'var(--app-warn-soft)',
+              borderColor: 'color-mix(in srgb, var(--app-warn) 45%, transparent)',
+              color: 'var(--app-text)',
+            }}
+          >
+            <span className="leading-relaxed">{modeBNoticeBanner}</span>
             <button
               type="button"
               onClick={() => setModeBNoticeBanner(null)}
-              className="px-2 py-0.5 rounded bg-amber-900/60 text-[11px] text-amber-100 hover:bg-amber-800"
+              className="min-h-[44px] min-w-[44px] px-3 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] shrink-0 transition-colors"
             >
               Tutup
             </button>

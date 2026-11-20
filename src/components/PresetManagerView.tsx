@@ -18,10 +18,8 @@ import {
   Smartphone,
   Monitor,
   Square,
-  Sparkles,
   Layers,
   ArrowRight,
-  Sliders,
   X,
   Download,
   Upload,
@@ -31,7 +29,9 @@ interface PresetManagerViewProps {
   presets: StudioPreset[];
   activePresetId: string;
   onSelectPreset: (presetId: string) => void;
-  onCreatePreset: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => void | boolean | Promise<void | boolean>;
+  onCreatePreset: (
+    preset: Omit<StudioPreset, 'id' | 'createdAt'>
+  ) => void | boolean | Promise<void | boolean>;
   onCanImportPreset?: () => Promise<boolean>;
   onDuplicatePreset: (presetId: string) => void;
   onDeletePreset: (presetId: string) => void;
@@ -59,23 +59,25 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
   const presetImportInputRef = useRef<HTMLInputElement>(null);
   const isTransferringRef = useRef(false);
   const [isTransferringPreset, setIsTransferringPreset] = useState(false);
-  const [transferNotice, setTransferNotice] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const [transferNotice, setTransferNotice] = useState<{
+    message: string;
+    tone: 'success' | 'error';
+  } | null>(null);
   const [createModalError, setCreateModalError] = useState<string | null>(null);
 
-  // Form state for creating new preset
   const [newPresetName, setNewPresetName] = useState('');
   const [newCategory, setNewCategory] = useState<PresetCategory>('hp_screen');
   const [newOrientation, setNewOrientation] = useState<CanvasOrientation>('9:16');
   const [newDescription, setNewDescription] = useState('');
-  const [starterTemplate, setStarterTemplate] = useState<'blank' | 'gaming' | 'chatting' | 'music'>('gaming');
+  const [starterTemplate, setStarterTemplate] = useState<
+    'blank' | 'gaming' | 'chatting' | 'music'
+  >('gaming');
 
   const filteredPresets = presets.filter((p) => {
     if (activeCategory === 'favorites') return p.isFavorite;
     if (activeCategory === 'all') return true;
     return p.category === activeCategory;
   });
-
-  const activePreset = presets.find((p) => p.id === activePresetId) || presets[0];
 
   const handleStartRename = (preset: StudioPreset) => {
     setEditingPresetId(preset.id);
@@ -131,7 +133,8 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
     try {
       if (onCanImportPreset && !(await onCanImportPreset())) {
         setTransferNotice({
-          message: 'Impor preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
+          message:
+            'Impor preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
           tone: 'error',
         });
         return;
@@ -160,14 +163,17 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
       if (created === false) {
         await rollbackImportedMedia(imported.importedAssetIds);
         setTransferNotice({
-          message: 'Impor preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
+          message:
+            'Impor preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
           tone: 'error',
         });
         return;
       }
 
       setTransferNotice({
-        message: `Preset “${name}” berhasil diimpor${imported.importedMediaCount ? ` bersama ${imported.importedMediaCount} file media` : ''} dan langsung dipilih.`,
+        message: `Preset “${name}” berhasil diimpor${
+          imported.importedMediaCount ? ` bersama ${imported.importedMediaCount} file media` : ''
+        } dan langsung dipilih.`,
         tone: 'success',
       });
     } catch (error) {
@@ -217,7 +223,7 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
           locked: false,
           opacity: 100,
           rotation: 0,
-          properties: { borderRadius: 16, borderColor: '#2563EB' },
+          properties: { borderRadius: 16, borderColor: '#F2C230' },
         },
         {
           id: `elem_chat_${Date.now()}`,
@@ -329,11 +335,13 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
         elements,
         isFavorite: false,
         description: newDescription.trim() || 'Preset tata letak kustom SYNTXRR STREAM',
-        thumbnailColor: '#1e3a8a',
+        thumbnailColor: '#1E232D',
       });
 
       if (created === false) {
-        setCreateModalError('Pembuatan preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.');
+        setCreateModalError(
+          'Pembuatan preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.'
+        );
         return;
       }
 
@@ -343,7 +351,7 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
       setCreateModalError(null);
     } catch (error) {
       setCreateModalError(
-        error instanceof Error ? error.message : 'Preset gagal disimpan ke penyimpanan lokal.',
+        error instanceof Error ? error.message : 'Preset gagal disimpan ke penyimpanan lokal.'
       );
     } finally {
       isTransferringRef.current = false;
@@ -352,29 +360,29 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20">
-      {/* Top Banner */}
-      <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center space-x-2 mb-1.5">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1e293b] text-blue-400 border border-blue-500/20">
+    <div className="space-y-5 pb-6">
+      {/* Header Console */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--app-text-muted)]">
+              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
                 Studio Scene Presets
               </span>
-              <span className="text-xs text-slate-400">
-                {presets.length} Preset Tersimpan
+              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
+                /
               </span>
+              <span className="font-mono-num">{presets.length} Preset Tersimpan</span>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">
-              Manajer Preset & Adegan (Presets)
+            <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight mt-0.5">
+              Manajer Preset &amp; Adegan
             </h1>
-            <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Simpan dan beralih antara konfigurasi tata letak overlay tanpa perlu menata ulang dari awal. Mendukung orientasi 9:16 (Layar HP), 16:9 (Landscape), dan 1:1.
+            <p className="text-xs sm:text-sm text-[var(--app-text-muted)] mt-1 max-w-2xl leading-relaxed">
+              Simpan, duplikasi, ekspor JSON, dan beralih antara tata letak 9:16, 16:9, dan 1:1 tanpa menata ulang dari nol.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <input
               ref={presetImportInputRef}
               type="file"
@@ -386,17 +394,18 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
               type="button"
               disabled={isTransferringPreset}
               onClick={() => presetImportInputRef.current?.click()}
-              className="px-3 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] text-slate-200 font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50"
+              className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-2 transition-colors disabled:opacity-50"
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-4 h-4 text-[var(--app-accent-text)]" />
               <span>Impor Preset</span>
             </button>
             <button
+              type="button"
               onClick={() => {
                 setCreateModalError(null);
                 setIsCreateModalOpen(true);
               }}
-              className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-sm flex items-center space-x-2 transition shadow-lg shadow-blue-600/25"
+              className="min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-2 transition-colors"
             >
               <Plus className="w-4 h-4" />
               <span>Buat Preset Baru</span>
@@ -404,67 +413,78 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
           </div>
         </div>
 
-        {/* Category Tabs */}
-        <div className="mt-6 flex flex-wrap gap-2 pt-4 border-t border-[#1e293b]">
+        {/* Category Filter Tabs */}
+        <div className="flex flex-wrap gap-2 pt-3 border-t border-[var(--app-border)]">
           {(
             [
               { id: 'all', label: 'Semua Preset' },
               { id: 'hp_screen', label: 'Layar HP (9:16)' },
               { id: 'landscape', label: 'Landscape (16:9)' },
               { id: 'portrait', label: 'Portrait' },
-              { id: 'favorites', label: '⭐ Favorit' },
+              { id: 'favorites', label: 'Favorit' },
             ] as const
           ).map((cat) => (
             <button
               key={cat.id}
+              type="button"
               onClick={() => setActiveCategory(cat.id)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
+              className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold border transition-colors ${
                 activeCategory === cat.id
-                  ? 'bg-[#2563EB] text-white shadow'
-                  : 'bg-[#080c16] text-slate-400 hover:text-white border border-[#1e293b]'
+                  ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                  : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
               }`}
             >
               {cat.label}
             </button>
           ))}
         </div>
+
         {transferNotice && (
           <div
             role="status"
             aria-live="polite"
-            className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-relaxed ${
+            className="rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed"
+            style={
               transferNotice.tone === 'success'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-            }`}
+                ? {
+                    backgroundColor: 'var(--app-ok-soft)',
+                    borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
+                    color: 'var(--app-ok)',
+                  }
+                : {
+                    backgroundColor: 'var(--app-error-soft)',
+                    borderColor: 'color-mix(in srgb, var(--app-error) 45%, transparent)',
+                    color: 'var(--app-error)',
+                  }
+            }
           >
             {transferNotice.message}
           </div>
         )}
-        <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
-          File JSON preset membawa elemen dan media lokal yang dirujuk. Impor membuat salinan baru tanpa menimpa preset yang sudah ada.
+
+        <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
+          File JSON preset membawa seluruh elemen dan media lokal yang dirujuk. Impor membuat salinan baru tanpa menimpa preset yang ada.
         </p>
-      </div>
+      </header>
 
       {/* Preset Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredPresets.map((preset) => {
           const isActive = preset.id === activePresetId;
 
           return (
             <div
               key={preset.id}
-              className={`rounded-2xl border transition-all flex flex-col justify-between overflow-hidden ${
+              className={`rounded-2xl border flex flex-col justify-between overflow-hidden transition-colors ${
                 isActive
-                  ? 'bg-[#101b33] border-[#38BDF8] shadow-xl shadow-blue-950/50'
-                  : 'bg-[#0e172a] border-[#1e293b] hover:border-slate-700'
+                  ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)]'
+                  : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)]'
               }`}
             >
-              {/* Card Header & Preview */}
-              <div className="p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center space-x-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#080c16] text-blue-400 border border-[#1e293b] flex items-center space-x-1">
+              <div className="p-4 sm:p-5 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg text-[10px] font-mono-num font-bold bg-[var(--app-surface-muted)] text-[var(--app-accent-text)] border border-[var(--app-border)] inline-flex items-center gap-1.5">
                       {preset.canvasOrientation === '9:16' && <Smartphone className="w-3 h-3" />}
                       {preset.canvasOrientation === '16:9' && <Monitor className="w-3 h-3" />}
                       {preset.canvasOrientation === '1:1' && <Square className="w-3 h-3" />}
@@ -472,113 +492,135 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                     </span>
 
                     {isActive && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1">
+                      <span
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold border inline-flex items-center gap-1"
+                        style={{
+                          backgroundColor: 'var(--app-ok-soft)',
+                          borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
+                          color: 'var(--app-ok)',
+                        }}
+                      >
                         <Check className="w-3 h-3" />
-                        <span>Sedang Digunakan</span>
+                        <span>Aktif</span>
                       </span>
                     )}
                   </div>
 
                   <button
+                    type="button"
                     onClick={() => onToggleFavorite(preset.id)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-[#1e293b] transition"
+                    aria-label={preset.isFavorite ? `Hapus favorit ${preset.name}` : `Favoritkan ${preset.name}`}
+                    className="min-w-[44px] min-h-[44px] -mt-1.5 -mr-1.5 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-accent-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center transition-colors"
                   >
                     <Star
                       className={`w-4 h-4 ${
-                        preset.isFavorite ? 'fill-amber-400 text-amber-400' : ''
+                        preset.isFavorite ? 'fill-[var(--app-accent)] text-[var(--app-accent)]' : ''
                       }`}
                     />
                   </button>
                 </div>
 
-                {/* Preset Name or Edit Input */}
                 {editingPresetId === preset.id ? (
-                  <div className="flex items-center space-x-2 my-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="text"
                       value={editingName}
                       onChange={(e) => setEditingName(e.target.value)}
-                      className="flex-1 bg-[#080c16] border border-[#2563EB] rounded px-2 py-1 text-sm text-white focus:outline-none font-bold"
+                      className="flex-1 min-w-0 min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-accent)] rounded-xl px-3 text-xs font-bold text-[var(--app-text)] focus:outline-none"
                       autoFocus
                     />
                     <button
+                      type="button"
                       onClick={() => handleSaveRename(preset.id)}
-                      className="px-2 py-1 bg-[#2563EB] text-white text-xs rounded hover:bg-blue-600 font-bold"
+                      className="min-h-[44px] px-3 bg-[var(--app-accent)] text-[var(--app-accent-ink)] text-xs rounded-xl hover:bg-[var(--app-accent-hover)] font-bold"
                     >
                       Simpan
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingPresetId(null)}
+                      className="min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs rounded-xl font-semibold"
+                    >
+                      Batal
+                    </button>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-base font-bold text-white tracking-tight">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="font-display text-base font-bold text-[var(--app-text)] tracking-tight truncate">
                       {preset.name}
-                    </h3>
+                    </h2>
                     <button
+                      type="button"
                       onClick={() => handleStartRename(preset)}
-                      className="text-slate-500 hover:text-slate-300 p-1"
-                      title="Ubah Nama"
+                      className="min-w-[44px] min-h-[44px] -mr-1.5 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center shrink-0 transition-colors"
+                      aria-label={`Ubah nama ${preset.name}`}
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 )}
 
-                <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                <p className="text-xs text-[var(--app-text-muted)] line-clamp-2 leading-relaxed">
                   {preset.description}
                 </p>
 
-                {/* Elements count badge */}
-                <div className="mt-4 flex items-center space-x-2 text-xs text-slate-400">
-                  <Layers className="w-3.5 h-3.5 text-blue-400" />
-                  <span>{preset.elements.length} Elemen Overlay di Kanvas</span>
+                <div className="flex items-center gap-2 text-xs text-[var(--app-text-secondary)] font-mono-num pt-1">
+                  <Layers className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
+                  <span>{preset.elements.length} Elemen Overlay</span>
                 </div>
               </div>
 
-              {/* Bottom Actions */}
-              <div className="p-4 bg-[#080c16]/50 border-t border-[#1e293b] flex items-center justify-between gap-2">
-                <div className="flex items-center space-x-1">
+              <div className="px-4 py-3 bg-[var(--app-surface-muted)] border-t border-[var(--app-border)] flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
                   <button
+                    type="button"
                     onClick={() => onDuplicatePreset(preset.id)}
-                    className="p-2 rounded-lg bg-[#1e293b] hover:bg-[#334155] text-slate-300 text-xs transition"
+                    className="min-w-[44px] min-h-[44px] rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors"
+                    aria-label={`Duplikasi ${preset.name}`}
                     title="Duplikasi Preset"
                   >
-                    <Copy className="w-3.5 h-3.5" />
+                    <Copy className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
                     disabled={isTransferringPreset}
                     onClick={() => void handleExportPreset(preset)}
-                    className="p-2 rounded-lg bg-[#1e293b] hover:bg-blue-500/20 text-slate-300 hover:text-blue-300 text-xs transition disabled:opacity-50"
+                    className="min-w-[44px] min-h-[44px] rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-accent-text)] flex items-center justify-center transition-colors disabled:opacity-50"
+                    aria-label={`Ekspor ${preset.name}`}
                     title="Ekspor Preset beserta Media"
                   >
-                    <Download className="w-3.5 h-3.5" />
+                    <Download className="w-4 h-4" />
                   </button>
 
                   {presets.length > 1 && (
                     <button
+                      type="button"
                       onClick={() => onDeletePreset(preset.id)}
-                      className="p-2 rounded-lg bg-[#1e293b] hover:bg-red-500/20 text-slate-400 hover:text-red-400 text-xs transition"
+                      className="min-w-[44px] min-h-[44px] rounded-xl bg-[var(--app-surface)] hover:bg-rose-950/60 border border-[var(--app-border)] hover:border-rose-700/60 text-[var(--app-text-muted)] hover:text-rose-300 flex items-center justify-center transition-colors"
+                      aria-label={`Hapus ${preset.name}`}
                       title="Hapus Preset"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   )}
                 </div>
 
                 {isActive ? (
                   <button
+                    type="button"
                     onClick={onNavigateToStudio}
-                    className="px-3.5 py-1.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs flex items-center space-x-1 transition shadow"
+                    className="min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-1.5 transition-colors"
                   >
                     <span>Buka Studio</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => onSelectPreset(preset.id)}
-                    className="px-3.5 py-1.5 rounded-xl bg-[#1e293b] hover:bg-[#2563EB] hover:text-white text-slate-300 font-semibold text-xs transition"
+                    className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-accent)] border border-[var(--app-border-strong)] hover:border-[var(--app-accent)] text-[var(--app-text)] hover:text-[var(--app-accent-ink)] font-bold text-xs transition-colors"
                   >
-                    <span>Gunakan Preset</span>
+                    Gunakan Preset
                   </button>
                 )}
               </div>
@@ -587,14 +629,20 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
         })}
       </div>
 
-      {/* Modal: Buat Preset Baru */}
+      {/* Create Preset Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#1e293b]">
-              <div className="flex items-center space-x-2">
-                <Layout className="w-5 h-5 text-blue-400" />
-                <h3 className="text-base font-bold text-white">Buat Preset Studio Baru</h3>
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-[var(--app-shadow)] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-[var(--app-border)]">
+              <div className="flex items-center gap-2">
+                <Layout className="w-5 h-5 text-[var(--app-accent-text)]" />
+                <h3 className="font-display text-base font-bold text-[var(--app-text)]">
+                  Buat Preset Studio Baru
+                </h3>
               </div>
               <button
                 type="button"
@@ -603,7 +651,8 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                   setCreateModalError(null);
                   setIsCreateModalOpen(false);
                 }}
-                className="text-slate-400 hover:text-white disabled:opacity-50"
+                aria-label="Tutup dialog"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-elevated)] disabled:opacity-50"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -613,13 +662,14 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
               {createModalError && (
                 <div
                   role="alert"
-                  className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 leading-relaxed"
+                  className="rounded-xl border border-rose-500/40 bg-rose-950/50 px-3.5 py-2.5 text-xs text-rose-200 leading-relaxed"
                 >
                   {createModalError}
                 </div>
               )}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">
                   Nama Preset
                 </label>
                 <input
@@ -628,20 +678,20 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                   onChange={(e) => setNewPresetName(e.target.value)}
                   placeholder="Misal: Mobile Gaming Pro, TikTok Live Malam"
                   required
-                  className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+                  className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl px-3.5 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">
                   Orientasi Kanvas
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {(
                     [
-                      { id: '9:16', label: '9:16 (Layar HP)', icon: <Smartphone className="w-4 h-4 mx-auto mb-1" /> },
-                      { id: '16:9', label: '16:9 (Landscape)', icon: <Monitor className="w-4 h-4 mx-auto mb-1" /> },
-                      { id: '1:1', label: '1:1 (Persegi)', icon: <Square className="w-4 h-4 mx-auto mb-1" /> },
+                      { id: '9:16', label: '9:16 HP', icon: <Smartphone className="w-4 h-4 mx-auto mb-1" /> },
+                      { id: '16:9', label: '16:9 Wide', icon: <Monitor className="w-4 h-4 mx-auto mb-1" /> },
+                      { id: '1:1', label: '1:1 Square', icon: <Square className="w-4 h-4 mx-auto mb-1" /> },
                     ] as const
                   ).map((orient) => (
                     <button
@@ -653,10 +703,10 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                         else if (orient.id === '16:9') setNewCategory('landscape');
                         else setNewCategory('portrait');
                       }}
-                      className={`p-2.5 rounded-xl text-center text-xs font-semibold border transition ${
+                      className={`min-h-[60px] p-2.5 rounded-xl text-center text-xs font-bold border transition-colors ${
                         newOrientation === orient.id
-                          ? 'bg-[#2563EB] border-[#38BDF8] text-white'
-                          : 'bg-[#080c16] border-[#1e293b] text-slate-400 hover:text-white'
+                          ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                          : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                       }`}
                     >
                       {orient.icon}
@@ -666,38 +716,38 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Pilihan Template Permulaan
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">
+                  Template Permulaan
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {(
                     [
-                      { id: 'gaming', label: 'Mobile Gaming', desc: 'Screen Capture + Facecam + Chat' },
-                      { id: 'chatting', label: 'Just Chatting', desc: 'Kamera Penuh + Alert + Chat' },
-                      { id: 'music', label: 'Music Stream', desc: 'Now Playing + Queue + Chat' },
-                      { id: 'blank', label: 'Kanvas Kosong', desc: 'Mulai dari kanvas bersih' },
+                      { id: 'gaming', label: 'Mobile Gaming', desc: 'Screen + Facecam + Chat' },
+                      { id: 'chatting', label: 'Just Chatting', desc: 'Kamera + Alert + Chat' },
+                      { id: 'music', label: 'Music Stream', desc: 'Now Playing + Chat' },
+                      { id: 'blank', label: 'Kanvas Kosong', desc: 'Mulai dari nol' },
                     ] as const
                   ).map((tmpl) => (
                     <button
                       key={tmpl.id}
                       type="button"
                       onClick={() => setStarterTemplate(tmpl.id)}
-                      className={`p-2.5 rounded-xl text-left border transition ${
+                      className={`min-h-[58px] p-3 rounded-xl text-left border transition-colors ${
                         starterTemplate === tmpl.id
-                          ? 'bg-[#131f38] border-[#38BDF8] text-white'
-                          : 'bg-[#080c16] border-[#1e293b] text-slate-400 hover:text-white'
+                          ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)] text-[var(--app-text)]'
+                          : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                       }`}
                     >
-                      <div className="text-xs font-bold text-white mb-0.5">{tmpl.label}</div>
-                      <div className="text-[10px] text-slate-400">{tmpl.desc}</div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">{tmpl.label}</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)] mt-0.5">{tmpl.desc}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">
                   Deskripsi (Opsional)
                 </label>
                 <textarea
@@ -705,11 +755,11 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                   onChange={(e) => setNewDescription(e.target.value)}
                   placeholder="Keterangan singkat tentang preset ini..."
                   rows={2}
-                  className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+                  className="w-full bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl px-3.5 py-2.5 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none"
                 />
               </div>
 
-              <div className="pt-2 flex items-center justify-end space-x-2">
+              <div className="pt-2 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
                   disabled={isTransferringPreset}
@@ -717,14 +767,14 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                     setCreateModalError(null);
                     setIsCreateModalOpen(false);
                   }}
-                  className="px-4 py-2 rounded-xl bg-[#1e293b] text-slate-300 text-xs font-semibold hover:bg-[#334155] disabled:opacity-50"
+                  className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs font-semibold disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isTransferringPreset}
-                  className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold shadow-lg shadow-blue-600/30 disabled:opacity-50"
+                  className="min-h-[44px] px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold disabled:opacity-50"
                 >
                   {isTransferringPreset ? 'Menyimpan...' : 'Simpan & Buat Preset'}
                 </button>

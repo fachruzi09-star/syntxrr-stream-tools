@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import {
-  BasicSourceType,
-  DynamicSourceType,
   SourceType,
   StudioElement,
 } from '../types';
@@ -111,8 +109,8 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
     icon: <Square className="w-5 h-5 text-amber-400" />,
     defaultDimensions: { width: 40, height: 12 },
     defaultProperties: {
-      backgroundColor: 'rgba(37, 99, 235, 0.4)',
-      borderColor: '#38BDF8',
+      backgroundColor: 'rgba(242, 194, 48, 0.25)',
+      borderColor: '#F2C230',
       borderWidth: 2,
       borderRadius: 12,
     },
@@ -123,11 +121,11 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
     category: 'basic',
     categoryLabel: 'Sumber Dasar',
     status: 'ACTIVE',
-    description: 'Garis pembatas vertikal/horizontal elegan dengan efek glow neon untuk pemisah informasi.',
+    description: 'Garis pembatas vertikal/horizontal elegan dengan efek glow untuk pemisah informasi.',
     icon: <Minus className="w-5 h-5 text-slate-400" />,
     defaultDimensions: { width: 80, height: 2 },
     defaultProperties: {
-      lineColor: '#38BDF8',
+      lineColor: '#F2C230',
       glow: true,
       thickness: 2,
     },
@@ -143,7 +141,7 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
     defaultDimensions: { width: 38, height: 24 },
     defaultProperties: {
       facingMode: 'user',
-      borderColor: '#2563EB',
+      borderColor: '#F2C230',
       borderRadius: 16,
       borderWidth: 3,
     },
@@ -189,7 +187,7 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
       text: 'SELAMAT DATANG DI LIVE STREAM! FOLLOW & TAP LAYAR UNTUK MENDUKUNG KREATOR!',
       speed: 2,
       textColor: '#FFFFFF',
-      bgColor: '#1E3A8A',
+      bgColor: '#1E232D',
     },
   },
   {
@@ -277,7 +275,7 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
       maxMessages: 5,
       fontSize: 13,
       showBadges: true,
-      backgroundColor: 'rgba(15, 23, 42, 0.75)',
+      backgroundColor: 'rgba(15, 19, 27, 0.82)',
     },
   },
   {
@@ -336,7 +334,7 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
       currentAmount: 350000,
       targetAmount: 1000000,
       currency: 'Rp',
-      barColor: '#2563EB',
+      barColor: '#F2C230',
     },
   },
   {
@@ -407,7 +405,7 @@ export const SOURCE_CATALOG: SourceDefinition[] = [
     defaultDimensions: { width: 80, height: 11 },
     defaultProperties: {
       soundEnabled: true,
-      accentColor: '#38BDF8',
+      accentColor: '#F2C230',
       animation: 'slide_in',
     },
   },
@@ -489,110 +487,104 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
 
     onAddElementToStudio(newElement);
     setInstalledCount((prev) => prev + 1);
-    setToastMessage(`"${src.name}" berhasil dipasang ke Studio!`);
-    setTimeout(() => setToastMessage(null), 3000);
+    setToastMessage(`"${src.name}" berhasil dipasang ke Studio.`);
+    window.setTimeout(() => setToastMessage(null), 3000);
   };
 
   return (
-    <div className="space-y-6 pb-20">
-      {/* Toast Notification */}
+    <div className="space-y-5 pb-6">
       {toastMessage && (
-        <div className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-[#1E3A8A] border border-[#38BDF8] text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center space-x-2 text-sm font-medium animate-bounce">
-          <Check className="w-4 h-4 text-[#38BDF8]" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-[var(--app-surface-elevated)] border border-[var(--app-accent-border)] text-[var(--app-text)] px-4 py-2 rounded-xl shadow-[var(--app-shadow)] flex items-center gap-2.5 text-xs sm:text-sm font-medium max-w-[92vw]"
+        >
+          <Check className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
           <span>{toastMessage}</span>
           <button
+            type="button"
             onClick={onNavigateToStudio}
-            className="ml-2 bg-[#2563EB] hover:bg-blue-600 px-2 py-0.5 rounded text-xs text-white underline font-semibold"
+            className="min-h-[36px] px-2.5 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs text-[var(--app-accent-ink)] font-bold shrink-0"
           >
-            Buka Studio →
+            Buka Studio
           </button>
         </div>
       )}
 
-      {/* Header Banner */}
-      <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center space-x-2 mb-1.5">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1e293b] text-blue-400 border border-blue-500/20">
+      {/* Header */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--app-text-muted)]">
+              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
                 Pustaka Komponen Resmi
               </span>
-              <span className="text-xs text-slate-400">
-                25 Sumber Tersedia (11 Dasar + 14 Dinamis)
+              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
+                /
+              </span>
+              <span className="font-mono-num">
+                {SOURCE_CATALOG.length} Sumber (11 Dasar + 15 Dinamis)
               </span>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">
+            <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight mt-0.5">
               Pustaka Sumber Siaran (Sources)
             </h1>
-            <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Pilih elemen visual dasar dan dinamis untuk disusun ke dalam Studio Canvas. Setiap sumber memiliki parameter mandiri dan pemicu responsif.
+            <p className="text-xs sm:text-sm text-[var(--app-text-muted)] mt-1 max-w-2xl leading-relaxed">
+              Pilih elemen visual dasar maupun widget dinamis untuk disusun langsung ke kanvas Studio.
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={onNavigateToStudio}
-              className="px-4 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#2563eb]/20 border border-[#334155] text-white font-medium text-sm flex items-center space-x-2 transition"
-            >
-              <Layers className="w-4 h-4 text-blue-400" />
-              <span>Buka Studio Canvas</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onNavigateToStudio}
+            className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-2 transition-colors self-start md:self-auto shrink-0"
+          >
+            <Layers className="w-4 h-4 text-[var(--app-accent-text)]" />
+            <span>Buka Studio Canvas</span>
+          </button>
         </div>
 
-        {/* Filter Controls */}
-        <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-[#1e293b]">
-          <div className="flex bg-[#080c16] p-1 rounded-xl border border-[#1e293b] w-full sm:w-auto">
-            <button
-              onClick={() => setActiveTab('all')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'all'
-                  ? 'bg-[#2563EB] text-white shadow'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Semua ({SOURCE_CATALOG.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('basic')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'basic'
-                  ? 'bg-[#2563EB] text-white shadow'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Sumber Dasar (11)
-            </button>
-            <button
-              onClick={() => setActiveTab('dynamic')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'dynamic'
-                  ? 'bg-[#2563EB] text-white shadow'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Sumber Dinamis (14)
-            </button>
+        <div className="pt-3 border-t border-[var(--app-border)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            {(
+              [
+                { id: 'all', label: `Semua (${SOURCE_CATALOG.length})` },
+                { id: 'basic', label: 'Dasar (11)' },
+                { id: 'dynamic', label: `Dinamis (${SOURCE_CATALOG.length - 11})` },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <div className="relative flex-1 max-w-xs">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 text-[var(--app-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari nama sumber atau fungsi..."
-              className="w-full bg-[#080c16] border border-[#1e293b] rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+              aria-label="Cari sumber siaran"
+              className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl pl-10 pr-3.5 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none"
             />
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Main Grid & Preview Sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Source Cards List */}
-        <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Main Split Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           {filteredSources.map((src) => {
             const statusConfig = STATUS_DEFINITIONS[src.status];
             const isSelected = selectedSource?.type === src.type;
@@ -600,51 +592,52 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
             return (
               <div
                 key={src.type}
-                onClick={() => setSelectedSource(src)}
-                className={`group relative p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                className={`rounded-2xl border transition-colors flex flex-col justify-between p-4 ${
                   isSelected
-                    ? 'bg-[#131f38] border-[#38BDF8] shadow-lg shadow-blue-950/40'
-                    : 'bg-[#0e172a] border-[#1e293b] hover:border-slate-600'
+                    ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)]'
+                    : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)]'
                 }`}
               >
-                <div>
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] group-hover:scale-105 transition">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSource(src)}
+                  aria-pressed={isSelected}
+                  className="w-full text-left space-y-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] rounded-xl"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] shrink-0">
                       {src.icon}
                     </div>
-
-                    <div className="flex items-center space-x-1.5">
-                      <span
-                        className="px-2 py-0.5 rounded text-[10px] font-bold border"
-                        style={{
-                          backgroundColor: `${statusConfig.color}15`,
-                          borderColor: `${statusConfig.color}40`,
-                          color: statusConfig.color,
-                        }}
-                      >
-                        {statusConfig.label}
-                      </span>
-                    </div>
+                    <span
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0"
+                      style={{
+                        backgroundColor: `${statusConfig.color}18`,
+                        borderColor: `${statusConfig.color}42`,
+                        color: statusConfig.color,
+                      }}
+                    >
+                      {statusConfig.label}
+                    </span>
                   </div>
 
-                  <h3 className="text-sm font-bold text-white mb-1 group-hover:text-blue-400 transition">
-                    {src.name}
-                  </h3>
-                  <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                    {src.description}
-                  </p>
-                </div>
+                  <div>
+                    <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
+                      {src.name}
+                    </h2>
+                    <p className="text-xs text-[var(--app-text-muted)] line-clamp-2 leading-relaxed mt-1">
+                      {src.description}
+                    </p>
+                  </div>
+                </button>
 
-                <div className="mt-4 pt-3 border-t border-[#1e293b] flex items-center justify-between">
-                  <span className="text-[11px] text-slate-500 font-mono">
+                <div className="mt-4 pt-3 border-t border-[var(--app-border)] flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
                     {src.category === 'basic' ? 'Basic Source' : 'Dynamic Widget'}
                   </span>
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleInstallToStudio(src);
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-medium text-xs flex items-center space-x-1 transition shadow"
+                    type="button"
+                    onClick={() => handleInstallToStudio(src)}
+                    className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-1.5 transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Pasang</span>
@@ -655,38 +648,40 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
           })}
 
           {filteredSources.length === 0 && (
-            <div className="col-span-2 text-center py-12 bg-[#0e172a] border border-[#1e293b] rounded-xl text-slate-400">
-              <Search className="w-8 h-8 text-slate-500 mx-auto mb-2 opacity-50" />
-              <p className="text-sm font-semibold">Tidak ada sumber yang cocok</p>
-              <p className="text-xs text-slate-500 mt-1">Coba kata kunci pencarian yang lain.</p>
+            <div className="sm:col-span-2 text-center py-12 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl text-[var(--app-text-muted)]">
+              <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm font-semibold text-[var(--app-text-secondary)]">
+                Tidak ada sumber yang cocok
+              </p>
+              <p className="text-xs mt-1">Coba kata kunci pencarian yang lain.</p>
             </div>
           )}
         </div>
 
-        {/* Source Inspector Preview Detail */}
-        <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 h-fit sticky top-20 shadow-lg">
+        {/* Sticky Inspector Preview */}
+        <aside className="lg:col-span-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 lg:sticky lg:top-20">
           {selectedSource ? (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-[#1e293b]">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] shrink-0">
                     {selectedSource.icon}
                   </div>
-                  <div>
-                    <h3 className="text-base font-bold text-white">
+                  <div className="min-w-0">
+                    <h3 className="font-display text-base font-bold text-[var(--app-text)] truncate">
                       {selectedSource.name}
                     </h3>
-                    <span className="text-xs text-slate-400">
-                      Tipe ID: {selectedSource.type}
+                    <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
+                      ID: {selectedSource.type}
                     </span>
                   </div>
                 </div>
 
                 <span
-                  className="px-2.5 py-1 rounded text-xs font-bold border"
+                  className="px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0"
                   style={{
-                    backgroundColor: `${STATUS_DEFINITIONS[selectedSource.status].color}20`,
-                    borderColor: `${STATUS_DEFINITIONS[selectedSource.status].color}50`,
+                    backgroundColor: `${STATUS_DEFINITIONS[selectedSource.status].color}18`,
+                    borderColor: `${STATUS_DEFINITIONS[selectedSource.status].color}42`,
                     color: STATUS_DEFINITIONS[selectedSource.status].color,
                   }}
                 >
@@ -694,67 +689,70 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
                 </span>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b]">
-                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center space-x-1.5">
-                  <Info className="w-3.5 h-3.5 text-blue-400" />
+              <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-1">
+                <div className="text-[10px] font-bold text-[var(--app-accent-text)] uppercase tracking-wider flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5" />
                   <span>Deskripsi Fungsional</span>
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
+                <p className="text-xs text-[var(--app-text-secondary)] leading-relaxed">
                   {selectedSource.description}
                 </p>
               </div>
 
-              {/* Status explanation */}
-              <div className="p-3 rounded-xl bg-blue-950/20 border border-blue-900/40 text-xs text-blue-200">
-                <span className="font-semibold block mb-0.5">
-                  {STATUS_DEFINITIONS[selectedSource.status].label}:
+              <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs space-y-0.5">
+                <span className="font-semibold text-[var(--app-text)] block">
+                  {STATUS_DEFINITIONS[selectedSource.status].label}
                 </span>
-                <span className="text-slate-300 text-[11px]">
+                <span className="text-[var(--app-text-muted)] text-[11px] leading-relaxed block">
                   {STATUS_DEFINITIONS[selectedSource.status].description}
                 </span>
               </div>
 
-              {/* Default Dimensions */}
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2.5 rounded-lg bg-[#080c16] border border-[#1e293b]">
-                  <span className="text-slate-400 block text-[10px]">Lebar Kanvas Default</span>
-                  <span className="font-mono text-white font-semibold">
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
+                  <span className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)] block">
+                    Lebar Default
+                  </span>
+                  <span className="font-mono-num text-[var(--app-text)] font-bold mt-0.5 block">
                     {selectedSource.defaultDimensions.width}%
                   </span>
                 </div>
-                <div className="p-2.5 rounded-lg bg-[#080c16] border border-[#1e293b]">
-                  <span className="text-slate-400 block text-[10px]">Tinggi Kanvas Default</span>
-                  <span className="font-mono text-white font-semibold">
+                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
+                  <span className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)] block">
+                    Tinggi Default
+                  </span>
+                  <span className="font-mono-num text-[var(--app-text)] font-bold mt-0.5 block">
                     {selectedSource.defaultDimensions.height}%
                   </span>
                 </div>
               </div>
 
-              {/* Action Button */}
-              <div className="pt-2 space-y-2">
+              <div className="pt-1 space-y-2">
                 <button
+                  type="button"
                   onClick={() => handleInstallToStudio(selectedSource)}
-                  className="w-full py-3 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-98 text-white font-bold text-sm flex items-center justify-center space-x-2 transition shadow-lg shadow-blue-600/30"
+                  className="w-full min-h-[44px] rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center justify-center gap-2 transition-colors"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Pasang ke Studio Canvas</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={onNavigateToStudio}
-                  className="w-full py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] text-slate-200 font-medium text-xs flex items-center justify-center space-x-1.5 transition"
+                  className="w-full min-h-[44px] rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <Eye className="w-3.5 h-3.5 text-blue-400" />
+                  <Eye className="w-4 h-4 text-[var(--app-accent-text)]" />
                   <span>Lihat Studio Canvas ({installedCount} ditambahkan)</span>
                 </button>
               </div>
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-400">
-              <p className="text-sm">Pilih salah satu sumber untuk melihat detail parameter.</p>
+            <div className="text-center py-8 text-[var(--app-text-muted)] text-xs">
+              Pilih salah satu sumber untuk melihat detail parameter.
             </div>
           )}
-        </div>
+        </aside>
       </div>
     </div>
   );

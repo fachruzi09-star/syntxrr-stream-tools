@@ -27,58 +27,50 @@ export const AlertBannerOverlay: React.FC<AlertBannerOverlayProps> = ({
       case 'follower':
         return {
           icon: UserCheck,
-          accent: 'border-sky-500/80 bg-sky-950/90 text-sky-300',
+          toneClass: 'text-sky-300 border-sky-500/40 bg-sky-500/10',
           badgeText: 'NEW FOLLOWER',
-          badgeBg: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
         };
       case 'gift':
         return {
           icon: Gift,
-          accent: 'border-amber-500/80 bg-amber-950/90 text-amber-300',
+          toneClass: 'text-[var(--app-accent-text)] border-[var(--app-accent-border)] bg-[var(--app-accent-soft)]',
           badgeText: 'STREAM GIFT',
-          badgeBg: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
         };
       case 'donation':
         return {
           icon: DollarSign,
-          accent: 'border-emerald-500/80 bg-emerald-950/90 text-emerald-300',
+          toneClass: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10',
           badgeText: 'DONATION',
-          badgeBg: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         };
       case 'like':
         return {
           icon: Heart,
-          accent: 'border-rose-500/80 bg-rose-950/90 text-rose-300',
+          toneClass: 'text-rose-300 border-rose-500/40 bg-rose-500/10',
           badgeText: 'TAP COMBO',
-          badgeBg: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
         };
       case 'share':
         return {
           icon: Share2,
-          accent: 'border-cyan-500/80 bg-cyan-950/90 text-cyan-300',
+          toneClass: 'text-cyan-300 border-cyan-500/40 bg-cyan-500/10',
           badgeText: 'STREAM SHARE',
-          badgeBg: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
         };
       case 'sub':
         return {
           icon: Star,
-          accent: 'border-indigo-500/80 bg-indigo-950/90 text-indigo-300',
+          toneClass: 'text-[var(--app-accent-text)] border-[var(--app-accent-border)] bg-[var(--app-accent-soft)]',
           badgeText: 'NEW SUBSCRIBER',
-          badgeBg: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
         };
       case 'chat_event':
         return {
           icon: MessageSquare,
-          accent: 'border-purple-500/80 bg-purple-950/90 text-purple-300',
+          toneClass: 'text-[var(--app-text-secondary)] border-[var(--app-border-strong)] bg-[var(--app-surface-elevated)]',
           badgeText: 'CHAT EVENT',
-          badgeBg: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
         };
       default:
         return {
           icon: Sparkles,
-          accent: 'border-slate-500/80 bg-slate-900/95 text-slate-300',
+          toneClass: 'text-[var(--app-accent-text)] border-[var(--app-accent-border)] bg-[var(--app-accent-soft)]',
           badgeText: 'LIVE EVENT',
-          badgeBg: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
         };
     }
   };
@@ -88,38 +80,39 @@ export const AlertBannerOverlay: React.FC<AlertBannerOverlayProps> = ({
   const alertMessage = currentAlert.message ?? currentAlert.detail ?? '';
 
   return (
-    <div className="fixed top-16 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none transition-all duration-300 ease-out">
+    <div className="fixed top-16 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
       <div
-        className={`pointer-events-auto max-w-md w-full rounded-xl border shadow-2xl p-3.5 backdrop-blur-md flex items-center justify-between gap-3 ${visuals.accent}`}
+        role="status"
+        aria-live="polite"
+        className="pointer-events-auto max-w-md w-full rounded-2xl bg-[var(--app-surface)]/95 border border-[var(--app-accent-border)] p-3.5 backdrop-blur-md flex items-center justify-between gap-3"
+        style={{ boxShadow: 'var(--app-shadow)' }}
       >
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-lg bg-black/40 border border-white/10 flex items-center justify-center shrink-0">
-            <Icon className="w-5 h-5 animate-bounce" />
+          <div
+            className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 ${visuals.toneClass}`}
+          >
+            <Icon className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${visuals.badgeBg}`}
-              >
-                {visuals.badgeText}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">Live Overlay</span>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.1em]">
+              <span className="text-[var(--app-accent-text)]">{visuals.badgeText}</span>
+              <span className="text-[var(--app-border-strong)]">·</span>
+              <span className="text-[var(--app-text-muted)] font-mono-num">Live Overlay</span>
             </div>
-            <div className="text-sm font-bold text-white truncate mt-0.5">
+            <div className="font-display text-sm font-bold text-[var(--app-text)] truncate mt-0.5">
               {currentAlert.username}
             </div>
             {alertMessage && (
-              <div className="text-xs text-slate-200 truncate">
-                {alertMessage}
-              </div>
+              <div className="text-xs text-[var(--app-text-secondary)] truncate">{alertMessage}</div>
             )}
           </div>
         </div>
 
         <button
+          type="button"
           onClick={onDismiss}
-          className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-400 hover:text-white rounded-md transition-colors"
-          aria-label="Dismiss alert"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-elevated)] rounded-xl transition-colors shrink-0"
+          aria-label="Tutup alert"
         >
           <X className="w-4 h-4" />
         </button>

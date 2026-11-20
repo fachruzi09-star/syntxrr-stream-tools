@@ -10,14 +10,8 @@ import { ttsService } from '../services/ttsService';
 import { soundboardEngine } from '../services/soundboardEngine';
 import { StorageService } from '../services/storage';
 import {
-  STATUS_DEFINITIONS,
-} from '../theme/designSystem';
-import {
-  Radio,
   Volume2,
-  VolumeX,
   Play,
-  RotateCcw,
   Sparkles,
   MessageSquare,
   Gift,
@@ -27,12 +21,11 @@ import {
   DollarSign,
   Users,
   Mic,
-  Sliders,
   Bell,
   Trash2,
   Star,
-  Check,
   Zap,
+  Upload,
 } from 'lucide-react';
 
 interface LiveCenterViewProps {
@@ -52,22 +45,25 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   const [customUsername, setCustomUsername] = useState('Sultan_Streaming');
   const [customDetail, setCustomDetail] = useState('Halo bang, semangat live streamingnya!');
   const [activeTab, setActiveTab] = useState<'simulator' | 'tts' | 'soundboard'>('simulator');
-  const [testVoiceText, setTestVoiceText] = useState('Terima kasih atas gift mawar merah dan dukungannya!');
+  const [testVoiceText, setTestVoiceText] = useState(
+    'Terima kasih atas gift mawar merah dan dukungannya!'
+  );
   const [lastTriggered, setLastTriggered] = useState<string | null>(null);
 
-  // Subscribe to central event bus
   useEffect(() => {
-    // Initial history from event bus
     setEvents(streamEventBus.getHistory());
-
     const unsubscribe = streamEventBus.subscribe((newEvent) => {
       setEvents((prev) => [newEvent, ...prev.slice(0, 49)]);
     });
-
     return () => unsubscribe();
   }, []);
 
-  const triggerEvent = (type: StreamEventType, detail: string, amount?: number, currency?: string) => {
+  const triggerEvent = (
+    type: StreamEventType,
+    detail: string,
+    amount?: number,
+    currency?: string
+  ) => {
     const newEvent: StreamEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       type,
@@ -80,8 +76,8 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     };
 
     streamEventBus.emit(newEvent);
-    setLastTriggered(`${type.toUpperCase()}: ${detail}`);
-    setTimeout(() => setLastTriggered(null), 3000);
+    setLastTriggered(`${type.toUpperCase()} · ${detail}`);
+    window.setTimeout(() => setLastTriggered(null), 3000);
   };
 
   const handleTestTTS = () => {
@@ -90,7 +86,9 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     ttsService.speak(testVoiceText, true);
   };
 
-  const handlePlaySoundboard = (itemOrType: SoundboardItem | 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell') => {
+  const handlePlaySoundboard = (
+    itemOrType: SoundboardItem | 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell'
+  ) => {
     if (typeof itemOrType === 'string') {
       soundboardEngine.playSynthesizedSFX(itemOrType);
       return;
@@ -168,7 +166,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
 
   const updateImportedSound = async (item: SoundboardItem, updates: Partial<SoundboardItem>) => {
     const nextItems = soundboardItems.map((candidate) =>
-      candidate.id === item.id ? { ...candidate, ...updates } : candidate,
+      candidate.id === item.id ? { ...candidate, ...updates } : candidate
     );
     await onSoundboardItemsChange(nextItems);
   };
@@ -178,293 +176,383 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     setEvents([]);
   };
 
+  const customSounds = soundboardItems.filter((item) => item.id.startsWith('sb_custom_'));
+
   return (
-    <div className="space-y-6 pb-20">
-      {/* Header Banner */}
-      <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center space-x-2 mb-1.5">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1e293b] text-blue-400 border border-blue-500/20 flex items-center space-x-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Pusat Interaksi Siaran</span>
+    <div className="space-y-5 pb-6">
+      {/* D+ Broadcast Console Header */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--app-text-muted)]">
+              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
+                D+ Live Interaction Console
               </span>
-              <span className="text-xs text-slate-400">
-                Mode A TikTok Companion & Simulator Event
+              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
+                /
               </span>
+              <span>Event Bus &amp; Audio Cue Station</span>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">
-              Live Center & Simulator Interaksi
+            <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight mt-0.5">
+              Live Center &amp; Simulator Interaksi
             </h1>
-            <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Uji coba respons overlay siaran secara interaktif: simulasi gift TikTok, chat live, donasi Saweria, Text-to-Speech (TTS), dan efek pemicu audio soundboard.
+            <p className="text-xs sm:text-sm text-[var(--app-text-muted)] mt-1 max-w-2xl leading-relaxed">
+              Uji coba respons overlay, antrean Text-to-Speech (TTS), dan efek soundboard secara real-time tanpa mengganggu sesi siaran aktif.
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <span
-              className="px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center space-x-1.5"
-              style={{
-                backgroundColor: `${STATUS_DEFINITIONS.ACTIVE.color}20`,
-                borderColor: `${STATUS_DEFINITIONS.ACTIVE.color}50`,
-                color: STATUS_DEFINITIONS.ACTIVE.color,
-              }}
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>Event Engine Aktif</span>
-            </span>
+          <div
+            className="min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-2 self-start md:self-auto shrink-0"
+            style={{
+              backgroundColor: 'var(--app-ok-soft)',
+              borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
+              color: 'var(--app-ok)',
+            }}
+          >
+            <Zap className="w-3.5 h-3.5 shrink-0" />
+            <span>Event Engine Siap</span>
+            <span className="text-[var(--app-border-strong)]">·</span>
+            <span className="font-mono-num">{events.length}</span>
           </div>
         </div>
 
-        {/* Tab Selector */}
-        <div className="mt-6 flex gap-2 pt-4 border-t border-[#1e293b]">
+        {/* Segmented Console Mode Tabs */}
+        <div
+          role="tablist"
+          aria-label="Konsol Live Center"
+          className="flex flex-wrap gap-2 pt-3 border-t border-[var(--app-border)]"
+        >
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'simulator'}
             onClick={() => setActiveTab('simulator')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
+            className={`min-h-[44px] px-4 rounded-xl text-xs font-bold border transition-colors inline-flex items-center gap-2 ${
               activeTab === 'simulator'
-                ? 'bg-[#2563EB] text-white shadow'
-                : 'bg-[#080c16] text-slate-400 hover:text-white border border-[#1e293b]'
+                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
             }`}
           >
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-4 h-4 shrink-0" />
             <span>Simulator Event ({events.length})</span>
           </button>
+
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'tts'}
             onClick={() => setActiveTab('tts')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
+            className={`min-h-[44px] px-4 rounded-xl text-xs font-bold border transition-colors inline-flex items-center gap-2 ${
               activeTab === 'tts'
-                ? 'bg-[#2563EB] text-white shadow'
-                : 'bg-[#080c16] text-slate-400 hover:text-white border border-[#1e293b]'
+                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
             }`}
           >
-            <Mic className="w-4 h-4" />
-            <span>Text-to-Speech (TTS)</span>
+            <Mic className="w-4 h-4 shrink-0" />
+            <span>Text-to-Speech</span>
           </button>
+
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'soundboard'}
             onClick={() => setActiveTab('soundboard')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
+            className={`min-h-[44px] px-4 rounded-xl text-xs font-bold border transition-colors inline-flex items-center gap-2 ${
               activeTab === 'soundboard'
-                ? 'bg-[#2563EB] text-white shadow'
-                : 'bg-[#080c16] text-slate-400 hover:text-white border border-[#1e293b]'
+                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
             }`}
           >
-            <Volume2 className="w-4 h-4" />
-            <span>Soundboard Cues</span>
+            <Volume2 className="w-4 h-4 shrink-0" />
+            <span>Soundboard Cues ({customSounds.length + 6})</span>
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Main Content Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Action Panels */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* TAB 1: SIMULATOR TRIGGER PAD */}
+      {/* Main Split Architecture: Trigger / Audio Deck (8 cols) + Live Feed Timeline (4 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <div className="lg:col-span-8 space-y-4 min-w-0">
+          {/* TAB 1: TACTILE SIMULATOR TRIGGER PAD */}
           {activeTab === 'simulator' && (
             <div className="space-y-4">
-              {/* Trigger Name Input */}
-              <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-3">
-                <div className="w-full sm:w-1/3">
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                    Nama User Penonton
+              {/* Actor & Payload Input Strip */}
+              <div className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 grid grid-cols-1 sm:grid-cols-12 gap-3">
+                <div className="sm:col-span-4 space-y-1.5">
+                  <label
+                    htmlFor="sim-actor-name"
+                    className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-muted)]"
+                  >
+                    User Penonton
                   </label>
                   <input
+                    id="sim-actor-name"
                     type="text"
                     value={customUsername}
                     onChange={(e) => setCustomUsername(e.target.value)}
-                    className="w-full bg-[#080c16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#2563EB]"
+                    className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl px-3 text-xs text-[var(--app-text)] focus:outline-none"
                   />
                 </div>
-                <div className="w-full sm:w-2/3">
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                <div className="sm:col-span-8 space-y-1.5">
+                  <label
+                    htmlFor="sim-actor-detail"
+                    className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-muted)]"
+                  >
                     Pesan Chat / Catatan Donasi
                   </label>
                   <input
+                    id="sim-actor-detail"
                     type="text"
                     value={customDetail}
                     onChange={(e) => setCustomDetail(e.target.value)}
-                    className="w-full bg-[#080c16] border border-[#1e293b] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#2563EB]"
+                    className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl px-3 text-xs text-[var(--app-text)] focus:outline-none"
                   />
                 </div>
               </div>
 
-              {/* Fast Simulation Trigger Buttons */}
-              <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Sparkles className="w-4 h-4 text-blue-400" />
-                    <span>Tombol Uji Coba Cepat (1-Tap Simulation)</span>
-                  </h3>
+              {/* 8 Tactile Broadcast Trigger Keypads */}
+              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--app-border)]">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                    <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
+                      Matriks Uji Pemicu Interaksi (1-Tap)
+                    </h2>
+                  </div>
                   {lastTriggered && (
-                    <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 animate-pulse">
+                    <span
+                      role="status"
+                      className="text-[11px] font-mono-num px-2.5 py-1 rounded-lg border truncate max-w-full"
+                      style={{
+                        backgroundColor: 'var(--app-ok-soft)',
+                        borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
+                        color: 'var(--app-ok)',
+                      }}
+                    >
                       Terkirim: {lastTriggered}
                     </span>
                   )}
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {/* Chat */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('chat', customDetail || 'Halo semuanya, salam kenal!')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-blue-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <MessageSquare className="w-5 h-5 text-blue-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Chat Komentar</span>
-                    <span className="text-[10px] text-slate-400">Teks & TTS</span>
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/25 flex items-center justify-center text-sky-300">
+                      <MessageSquare className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Chat Komentar</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Teks &amp; Antrean TTS</div>
+                    </div>
                   </button>
 
-                  {/* Gift Mawar */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('gift', 'mengirim 5x Mawar Merah 🌹', 5, 'Mawar')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-rose-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <Gift className="w-5 h-5 text-rose-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Gift Mawar (x5)</span>
-                    <span className="text-[10px] text-slate-400">TikTok Gift</span>
+                    <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-rose-300">
+                      <Gift className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Gift Mawar (5x)</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">TikTok Gift</div>
+                    </div>
                   </button>
 
-                  {/* Gift Paus */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('gift', 'mengirim Paus Biru Sultan 🐋🔥', 1000, 'Koin')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-cyan-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <Gift className="w-5 h-5 text-cyan-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Gift Paus Sultan</span>
-                    <span className="text-[10px] text-slate-400">Mega Alert</span>
+                    <div className="w-8 h-8 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)]">
+                      <Gift className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Gift Paus Sultan</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Mega Alert 1000 Koin</div>
+                    </div>
                   </button>
 
-                  {/* Tap Layar / Like */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('like', 'mengetuk layar 100x ❤️')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-pink-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <Heart className="w-5 h-5 text-pink-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Tap Layar (Like)</span>
-                    <span className="text-[10px] text-slate-400">100 Likes</span>
+                    <div className="w-8 h-8 rounded-lg bg-pink-500/10 border border-pink-500/25 flex items-center justify-center text-pink-300">
+                      <Heart className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Tap Layar (Like)</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Combo 100 Likes</div>
+                    </div>
                   </button>
 
-                  {/* Follow */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('follow', 'mulai mengikuti siaran kamu!')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-emerald-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <UserPlus className="w-5 h-5 text-emerald-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Follow Baru</span>
-                    <span className="text-[10px] text-slate-400">Bell Sfx</span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-300">
+                      <UserPlus className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Follow Baru</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Bell SFX + Alert</div>
+                    </div>
                   </button>
 
-                  {/* Share */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('share', 'membagikan siaran ke 10 teman!')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-amber-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <Share2 className="w-5 h-5 text-amber-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Share Live</span>
-                    <span className="text-[10px] text-slate-400">Viral Boost</span>
+                    <div className="w-8 h-8 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)]">
+                      <Share2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Share Live</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Social Boost</div>
+                    </div>
                   </button>
 
-                  {/* Saweria / Trakteer Rp 50.000 */}
                   <button
-                    onClick={() => triggerEvent('donation', 'Donasi Rp 50.000: "Semangat push rank sampai Mythic bang!"', 50000, 'Rp')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-emerald-400 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    type="button"
+                    onClick={() =>
+                      triggerEvent(
+                        'donation',
+                        'Donasi Rp 50.000: "Semangat push rank sampai Mythic bang!"',
+                        50000,
+                        'Rp'
+                      )
+                    }
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <DollarSign className="w-5 h-5 text-emerald-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Donasi Saweria</span>
-                    <span className="text-[10px] text-slate-400">Rp 50.000 + TTS</span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-300">
+                      <DollarSign className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Donasi Saweria</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Rp 50.000 + TTS</div>
+                    </div>
                   </button>
 
-                  {/* Viewer Peak */}
                   <button
+                    type="button"
                     onClick={() => triggerEvent('viewer', 'Siaran mencapai 1.500 penonton aktif!')}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-purple-500 hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
                   >
-                    <Users className="w-5 h-5 text-purple-400 mb-1.5 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-white">Peak Penonton</span>
-                    <span className="text-[10px] text-slate-400">1.500 Viewers</span>
+                    <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-center text-cyan-300">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Peak Penonton</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">1.500 Viewers</div>
+                    </div>
                   </button>
                 </div>
-              </div>
+              </section>
             </div>
           )}
 
-          {/* TAB 2: TTS CONFIGURATION */}
+          {/* TAB 2: TEXT-TO-SPEECH VOICE ENGINE */}
           {activeTab === 'tts' && (
-            <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-5">
-              <div className="flex items-center justify-between pb-3 border-b border-[#1e293b]">
-                <div className="flex items-center space-x-2">
-                  <Mic className="w-5 h-5 text-blue-400" />
-                  <h3 className="text-sm font-bold text-white">
-                    Pengaturan Text-to-Speech (TTS Bahasa Indonesia)
-                  </h3>
+            <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-5">
+              <div className="flex items-center justify-between gap-3 pb-3 border-b border-[var(--app-border)]">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0">
+                    <Mic className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
+                      Text-to-Speech (TTS Bahasa Indonesia)
+                    </h2>
+                    <p className="text-[11px] text-[var(--app-text-muted)]">
+                      Pembacaan otomatis donasi, gift, dan komentar masuk
+                    </p>
+                  </div>
                 </div>
 
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={ttsConfig.enabled}
-                    onChange={(e) => {
-                      const updated = { ...ttsConfig, enabled: e.target.checked };
-                      onUpdateTTSConfig(updated);
-                      ttsService.updateConfig(updated);
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2563EB]"></div>
-                </label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={ttsConfig.enabled}
+                  aria-label="Aktifkan Text-to-Speech"
+                  onClick={() => {
+                    const updated = { ...ttsConfig, enabled: !ttsConfig.enabled };
+                    onUpdateTTSConfig(updated);
+                    ttsService.updateConfig(updated);
+                  }}
+                  className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl shrink-0"
+                >
+                  <span
+                    className={`relative w-11 h-6 rounded-full border transition-colors ${
+                      ttsConfig.enabled
+                        ? 'bg-[var(--app-accent)] border-[var(--app-accent)]'
+                        : 'bg-[var(--app-surface-elevated)] border-[var(--app-border-strong)]'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-[18px] h-[18px] rounded-full transition-all shadow-sm ${
+                        ttsConfig.enabled
+                          ? 'left-[22px] bg-[var(--app-accent-ink)]'
+                          : 'left-0.5 bg-[var(--app-text-secondary)]'
+                      }`}
+                    />
+                  </span>
+                </button>
               </div>
 
-              {/* Toggles for TTS categories */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <label className="p-3 rounded-xl bg-[#080c16] border border-[#1e293b] flex items-center justify-between cursor-pointer">
-                  <span className="text-xs font-semibold text-slate-200">Baca Donasi</span>
-                  <input
-                    type="checkbox"
-                    checked={ttsConfig.readDonations}
-                    onChange={(e) => {
-                      const updated = { ...ttsConfig, readDonations: e.target.checked };
+              {/* Filter Kategori Bacaan */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {(
+                  [
+                    { key: 'readDonations', label: 'Baca Donasi', val: ttsConfig.readDonations },
+                    { key: 'readGifts', label: 'Baca Gift TikTok', val: ttsConfig.readGifts },
+                    { key: 'readComments', label: 'Baca Chat Penonton', val: ttsConfig.readComments },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="switch"
+                    aria-checked={item.val}
+                    onClick={() => {
+                      const updated = { ...ttsConfig, [item.key]: !item.val };
                       onUpdateTTSConfig(updated);
                       ttsService.updateConfig(updated);
                     }}
-                    className="rounded text-[#2563EB] focus:ring-0"
-                  />
-                </label>
-
-                <label className="p-3 rounded-xl bg-[#080c16] border border-[#1e293b] flex items-center justify-between cursor-pointer">
-                  <span className="text-xs font-semibold text-slate-200">Baca Gift TikTok</span>
-                  <input
-                    type="checkbox"
-                    checked={ttsConfig.readGifts}
-                    onChange={(e) => {
-                      const updated = { ...ttsConfig, readGifts: e.target.checked };
-                      onUpdateTTSConfig(updated);
-                      ttsService.updateConfig(updated);
-                    }}
-                    className="rounded text-[#2563EB] focus:ring-0"
-                  />
-                </label>
-
-                <label className="p-3 rounded-xl bg-[#080c16] border border-[#1e293b] flex items-center justify-between cursor-pointer">
-                  <span className="text-xs font-semibold text-slate-200">Baca Chat Penonton</span>
-                  <input
-                    type="checkbox"
-                    checked={ttsConfig.readComments}
-                    onChange={(e) => {
-                      const updated = { ...ttsConfig, readComments: e.target.checked };
-                      onUpdateTTSConfig(updated);
-                      ttsService.updateConfig(updated);
-                    }}
-                    className="rounded text-[#2563EB] focus:ring-0"
-                  />
-                </label>
+                    className={`min-h-[46px] px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold transition-colors ${
+                      item.val
+                        ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
+                        : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                        item.val ? 'bg-[var(--app-accent)]' : 'bg-[var(--app-border-strong)]'
+                      }`}
+                    />
+                  </button>
+                ))}
               </div>
 
-              {/* Sliders for Volume, Speed, Pitch */}
-              <div className="space-y-3 pt-2">
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1">
-                    <span>Volume Suara TTS</span>
-                    <span className="font-mono text-blue-400">
-                      {Math.round(Math.max(0, Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9)) * 100)}%
+              {/* Sliders: Volume, Speed, Pitch */}
+              <div className="space-y-4 pt-1">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold text-[var(--app-text-secondary)]">
+                      Volume Suara TTS
+                    </span>
+                    <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
+                      {Math.round(
+                        Math.max(0, Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9)) *
+                          100
+                      )}
+                      %
                     </span>
                   </div>
                   <input
@@ -472,7 +560,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                     min="0"
                     max="1"
                     step="0.05"
-                    value={Math.max(0, Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9))}
+                    value={Math.max(
+                      0,
+                      Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9)
+                    )}
                     onChange={(e) => {
                       const parsed = parseFloat(e.target.value);
                       const clamped = Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0.9;
@@ -480,14 +571,18 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                       onUpdateTTSConfig(updated);
                       ttsService.updateConfig(updated);
                     }}
-                    className="w-full accent-[#2563EB]"
+                    className="w-full h-2 rounded-lg cursor-pointer accent-[var(--app-accent)]"
                   />
                 </div>
 
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1">
-                    <span>Kecepatan Bicara (Speed)</span>
-                    <span className="font-mono text-blue-400">{ttsConfig.rate}x</span>
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold text-[var(--app-text-secondary)]">
+                      Kecepatan Bicara (Speed)
+                    </span>
+                    <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
+                      {ttsConfig.rate}x
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -500,14 +595,18 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                       onUpdateTTSConfig(updated);
                       ttsService.updateConfig(updated);
                     }}
-                    className="w-full accent-[#2563EB]"
+                    className="w-full h-2 rounded-lg cursor-pointer accent-[var(--app-accent)]"
                   />
                 </div>
 
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1">
-                    <span>Nada Suara (Pitch)</span>
-                    <span className="font-mono text-blue-400">{ttsConfig.pitch}x</span>
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold text-[var(--app-text-secondary)]">
+                      Nada Suara (Pitch)
+                    </span>
+                    <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
+                      {ttsConfig.pitch}x
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -520,46 +619,49 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                       onUpdateTTSConfig(updated);
                       ttsService.updateConfig(updated);
                     }}
-                    className="w-full accent-[#2563EB]"
+                    className="w-full h-2 rounded-lg cursor-pointer accent-[var(--app-accent)]"
                   />
                 </div>
               </div>
 
-              {/* Test TTS Box */}
-              <div className="pt-3 border-t border-[#1e293b] flex items-center gap-2">
+              {/* Voice Test Strip */}
+              <div className="pt-3 border-t border-[var(--app-border)] flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                 <input
                   type="text"
                   value={testVoiceText}
                   onChange={(e) => setTestVoiceText(e.target.value)}
                   placeholder="Ketik kalimat uji coba suara..."
-                  className="flex-1 bg-[#080c16] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#2563EB]"
+                  aria-label="Kalimat uji coba suara TTS"
+                  className="flex-1 min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl px-3.5 text-xs text-[var(--app-text)] focus:outline-none"
                 />
                 <button
+                  type="button"
                   onClick={handleTestTTS}
-                  className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-xs flex items-center space-x-1.5 transition shadow"
+                  className="min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center justify-center gap-2 shrink-0 transition-colors"
                 >
-                  <Play className="w-3.5 h-3.5" />
+                  <Play className="w-4 h-4 shrink-0" />
                   <span>Uji Suara</span>
                 </button>
               </div>
-            </div>
+            </section>
           )}
 
           {/* TAB 3: SOUNDBOARD CUES */}
           {activeTab === 'soundboard' && (
-            <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
+            <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--app-border)]">
                 <div>
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Volume2 className="w-4 h-4 text-blue-400" />
-                    <span>Soundboard Efek Suara Prosedural</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Efek prosedural tetap tersedia, dan file audio pendek dapat diimpor lalu disimpan di perangkat ini.
+                  <h2 className="font-display text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
+                    <Volume2 className="w-4 h-4 text-[var(--app-accent-text)]" />
+                    <span>Soundboard Efek Suara &amp; Custom SFX</span>
+                  </h2>
+                  <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
+                    Efek prosedural bawaan dan file audio pendek yang disimpan persisten di perangkat.
                   </p>
                 </div>
-                <label className="shrink-0 px-3 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold cursor-pointer transition">
-                  Impor Audio
+                <label className="min-h-[44px] shrink-0 px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-2 transition-colors self-start sm:self-auto">
+                  <Upload className="w-4 h-4 shrink-0" />
+                  <span>Impor Audio</span>
                   <input
                     type="file"
                     accept="audio/*"
@@ -573,94 +675,130 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {(
                   [
-                    { id: 'horn', name: 'Air Horn Blast', type: 'horn', desc: 'Suara terompet hype' },
-                    { id: 'level_up', name: 'Level Up Fanfare', type: 'level_up', desc: 'Melodi nada naik ceria' },
-                    { id: 'tada', name: 'Tada! Victory', type: 'tada', desc: 'Akord perayaan donasi' },
-                    { id: 'bell', name: 'Bell Notifikasi', type: 'bell', desc: 'Lonceng ting jernih' },
-                    { id: 'cheer', name: 'Cheer Sorak', type: 'cheer', desc: 'Gemuruh penonton' },
-                    { id: 'game_over', name: 'Game Over Wah', type: 'game_over', desc: 'Efek komedi kalah' },
+                    { id: 'horn', name: 'Air Horn Blast', type: 'horn', desc: 'Terompet hype' },
+                    { id: 'level_up', name: 'Level Up Fanfare', type: 'level_up', desc: 'Melodi nada naik' },
+                    { id: 'tada', name: 'Tada! Victory', type: 'tada', desc: 'Akord perayaan' },
+                    { id: 'bell', name: 'Bell Notifikasi', type: 'bell', desc: 'Lonceng jernih' },
+                    { id: 'cheer', name: 'Cheer Sorak', type: 'cheer', desc: 'Sorak penonton' },
+                    { id: 'game_over', name: 'Game Over Wah', type: 'game_over', desc: 'Efek komedi' },
                   ] as const
                 ).map((sfx) => (
                   <button
                     key={sfx.id}
+                    type="button"
                     onClick={() => handlePlaySoundboard(sfx.type)}
-                    className="p-3.5 rounded-xl bg-[#080c16] border border-[#1e293b] hover:border-[#38BDF8] hover:bg-[#131f38] transition flex flex-col items-center text-center group active:scale-95"
+                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left group active:scale-[0.98]"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#1e293b] flex items-center justify-center mb-2 group-hover:bg-[#2563EB] transition">
-                      <Play className="w-4 h-4 text-white ml-0.5" />
+                    <div className="w-9 h-9 rounded-full bg-[var(--app-surface-elevated)] border border-[var(--app-border)] group-hover:bg-[var(--app-accent)] group-hover:border-[var(--app-accent)] group-hover:text-[var(--app-accent-ink)] text-[var(--app-text)] flex items-center justify-center transition-colors">
+                      <Play className="w-4 h-4 ml-0.5" />
                     </div>
-                    <span className="text-xs font-bold text-white">{sfx.name}</span>
-                    <span className="text-[10px] text-slate-400">{sfx.desc}</span>
+                    <div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">{sfx.name}</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">{sfx.desc}</div>
+                    </div>
                   </button>
                 ))}
               </div>
 
-              {soundboardItems.some((item) => item.id.startsWith('sb_custom_')) && (
-                <div className="pt-3 border-t border-[#1e293b] space-y-2">
-                  <h4 className="text-xs font-bold text-slate-300">Audio Diimpor</h4>
+              {customSounds.length > 0 && (
+                <div className="pt-4 border-t border-[var(--app-border)] space-y-2.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                    Audio Kustom Tersimpan ({customSounds.length})
+                  </h3>
                   <div className="space-y-2">
-                    {soundboardItems.filter((item) => item.id.startsWith('sb_custom_')).map((item) => (
-                      <div key={item.id} className="flex items-center gap-2 rounded-xl bg-[#080c16] border border-[#1e293b] p-2.5">
+                    {customSounds.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex flex-wrap sm:flex-nowrap items-center gap-2 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] p-2.5"
+                      >
                         <button
+                          type="button"
                           onClick={() => handlePlaySoundboard(item)}
-                          className="flex-1 min-w-0 flex items-center gap-2 text-left hover:text-blue-300 transition"
+                          className="flex-1 min-w-0 min-h-[44px] px-2 flex items-center gap-2.5 text-left text-[var(--app-text)] hover:text-[var(--app-accent-text)] transition-colors rounded-lg"
                           aria-label={`Putar ${item.name}`}
                         >
-                          <Play className="w-3.5 h-3.5 shrink-0 text-blue-400" />
-                          <span className="text-xs font-semibold text-white truncate">{item.name}</span>
-                          <span className="text-[10px] text-slate-500 shrink-0">{item.durationSec}s</span>
+                          <Play className="w-4 h-4 shrink-0 text-[var(--app-accent-text)]" />
+                          <span className="text-xs font-semibold truncate">{item.name}</span>
+                          <span className="text-[10px] font-mono-num text-[var(--app-text-muted)] shrink-0">
+                            {item.durationSec}s
+                          </span>
                         </button>
-                        <button
-                          onClick={() => void updateImportedSound(item, { isFavorite: !item.isFavorite })}
-                          className={`p-1.5 transition ${item.isFavorite ? 'text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
-                          aria-label={`${item.isFavorite ? 'Hapus dari' : 'Tambahkan ke'} favorit ${item.name}`}
-                          aria-pressed={item.isFavorite}
-                        >
-                          <Star className={`w-3.5 h-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
-                        </button>
-                        <select
-                          value={item.isQuickSlot ? String(item.quickSlotKey ?? '') : ''}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            void updateImportedSound(item, value ? { isQuickSlot: true, quickSlotKey: Number(value) } : { isQuickSlot: false, quickSlotKey: undefined });
-                          }}
-                          className="bg-[#111b2e] border border-[#1e293b] rounded-md px-1.5 py-1 text-[10px] text-slate-300"
-                          aria-label={`Quick Slot untuk ${item.name}`}
-                        >
-                          <option value="">Slot</option>
-                          {[1, 2, 3, 4].map((slot) => (
-                            <option key={slot} value={slot}>Q{slot}</option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => void handleDeleteSound(item)}
-                          className="p-1.5 text-slate-500 hover:text-red-400 transition"
-                          aria-label={`Hapus ${item.name}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void updateImportedSound(item, { isFavorite: !item.isFavorite })
+                            }
+                            className={`min-w-[44px] min-h-[44px] rounded-xl border flex items-center justify-center transition-colors ${
+                              item.isFavorite
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
+                                : 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
+                            aria-label={`${
+                              item.isFavorite ? 'Hapus dari' : 'Tambahkan ke'
+                            } favorit ${item.name}`}
+                            aria-pressed={item.isFavorite}
+                          >
+                            <Star className={`w-4 h-4 ${item.isFavorite ? 'fill-current' : ''}`} />
+                          </button>
+
+                          <select
+                            value={item.isQuickSlot ? String(item.quickSlotKey ?? '') : ''}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              void updateImportedSound(
+                                item,
+                                value
+                                  ? { isQuickSlot: true, quickSlotKey: Number(value) }
+                                  : { isQuickSlot: false, quickSlotKey: undefined }
+                              );
+                            }}
+                            className="min-h-[44px] bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl px-2.5 text-xs font-mono-num text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            aria-label={`Quick Slot untuk ${item.name}`}
+                          >
+                            <option value="">Slot</option>
+                            {[1, 2, 3, 4].map((slot) => (
+                              <option key={slot} value={slot}>
+                                Q{slot}
+                              </option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteSound(item)}
+                            className="min-w-[44px] min-h-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-rose-400 hover:border-rose-500/40 flex items-center justify-center transition-colors"
+                            aria-label={`Hapus ${item.name}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
+            </section>
           )}
         </div>
 
-        {/* Right Column: Live Event Timeline Feed */}
-        <div className="bg-[#0e172a] border border-[#1e293b] rounded-2xl p-5 flex flex-col h-[520px] shadow-lg">
-          <div className="flex items-center justify-between pb-3 border-b border-[#1e293b]">
-            <div className="flex items-center space-x-2">
-              <Bell className="w-4 h-4 text-blue-400" />
-              <h3 className="text-sm font-bold text-white">Live Event Feed</h3>
+        {/* Right Sticky Column: Live Event Timeline Feed */}
+        <aside className="lg:col-span-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 flex flex-col h-[520px] lg:sticky lg:top-20">
+          <div className="flex items-center justify-between pb-3 border-b border-[var(--app-border)] gap-2">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-[var(--app-accent-text)]" />
+              <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
+                Live Event Feed
+              </h2>
             </div>
             <button
+              type="button"
               onClick={handleClearHistory}
-              className="text-[11px] text-slate-400 hover:text-red-400 flex items-center space-x-1"
+              className="min-h-[44px] px-3 rounded-xl text-xs font-semibold text-[var(--app-text-muted)] hover:text-rose-400 hover:bg-[var(--app-surface-muted)] inline-flex items-center gap-1.5 transition-colors"
               title="Bersihkan riwayat event"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -670,55 +808,62 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
 
           <div className="flex-1 overflow-y-auto space-y-2.5 py-3 pr-1">
             {events.map((evt) => {
-              let badgeColor = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+              let accentTone = 'text-sky-300';
               let Icon = MessageSquare;
 
               if (evt.type === 'gift') {
-                badgeColor = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                accentTone = 'text-[var(--app-accent-text)]';
                 Icon = Gift;
               } else if (evt.type === 'donation') {
-                badgeColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                accentTone = 'text-emerald-300';
                 Icon = DollarSign;
               } else if (evt.type === 'like') {
-                badgeColor = 'bg-pink-500/10 text-pink-400 border-pink-500/20';
+                accentTone = 'text-rose-300';
                 Icon = Heart;
               } else if (evt.type === 'follow') {
-                badgeColor = 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
+                accentTone = 'text-cyan-300';
                 Icon = UserPlus;
               } else if (evt.type === 'share') {
-                badgeColor = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                accentTone = 'text-[var(--app-accent-text)]';
                 Icon = Share2;
               }
 
               return (
                 <div
                   key={evt.id}
-                  className="p-2.5 rounded-xl bg-[#080c16] border border-[#1e293b] flex items-start space-x-2.5 hover:border-slate-600 transition"
+                  className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-start gap-2.5"
                 >
-                  <div className="p-1.5 rounded-lg bg-[#0e172a] border border-[#1e293b] text-slate-300">
+                  <div
+                    className={`w-8 h-8 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center shrink-0 ${accentTone}`}
+                  >
                     <Icon className="w-3.5 h-3.5" />
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white truncate">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[var(--app-text)] truncate">
                         {evt.username}
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        {new Date(evt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      <span className="text-[10px] text-[var(--app-text-muted)] font-mono-num shrink-0">
+                        {new Date(evt.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
                       </span>
                     </div>
 
-                    <p className="text-[11px] text-slate-300 mt-0.5 leading-snug break-words">
+                    <p className="text-[11px] text-[var(--app-text-secondary)] mt-0.5 leading-snug break-words">
                       {evt.detail}
                     </p>
 
-                    <div className="mt-1 flex items-center space-x-1.5">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${badgeColor}`}>
-                        {evt.type.toUpperCase()}
-                      </span>
+                    <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-mono-num text-[var(--app-text-muted)]">
+                      <span className={`font-bold uppercase ${accentTone}`}>{evt.type}</span>
                       {evt.isSimulation && (
-                        <span className="text-[9px] text-slate-500">Simulasi</span>
+                        <>
+                          <span>·</span>
+                          <span>Simulasi</span>
+                        </>
                       )}
                     </div>
                   </div>
@@ -727,16 +872,18 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
             })}
 
             {events.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12">
-                <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-xs font-semibold text-slate-400">Belum ada event tercatat</p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Gunakan tombol di tab Simulator untuk memicu event.
+              <div className="h-full flex flex-col items-center justify-center text-center text-[var(--app-text-muted)] py-12 px-4">
+                <Bell className="w-8 h-8 mb-2 opacity-30" />
+                <p className="text-xs font-semibold text-[var(--app-text-secondary)]">
+                  Belum ada event tercatat
+                </p>
+                <p className="text-[11px] mt-1 leading-relaxed">
+                  Tekan salah satu pad di Simulator Event untuk melihat respons real-time di lini masa ini.
                 </p>
               </div>
             )}
           </div>
-        </div>
+        </aside>
       </div>
     </div>
   );
