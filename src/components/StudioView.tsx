@@ -2665,13 +2665,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* SECTION 1: CANVAS EDITOR */}
         <div
-          className="lg:col-span-7 bg-sx-surface border border-sx-border-subtle rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col items-center justify-between space-y-4 overscroll-y-contain"
+          className="lg:col-span-7 bg-sx-surface border border-sx-border-subtle rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col items-center justify-between space-y-4 overscroll-y-contain"
           style={{ overscrollBehaviorY: 'contain' }}
         >
           {/* Viewport Toolbar */}
           <div className="w-full flex items-center justify-between text-xs text-sx-text-secondary px-1 border-b border-sx-border-subtle pb-3">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-sx-accent animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-sx-accent" />
               <span className="font-bold text-sx-text font-mono">
                 Kanvas {canvasOrientation} ({elements.length} Elemen)
               </span>
@@ -2763,7 +2763,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 touchAction: 'none',
                 overscrollBehaviorY: 'contain',
               }}
-              className={`relative bg-sx-bg border-2 border-sx-border-subtle rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()} overscroll-y-contain`}
+              className={`relative bg-black border border-sx-border rounded-xl shadow-sm transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()} overscroll-y-contain`}
               onClick={() => {
                 setSelectedId(null);
                 setSelectedGroupId(null);
@@ -2771,7 +2771,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
               <div className="absolute inset-x-2 top-2 h-7 border border-dashed border-sx-info/30 rounded flex items-center justify-center pointer-events-none">
-                <span className="text-[8px] font-mono text-sx-accent-text/50">SAFE ZONE HEADER (STATUS BAR)</span>
+                <span className="text-[8px] font-mono text-sx-info/60">SAFE ZONE HEADER (STATUS BAR)</span>
               </div>
               <div className="absolute inset-x-2 bottom-2 h-10 border border-dashed border-sx-danger/30 rounded flex items-center justify-center pointer-events-none">
                 <span className="text-[8px] font-mono text-sx-danger/50">SAFE ZONE FOOTER (CHAT / GIFTS AREA)</span>
@@ -2803,7 +2803,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     }}
                     className={`group cursor-move transition-shadow ${
                       isSelected
-                        ? 'ring-2 ring-sx-accent ring-offset-1 ring-offset-slate-950'
+                        ? 'ring-2 ring-sx-accent ring-offset-1 ring-offset-black'
                         : 'hover:ring-1 hover:ring-sx-accent'
                     }`}
                   >
@@ -2817,28 +2817,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-right')}
                           style={{ touchAction: 'none' }}
-                          className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sx-accent border-2 border-white rounded-full cursor-se-resize shadow-md z-30"
+                          className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sx-accent border-2 border-sx-accent-fg/70 rounded-full cursor-se-resize shadow-md z-30"
                           title="Resize Sudut Kanan-Bawah"
                         />
                         {/* Top-Right Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-right')}
                           style={{ touchAction: 'none' }}
-                          className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-sx-accent border border-white rounded-full cursor-ne-resize shadow-sm z-30"
+                          className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-sx-accent border border-sx-accent-fg/70 rounded-full cursor-ne-resize shadow-sm z-30"
                           title="Resize Sudut Kanan-Atas"
                         />
                         {/* Bottom-Left Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-left')}
                           style={{ touchAction: 'none' }}
-                          className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-sx-accent border border-white rounded-full cursor-sw-resize shadow-sm z-30"
+                          className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-sx-accent border border-sx-accent-fg/70 rounded-full cursor-sw-resize shadow-sm z-30"
                           title="Resize Sudut Kiri-Bawah"
                         />
                         {/* Top-Left Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-left')}
                           style={{ touchAction: 'none' }}
-                          className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-sx-accent border border-white rounded-full cursor-nw-resize shadow-sm z-30"
+                          className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-sx-accent border border-sx-accent-fg/70 rounded-full cursor-nw-resize shadow-sm z-30"
                           title="Resize Sudut Kiri-Atas"
                         />
                       </>
@@ -2846,7 +2846,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Selected Badge */}
                     {isSelected && (
-                      <div className="absolute -top-4 left-0 px-1.5 py-0.2 bg-sx-accent text-sx-accent-fg font-mono text-[8px] rounded uppercase font-bold tracking-wider pointer-events-none">
+                      <div className="absolute -top-4 left-0 px-1.5 py-0.5 bg-sx-accent text-sx-accent-fg font-mono text-[9px] rounded uppercase font-bold tracking-wider pointer-events-none">
                         {elem.name}
                       </div>
                     )}
@@ -2889,7 +2889,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           onPointerCancel={handlePointerUp}
                           onClick={(e) => e.stopPropagation()}
                           style={{ pointerEvents: 'auto', touchAction: 'none' }}
-                          className={`absolute w-3.5 h-3.5 bg-sx-warning border-2 border-white rounded-full shadow-md ${
+                          className={`absolute w-3.5 h-3.5 bg-sx-warning border-2 border-sx-accent-fg/70 rounded-full shadow-md ${
                             handle.includes('top') ? '-top-2' : '-bottom-2'
                           } ${handle.includes('left') ? '-left-2' : '-right-2'} ${
                             handle === 'top-left' || handle === 'bottom-right' ? 'cursor-nwse-resize' : 'cursor-nesw-resize'
@@ -2906,13 +2906,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Quick Helper Legend */}
           <div className="w-full flex items-center justify-between text-[11px] text-sx-text-secondary px-2">
-            <span>💡 Geser elemen bebas horizontal &amp; vertikal (mouse/sentuhan Android).</span>
+            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-sx-accent shrink-0" />Geser elemen bebas horizontal &amp; vertikal (mouse/sentuhan Android).</span>
             <span className="font-mono text-sx-accent-text">1080p Produksi</span>
           </div>
         </div>
 
         {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
-        <div className="lg:col-span-5 bg-sx-surface border border-sx-border-subtle rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4">
+        <div className="lg:col-span-5 bg-sx-surface border border-sx-border-subtle rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
           {/* Studio panel navigation — Batch 7.2 */}
           <StudioPanelNav active={activeSidePanel} onChange={setActiveSidePanel} />
 
