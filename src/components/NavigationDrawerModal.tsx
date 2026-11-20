@@ -1,18 +1,24 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationTab } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import {
-  X,
-  LayoutDashboard,
-  Tv,
-  Box,
-  Radio,
-  ShoppingBag,
-  Share2,
-  Settings,
-  Smartphone,
   ChevronRight,
+  FolderOpen,
+  Gamepad2,
+  LayoutDashboard,
+  LayoutTemplate,
+  Layers,
+  Music,
+  Plug,
+  Radio,
+  Settings as SettingsIcon,
+  Store,
+  X,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Icon } from './ui/Icon';
+import { cn } from './ui/cn';
+import { BrandMark } from './shell/BrandMark';
 
 interface NavigationDrawerModalProps {
   isOpen: boolean;
@@ -22,6 +28,23 @@ interface NavigationDrawerModalProps {
   pendingMusicCount?: number;
 }
 
+interface DrawerItem {
+  tab: NavigationTab;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+  badge?: number;
+}
+
+interface DrawerGroup {
+  title: string;
+  items: DrawerItem[];
+}
+
+/**
+ * Full module drawer. Reaches every one of the ten NavigationTab routes,
+ * including Presets and Music which the compact bottom bar cannot hold.
+ */
 export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   isOpen,
   onClose,
@@ -29,148 +52,204 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   onNavigate,
   pendingMusicCount = 0,
 }) => {
-  const { t } = useTranslation();
+  const { isEnglish } = useTranslation();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
-  const modules: {
-    id: NavigationTab;
-    label: string;
-    sublabel: string;
-    icon: React.ElementType;
-    badge?: string | number;
-  }[] = [
+  const groups: DrawerGroup[] = [
     {
-      id: 'dashboard',
-      label: t('drawer.dashboard.title', '1. Dashboard'),
-      sublabel: t('drawer.dashboard.sub', 'Pusat kendali, status hardware, dan telemetri streaming'),
-      icon: LayoutDashboard,
+      title: isEnglish ? 'Control' : 'Kontrol',
+      items: [
+        {
+          tab: 'dashboard',
+          label: 'Dashboard',
+          hint: isEnglish ? 'Mode, status and next actions' : 'Mode, status, dan langkah berikutnya',
+          icon: LayoutDashboard,
+        },
+      ],
     },
     {
-      id: 'studio',
-      label: t('drawer.studio.title', '2. Studio Editor & Presets'),
-      sublabel: t('drawer.studio.sub', 'Pusat pemilihan preset, editor canvas 9:16 & 16:9, dan layer compositor'),
-      icon: Tv,
+      title: 'Studio',
+      items: [
+        {
+          tab: 'studio',
+          label: 'Studio',
+          hint: isEnglish ? 'Canvas, elements and presets' : 'Canvas, elemen, dan preset',
+          icon: Layers,
+        },
+        {
+          tab: 'sources',
+          label: isEnglish ? 'Sources' : 'Sumber',
+          hint: isEnglish ? 'Camera, microphone, media' : 'Kamera, mikrofon, media',
+          icon: FolderOpen,
+        },
+        {
+          tab: 'presets',
+          label: isEnglish ? 'Presets' : 'Preset',
+          hint: isEnglish ? 'Saved layouts and triggers' : 'Layout dan trigger tersimpan',
+          icon: LayoutTemplate,
+        },
+        {
+          tab: 'marketplace',
+          label: isEnglish ? 'Marketplace' : 'Marketplace',
+          hint: isEnglish ? 'Preset and asset library' : 'Pustaka preset dan aset',
+          icon: Store,
+        },
+      ],
     },
     {
-      id: 'sources',
-      label: t('drawer.sources.title', '3. Sources & Audio Library'),
-      sublabel: t('drawer.sources.sub', 'Pustaka elemen overlay, audio manual, dan widget interaktif'),
-      icon: Box,
+      title: isEnglish ? 'Live & Audio' : 'Live & Audio',
+      items: [
+        {
+          tab: 'live_center',
+          label: isEnglish ? 'Live Center' : 'Pusat Live',
+          hint: isEnglish ? 'Chat, gifts, TTS and events' : 'Chat, gift, TTS, dan event',
+          icon: Radio,
+        },
+        {
+          tab: 'music',
+          label: isEnglish ? 'Music' : 'Musik',
+          hint: isEnglish ? 'Queue, requests and history' : 'Antrean, request, dan riwayat',
+          icon: Music,
+          badge: pendingMusicCount > 0 ? pendingMusicCount : undefined,
+        },
+        {
+          tab: 'remote_deck',
+          label: 'Remote Deck',
+          hint: isEnglish ? 'Hardware deck control' : 'Kontrol deck perangkat',
+          icon: Gamepad2,
+        },
+      ],
     },
     {
-      id: 'live_center',
-      label: t('drawer.live.title', '4. Live Center & Event'),
-      sublabel: t('drawer.live.sub', 'Simulator chat, gift, follow, donasi, dan Text-to-Speech (TTS)'),
-      icon: Radio,
+      title: isEnglish ? 'Connections' : 'Koneksi',
+      items: [
+        {
+          tab: 'integrations',
+          label: isEnglish ? 'Integrations' : 'Integrasi',
+          hint: isEnglish ? 'TikTok, YouTube, Spotify' : 'TikTok, YouTube, Spotify',
+          icon: Plug,
+        },
+      ],
     },
     {
-      id: 'remote_deck',
-      label: t('drawer.deck.title', '5. Remote Stream Deck'),
-      sublabel: t('drawer.deck.sub', 'Kontroler nirkabel P2P LAN dari HP kedua dengan tombol fisik virtual'),
-      icon: Smartphone,
-    },
-    {
-      id: 'integrations',
-      label: t('drawer.integrations.title', '6. Integrations'),
-      sublabel: t('drawer.integrations.sub', 'TikTok LIVE, YouTube, Twitch, Saweria, Sociabuzz, Trakteer, BagiBagi'),
-      icon: Share2,
-    },
-    {
-      id: 'marketplace',
-      label: t('drawer.marketplace.title', '7. Marketplace'),
-      sublabel: t('drawer.marketplace.sub', 'Koleksi scene, widget donasi, alert pack, dan overlay interaktif'),
-      icon: ShoppingBag,
-    },
-    {
-      id: 'settings',
-      label: t('drawer.settings.title', '8. Settings (Pengaturan)'),
-      sublabel: t('drawer.settings.sub', 'Mode streaming, encoder, profil performa, izin Android, dan backup JSON'),
-      icon: Settings,
+      title: isEnglish ? 'Preferences' : 'Preferensi',
+      items: [
+        {
+          tab: 'settings',
+          label: isEnglish ? 'Settings' : 'Pengaturan',
+          hint: isEnglish ? 'App, audio, HUD, performance' : 'Aplikasi, audio, HUD, performa',
+          icon: SettingsIcon,
+        },
+      ],
     },
   ];
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="nav-drawer-title"
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4"
-    >
-      <div className="relative w-full max-w-lg bg-[#0e1626] border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-        {/* Grab Handle for mobile */}
-        <div className="w-12 h-1 bg-slate-700 rounded-full mx-auto mt-3 sm:hidden" />
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={isEnglish ? 'All modules' : 'Semua modul'}>
+      <button
+        type="button"
+        aria-label={isEnglish ? 'Close navigation' : 'Tutup navigasi'}
+        onClick={onClose}
+        className="absolute inset-0 h-full w-full cursor-default bg-black/60 motion-safe:animate-[sx-fade-in_160ms_ease-out]"
+      />
 
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-800">
-          <div>
-            <h2 id="nav-drawer-title" className="text-base font-bold text-white flex items-center gap-2">
-              {t('drawer.title', 'Pusat Navigasi & Fitur')}
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {t('drawer.subtitle', 'Pilih modul studio siaran yang ingin dikelola')}
-            </p>
+      <div className="absolute inset-y-0 left-0 flex w-[86%] max-w-[340px] flex-col border-r border-sx-border bg-sx-bg shadow-sx-overlay motion-safe:animate-[sx-slide-in_220ms_cubic-bezier(0.22,1,0.36,1)]">
+        <div className="border-b border-sx-border px-4 pb-3 pt-[calc(env(safe-area-inset-top)+14px)]">
+          <div className="flex items-start gap-2.5">
+            <BrandMark size={36} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-1.5 leading-none">
+                <span className="text-[15px] font-bold tracking-[0.14em] text-sx-text">SYNTXRR</span>
+                <span className="text-[15px] font-bold tracking-[0.14em] text-sx-accent">STREAM</span>
+              </div>
+              <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-sx-text-muted">
+                {isEnglish ? 'All modules' : 'Semua modul'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={isEnglish ? 'Close' : 'Tutup'}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
+            >
+              <Icon icon={X} size="md" tone="inherit" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            aria-label="Tutup menu"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
-        {/* Modules List */}
-        <div className="p-3 sm:p-4 overflow-y-auto space-y-1.5">
-          {modules.map((mod) => {
-            const Icon = mod.icon;
-            const isActive = activeNav === mod.id;
-
-            return (
-              <button
-                key={mod.id}
-                onClick={() => {
-                  onNavigate(mod.id);
-                  onClose();
-                }}
-                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between gap-3 transition-colors ${
-                  isActive
-                    ? 'bg-blue-950/60 border-blue-500 shadow-md ring-1 ring-blue-500/50'
-                    : 'bg-[#131f36]/70 border-slate-800/80 hover:bg-[#182744] hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                      isActive
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-[#080c16] text-blue-400 border border-slate-800'
-                    }`}
-                  >
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                      <span>{mod.label}</span>
-                      {mod.badge !== undefined && (
-                        <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[10px] font-bold">
-                          {mod.badge}
-                        </span>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-3">
+          {groups.map((group) => (
+            <div key={group.title} className="mb-3 last:mb-0">
+              <div className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-sx-text-muted">
+                {group.title}
+              </div>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const isActive = activeNav === item.tab;
+                  return (
+                    <button
+                      key={item.tab}
+                      type="button"
+                      onClick={() => {
+                        onNavigate(item.tab);
+                        onClose();
+                      }}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        'flex min-h-[52px] w-full items-center gap-2.5 rounded-sx-md border px-2.5 py-2 text-left transition-colors',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus',
+                        isActive
+                          ? 'border-sx-accent/40 bg-sx-accent-soft'
+                          : 'border-transparent hover:bg-sx-surface-2',
                       )}
-                    </div>
-                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                      {mod.sublabel}
-                    </div>
-                  </div>
-                </div>
-
-                <ChevronRight
-                  className={`w-4 h-4 shrink-0 transition-transform ${
-                    isActive ? 'text-blue-400 translate-x-0.5' : 'text-slate-500'
-                  }`}
-                />
-              </button>
-            );
-          })}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-8 w-8 shrink-0 items-center justify-center rounded-sx-sm border',
+                          isActive
+                            ? 'border-sx-accent/40 bg-sx-accent text-sx-accent-fg'
+                            : 'border-sx-border bg-sx-surface-2',
+                        )}
+                      >
+                        <Icon
+                          icon={item.icon}
+                          size="sm"
+                          tone={isActive ? 'inherit' : 'secondary'}
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={cn(
+                            'block truncate text-sx-caption',
+                            isActive ? 'font-bold text-sx-text' : 'font-semibold text-sx-text',
+                          )}
+                        >
+                          {item.label}
+                        </span>
+                        <span className="block truncate text-[10px] text-sx-text-muted">{item.hint}</span>
+                      </span>
+                      {item.badge ? (
+                        <span className="flex h-4 min-w-[16px] items-center justify-center rounded-sx-full bg-sx-accent px-1 text-[9px] font-bold leading-none text-sx-accent-fg">
+                          {item.badge > 99 ? '99+' : item.badge}
+                        </span>
+                      ) : null}
+                      <Icon icon={ChevronRight} size="xs" tone="muted" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

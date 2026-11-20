@@ -1,89 +1,118 @@
 import React from 'react';
 import { NavigationTab } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
-import {
-  LayoutDashboard,
-  Tv,
-  Radio,
-  Smartphone,
-  Plug,
-  Settings,
-} from 'lucide-react';
+import { Gamepad2, LayoutDashboard, Layers, Menu, Radio } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Icon } from './ui/Icon';
+import { cn } from './ui/cn';
 
 interface BottomNavProps {
   activeNav: NavigationTab;
   onNavigate: (nav: NavigationTab) => void;
-  onOpenDrawer?: () => void;
+  onOpenDrawer: () => void;
   pendingRequestsCount?: number;
 }
 
+interface PrimaryItem {
+  tab: NavigationTab;
+  label: string;
+  icon: LucideIcon;
+  badge?: number;
+}
+
+/**
+ * Five-destination mobile navigation.
+ *
+ * The previous six-tab bar was cramped and unreadable at 360dp. Four real
+ * modules plus a "More" destination that opens the full drawer (all ten
+ * routes), so no screen becomes unreachable.
+ */
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeNav,
   onNavigate,
   onOpenDrawer,
   pendingRequestsCount = 0,
 }) => {
-  const { t } = useTranslation();
-  const primaryTabs: {
-    id: NavigationTab;
-    label: string;
-    icon: React.ElementType;
-    badge?: number;
-  }[] = [
-    { id: 'dashboard', label: t('nav.dashboard', 'Dashboard'), icon: LayoutDashboard },
-    { id: 'studio', label: t('nav.studio', 'Studio'), icon: Tv },
-    { id: 'live_center', label: t('nav.live_center', 'Live'), icon: Radio },
-    { id: 'remote_deck', label: t('nav.remote_deck', 'Deck'), icon: Smartphone },
-    { id: 'integrations', label: t('nav.integrations', 'Integrasi'), icon: Plug },
-    { id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings },
+  const { t, isEnglish } = useTranslation();
+
+  const primaryItems: PrimaryItem[] = [
+    { tab: 'dashboard', label: t('nav.dashboard', 'Dashboard'), icon: LayoutDashboard },
+    { tab: 'studio', label: t('nav.studio', 'Studio'), icon: Layers },
+    {
+      tab: 'live_center',
+      label: t('nav.live_center', 'Live Center'),
+      icon: Radio,
+      badge: pendingRequestsCount > 0 ? pendingRequestsCount : undefined,
+    },
+    { tab: 'remote_deck', label: t('nav.remote_deck', 'Remote Deck'), icon: Gamepad2 },
   ];
+
+  const isMoreActive = !primaryItems.some((item) => item.tab === activeNav);
+
+  const itemClass =
+    'relative flex min-h-[58px] flex-1 flex-col items-center justify-center gap-1 rounded-sx-md px-1 pb-1 pt-2 ' +
+    'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus ' +
+    'focus-visible:ring-inset motion-reduce:transition-none';
 
   return (
     <nav
-      aria-label="Navigasi bawah mobile"
-      className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080c16]/95 backdrop-blur-lg border-t border-slate-800/90 pb-safe"
+      aria-label={isEnglish ? 'Primary navigation' : 'Navigasi utama'}
+      className="sticky bottom-0 z-40 border-t border-sx-border bg-sx-surface/95 backdrop-blur-md"
     >
-      <div className="grid grid-cols-6 items-center h-14 px-1 max-w-lg mx-auto">
-        {primaryTabs.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeNav === item.id;
-
+      <div className="mx-auto flex w-full max-w-6xl items-stretch gap-0.5 px-1.5 pb-[env(safe-area-inset-bottom)]">
+        {primaryItems.map((item) => {
+          const isActive = activeNav === item.tab;
           return (
             <button
-              key={item.id}
-              onClick={() => onNavigate(item.id)}
-              className={`relative flex flex-col items-center justify-center min-h-[44px] py-1 transition-colors rounded-lg px-0.5 ${
-                isActive ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'
-              }`}
+              key={item.tab}
+              type="button"
+              onClick={() => onNavigate(item.tab)}
+              aria-current={isActive ? 'page' : undefined}
+              className={cn(itemClass, isActive ? 'bg-sx-surface-2/70' : 'hover:bg-sx-surface-2/50')}
             >
-              <div className="relative">
-                <Icon
-                  className={`w-4 h-4 sm:w-5 sm:h-5 transition-transform ${
-                    isActive ? 'scale-110 text-blue-400 stroke-[2.2]' : 'stroke-[1.8]'
-                  }`}
-                />
-                {item.badge !== undefined && item.badge > 0 && (
-                  <span className="absolute -top-1 -right-2 px-1 text-[8px] font-bold bg-blue-600 text-white rounded-full leading-tight">
-                    {item.badge}
+              {isActive ? (
+                <span className="absolute inset-x-3 top-0 h-[2px] rounded-sx-full bg-sx-accent" />
+              ) : null}
+              <span className="relative">
+                <Icon icon={item.icon} size="lg" tone={isActive ? 'accent' : 'muted'} active={isActive} />
+                {item.badge ? (
+                  <span className="absolute -right-2 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-sx-full bg-sx-accent px-1 text-[9px] font-bold leading-none text-sx-accent-fg">
+                    {item.badge > 99 ? '99+' : item.badge}
                   </span>
-                )}
-              </div>
+                ) : null}
+              </span>
               <span
-                className={`text-[8.5px] sm:text-[10px] tracking-tight mt-0.5 truncate max-w-full text-center ${
-                  isActive ? 'font-semibold text-blue-300' : 'font-medium'
-                }`}
+                className={cn(
+                  'max-w-full truncate text-[11px] leading-none',
+                  isActive ? 'font-semibold text-sx-text' : 'font-medium text-sx-text-muted',
+                )}
               >
                 {item.label}
               </span>
-              {isActive && (
-                <span className="absolute bottom-0 w-5 sm:w-6 h-0.5 bg-blue-500 rounded-full" />
-              )}
             </button>
           );
         })}
+
+        <button
+          type="button"
+          onClick={onOpenDrawer}
+          aria-label={isEnglish ? 'More modules' : 'Modul lainnya'}
+          className={cn(itemClass, isMoreActive ? 'bg-sx-surface-2/70' : 'hover:bg-sx-surface-2/50')}
+        >
+          {isMoreActive ? (
+            <span className="absolute inset-x-3 top-0 h-[2px] rounded-sx-full bg-sx-accent" />
+          ) : null}
+          <Icon icon={Menu} size="lg" tone={isMoreActive ? 'accent' : 'muted'} active={isMoreActive} />
+          <span
+            className={cn(
+              'text-[11px] leading-none',
+              isMoreActive ? 'font-semibold text-sx-text' : 'font-medium text-sx-text-muted',
+            )}
+          >
+            {isEnglish ? 'More' : 'Lainnya'}
+          </span>
+        </button>
       </div>
     </nav>
   );
 };
-
-
