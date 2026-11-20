@@ -587,12 +587,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleQuickSlotKeyDown);
   }, [settings.soundboardVolume, soundboardItems]);
 
-  // Android Native Hardware Back Button & Status Bar Handling (Capacitor)
+  // Android status bar follows the resolved theme (Adaptive Dark / Adaptive Light)
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      StatusBar.setBackgroundColor({ color: '#080C16' }).catch(() => {});
-    }
+    if (!Capacitor.isNativePlatform()) return;
+
+    const meta = getThemeMeta(settings.theme);
+    // Capacitor semantics: Style.Dark = light icons (dark background),
+    // Style.Light = dark icons (light background).
+    StatusBar.setBackgroundColor({ color: meta.bg }).catch(() => {});
+    StatusBar.setStyle({ style: meta.mode === 'light' ? Style.Light : Style.Dark }).catch(() => {});
+  }, [settings.theme]);
+
+  // Android Native Hardware Back Button Handling (Capacitor)
+  useEffect(() => {
 
     const backListenerPromise = CapApp.addListener('backButton', () => {
       // 1. If drawer or modal is open, dismiss it
