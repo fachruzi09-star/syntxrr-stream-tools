@@ -42,7 +42,17 @@ export type FrameRate = 30 | 60;
 
 export type PerformanceProfile = 'battery_saver' | 'balanced' | 'performance';
 
-export type AppTheme = 'navy_dark' | 'obsidian_dark' | 'cyber_slate';
+/**
+ * Adaptive themes are the current system. The three legacy ids stay in the
+ * union so previously saved settings remain valid; they resolve to
+ * `adaptive_dark` at runtime (see `resolveTheme`).
+ */
+export type AppTheme =
+  | 'adaptive_dark'
+  | 'adaptive_light'
+  | 'navy_dark'
+  | 'obsidian_dark'
+  | 'cyber_slate';
 
 // SETTINGS FOUNDATION
 export type AppLanguage = 'id-ID' | 'en-US';

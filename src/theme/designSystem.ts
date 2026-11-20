@@ -1,6 +1,13 @@
 /**
  * Design System Terpusat — SYNTXRR STREAM
- * Berdasarkan pedoman desain: Deep Navy, Electric Blue Accent, Status Jujur, Touch Targets >= 44px
+ *
+ * Batch 7.1A: CSS custom properties in `src/index.css` are the single source of
+ * truth for visual colour. Values exported here are `var(--sx-*)` references so
+ * nothing in TypeScript maintains a competing palette.
+ *
+ * Note: `STATUS_DEFINITIONS[].color` must remain a literal hex value because
+ * existing screens interpolate it into alpha-suffixed strings
+ * (e.g. `${color}20`). Do not convert it to a CSS variable.
  */
 
 export type FeatureStatus = 'ACTIVE' | 'SIMULATION' | 'FOUNDATION' | 'NOT_CONNECTED' | 'NOT_SUPPORTED';
@@ -57,16 +64,88 @@ export const STATUS_DEFINITIONS: Record<FeatureStatus, StatusMeta> = {
   },
 };
 
-export const THEME_COLORS = {
-  canvas: '#080C16',
-  surface: '#0E1626',
-  card: '#131F36',
-  cardHover: '#182744',
-  border: '#1E293B',
-  borderLight: '#334155',
-  accentBlue: '#2563EB',
-  accentElectric: '#38BDF8',
-  textMuted: '#94A3B8',
-  textSecondary: '#CBD5E1',
-  textPrimary: '#F8FAFC',
+/**
+ * Feature status → semantic token. Brand yellow is NOT a status colour, so the
+ * status scale stays green / orange / red / blue / grey.
+ */
+export const STATUS_TOKENS: Record<FeatureStatus, string> = {
+  ACTIVE: 'var(--sx-success)',
+  SIMULATION: 'var(--sx-info)',
+  FOUNDATION: 'var(--sx-neutral)',
+  NOT_CONNECTED: 'var(--sx-warning)',
+  NOT_SUPPORTED: 'var(--sx-neutral)',
 };
+
+/**
+ * Theme-driven colours. These are CSS variable references, valid anywhere a
+ * `color`/`background-color` string is accepted by the DOM.
+ */
+export const THEME_COLORS = {
+  canvas: 'var(--sx-bg)',
+  surface: 'var(--sx-surface-1)',
+  card: 'var(--sx-surface-2)',
+  cardHover: 'var(--sx-surface-3)',
+  border: 'var(--sx-border)',
+  borderLight: 'var(--sx-border-strong)',
+  accentBlue: 'var(--sx-accent)',
+  accentElectric: 'var(--sx-accent-hover)',
+  textMuted: 'var(--sx-text-muted)',
+  textSecondary: 'var(--sx-text-secondary)',
+  textPrimary: 'var(--sx-text)',
+} as const;
+
+/** Small, disciplined radius scale. */
+export const RADIUS = {
+  sm: 'var(--sx-radius-sm)',
+  md: 'var(--sx-radius-md)',
+  lg: 'var(--sx-radius-lg)',
+  xl: 'var(--sx-radius-xl)',
+  full: 'var(--sx-radius-full)',
+} as const;
+
+/** Semantic elevation levels. */
+export const ELEVATION = {
+  flat: 'none',
+  raised: 'var(--sx-shadow-raised)',
+  overlay: 'var(--sx-shadow-overlay)',
+} as const;
+
+/** 4px spacing scale. */
+export const SPACING = {
+  0: 'var(--sx-space-0)',
+  1: 'var(--sx-space-1)',
+  2: 'var(--sx-space-2)',
+  3: 'var(--sx-space-3)',
+  4: 'var(--sx-space-4)',
+  5: 'var(--sx-space-5)',
+  6: 'var(--sx-space-6)',
+  8: 'var(--sx-space-8)',
+  10: 'var(--sx-space-10)',
+  12: 'var(--sx-space-12)',
+  16: 'var(--sx-space-16)',
+} as const;
+
+/** Motion foundation — shared by CSS utilities and the `motion` package. */
+export const MOTION = {
+  durationInstant: 'var(--sx-duration-instant)',
+  durationFast: 'var(--sx-duration-fast)',
+  durationBase: 'var(--sx-duration-base)',
+  durationSlow: 'var(--sx-duration-slow)',
+  easeStandard: 'var(--sx-ease-standard)',
+  easeEmphasized: 'var(--sx-ease-emphasized)',
+  easeExit: 'var(--sx-ease-exit)',
+} as const;
+
+/**
+ * Type scale. Labels default to at least 12px (`caption`); anything smaller is
+ * reserved for genuinely essential compact metadata.
+ */
+export const TYPE_SCALE = {
+  display: 'var(--text-sx-display)',
+  title: 'var(--text-sx-title)',
+  section: 'var(--text-sx-section)',
+  body: 'var(--text-sx-body)',
+  secondary: 'var(--text-sx-secondary)',
+  caption: 'var(--text-sx-caption)',
+  numeric: 'var(--text-sx-numeric)',
+} as const;
