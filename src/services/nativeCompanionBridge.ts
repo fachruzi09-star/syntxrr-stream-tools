@@ -210,6 +210,7 @@ export interface FloatingCompanionPluginInterface {
   connectTikTokLive(options: {
     username: string;
     eulerApiKey?: string;
+    eulerJwtKey?: string;
     allowEulerFallback?: boolean;
     connectionMethod?: TikTokConnectionMethod;
   }): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload }>;
@@ -758,6 +759,7 @@ export async function onHudResync(
 export async function connectTikTokLiveNative(options: {
   username: string;
   eulerApiKey?: string;
+  eulerJwtKey?: string;
   allowEulerFallback?: boolean;
   connectionMethod?: TikTokConnectionMethod;
 }): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload; message?: string }> {

@@ -19,6 +19,7 @@ import {
   normalizeUnitVolume,
 } from '../types';
 import { DEFAULT_TTS_CONFIG } from './ttsService';
+import { normalizeStudioPreset } from './presetModel';
 
 const DB_NAME = 'syntxrr_stream_tools_db';
 const DB_VERSION = 3; // Incremented for SYNTXRR STREAM Master Architecture
@@ -81,6 +82,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tiktokConnected: false,
   tiktokConnectionMethod: 'direct',
   eulerStreamApiKey: '',
+  eulerStreamJwtKey: '',
   tiktokEulerFallbackEnabled: true,
   soundboardVolume: 0.85,
   // === SETTINGS FOUNDATION DEFAULTS ===
@@ -723,6 +725,7 @@ export const CREDENTIAL_SETTING_KEYS = [
   'youtubeApiKey',
   'spotifyAccessToken',
   'eulerStreamApiKey',
+  'eulerStreamJwtKey',
 ] as const;
 export type CredentialSettingKey = (typeof CREDENTIAL_SETTING_KEYS)[number];
 
@@ -774,12 +777,17 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
 }
 
 function normalizeSettingsFields(settings: AppSettings): AppSettings {
+  const eulerStreamApiKey = typeof settings.eulerStreamApiKey === 'string' ? settings.eulerStreamApiKey.trim() : '';
+  const eulerStreamJwtKey = typeof settings.eulerStreamJwtKey === 'string' ? settings.eulerStreamJwtKey.trim() : '';
   return {
     ...settings,
     operatingMode: normalizeOperatingMode(settings.operatingMode),
     modeBAudioSource: normalizeModeBAudioSource(settings.modeBAudioSource, 'mix'),
     streamKey: typeof settings.streamKey === 'string' ? settings.streamKey : '',
     rtmpServer: typeof settings.rtmpServer === 'string' ? settings.rtmpServer : DEFAULT_SETTINGS.rtmpServer,
+    eulerStreamApiKey,
+    // Enforce mutual exclusivity if corrupted storage contains both credentials.
+    eulerStreamJwtKey: eulerStreamApiKey ? '' : eulerStreamJwtKey,
     audioVolume: normalizeUnitVolume(settings.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85),
     soundboardVolume: normalizeUnitVolume(settings.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85),
     micGain:
@@ -804,18 +812,29 @@ export const StorageService = {
   // PRESETS
   async getPresets(): Promise<StudioPreset[]> {
     const stored = await idbGet<StudioPreset[]>('studio_presets');
-    if (!stored || stored.length === 0) {
-      await idbSet('studio_presets', DEFAULT_PRESETS);
-      return DEFAULT_PRESETS;
+    if (!Array.isArray(stored) || stored.length === 0) {
+      const defaults = DEFAULT_PRESETS.map((preset) =>
+        normalizeStudioPreset({
+          ...preset,
+          elements: ensureUniqueElementIds(preset.elements || []),
+        }),
+      );
+      await idbSet('studio_presets', defaults);
+      return defaults;
     }
-    return stored.map((preset) => ({
-      ...preset,
-      elements: ensureUniqueElementIds(preset.elements || []),
-    }));
+    return stored.map((preset) =>
+      normalizeStudioPreset({
+        ...preset,
+        elements: ensureUniqueElementIds(preset.elements || []),
+      }),
+    );
   },
 
   async savePresets(presets: StudioPreset[]): Promise<void> {
-    await idbSet('studio_presets', presets);
+    await idbSet(
+      'studio_presets',
+      presets.map((preset) => normalizeStudioPreset(preset)),
+    );
   },
 
   async getActivePresetId(): Promise<string> {
@@ -830,7 +849,9 @@ export const StorageService = {
   // STUDIO ELEMENTS
   async getStudioElements(): Promise<StudioElement[]> {
     const stored = await idbGet<StudioElement[]>('studio_elements');
-    if (!stored || stored.length === 0) {
+    // An empty canvas is a valid user choice. Only a missing/corrupt value should
+    // initialize defaults; treating [] as missing silently repopulates deleted elements.
+    if (!Array.isArray(stored)) {
       await idbSet('studio_elements', DEFAULT_STUDIO_ELEMENTS);
       return DEFAULT_STUDIO_ELEMENTS;
     }
@@ -844,6 +865,171 @@ export const StorageService = {
   async saveStudioElements(elements: StudioElement[]): Promise<void> {
     const sanitized = ensureUniqueElementIds(elements);
     await idbSet('studio_elements', sanitized);
+  },
+
+  /**
+   * Atomically persists presets, activePresetId, studioElements, and settings in one IndexedDB transaction.
+   * Only falls back to synchronized localStorage writes when openDB() fails before starting a transaction.
+   */
+  async savePresetActivationAtomically(input: {
+    presets: StudioPreset[];
+    activePresetId: string;
+    studioElements: StudioElement[];
+    settings: AppSettings;
+  }): Promise<void> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('Data aktivasi preset tidak valid.');
+    }
+    if (!Array.isArray(input.presets) || input.presets.length === 0) {
+      throw new Error('Daftar preset tidak boleh kosong.');
+    }
+    const activePresetId = typeof input.activePresetId === 'string' ? input.activePresetId.trim() : '';
+    if (!activePresetId) {
+      throw new Error('ID preset aktif tidak valid.');
+    }
+    if (!Array.isArray(input.studioElements)) {
+      throw new Error('Daftar elemen Studio tidak valid.');
+    }
+    if (!input.settings || typeof input.settings !== 'object' || Array.isArray(input.settings)) {
+      throw new Error('Pengaturan aplikasi tidak valid.');
+    }
+
+    const seenPresetIds = new Set<string>();
+    const normalizedPresets = input.presets.map((preset) => {
+      if (!preset || typeof preset !== 'object' || Array.isArray(preset)) {
+        throw new Error('Item preset tidak valid.');
+      }
+      const presetId = typeof preset.id === 'string' ? preset.id.trim() : '';
+      if (!presetId || seenPresetIds.has(presetId)) {
+        throw new Error('ID preset tidak valid atau terduplikasi.');
+      }
+      if (!Array.isArray(preset.elements)) {
+        throw new Error(`Elemen pada preset "${preset.name || presetId}" tidak valid.`);
+      }
+      seenPresetIds.add(presetId);
+      return normalizeStudioPreset({
+        ...preset,
+        id: presetId,
+        elements: ensureUniqueElementIds(preset.elements),
+      });
+    });
+
+    if (!normalizedPresets.some((preset) => preset.id === activePresetId)) {
+      throw new Error(`Preset aktif "${activePresetId}" tidak ditemukan dalam daftar preset.`);
+    }
+
+    const normalizedElements = ensureUniqueElementIds(input.studioElements);
+    const normalizedSettings = normalizeSettingsFields(input.settings);
+
+    const entries: Array<[string, unknown]> = [
+      ['studio_presets', normalizedPresets],
+      ['active_preset_id', activePresetId],
+      ['studio_elements', normalizedElements],
+      ['settings', normalizedSettings],
+    ];
+
+    let db: IDBDatabase;
+    try {
+      db = await openDB();
+    } catch {
+      if (typeof localStorage === 'undefined') {
+        throw new Error('IndexedDB gagal dibuka dan localStorage tidak tersedia.');
+      }
+      const previousEntries: Array<{ key: string; existed: boolean; value: string | null }> = [];
+      for (const [key] of entries) {
+        const storageKey = `syntxrr_${key}`;
+        const existing = localStorage.getItem(storageKey);
+        previousEntries.push({
+          key: storageKey,
+          existed: existing !== null,
+          value: existing,
+        });
+      }
+      try {
+        for (const [key, value] of entries) {
+          localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
+        }
+        return;
+      } catch (writeError) {
+        try {
+          for (const prev of previousEntries) {
+            if (prev.existed && prev.value !== null) {
+              localStorage.setItem(prev.key, prev.value);
+            } else {
+              localStorage.removeItem(prev.key);
+            }
+          }
+        } catch (rollbackError) {
+          throw new Error(
+            `Penulisan fallback localStorage gagal dan pemulihan snapshot ikut gagal: ${
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+            }`,
+          );
+        }
+        throw writeError instanceof Error ? writeError : new Error('Penulisan fallback localStorage gagal.');
+      }
+    }
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let abortReason: Error | null = null;
+        const fail = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          reject(err instanceof Error ? err : new Error(String(err || 'Transaksi aktivasi preset gagal.')));
+        };
+
+        let tx: IDBTransaction;
+        try {
+          tx = db.transaction('store', 'readwrite');
+        } catch (err) {
+          fail(err);
+          return;
+        }
+
+        tx.oncomplete = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        tx.onerror = () => fail(abortReason || tx.error || new Error('Transaksi aktivasi preset gagal.'));
+        tx.onabort = () => fail(abortReason || tx.error || new Error('Transaksi aktivasi preset dibatalkan.'));
+
+        try {
+          const store = tx.objectStore('store');
+          for (const [key, value] of entries) {
+            const request = store.put(value, key);
+            request.onerror = () => {
+              abortReason =
+                request.error instanceof Error
+                  ? request.error
+                  : new Error(`Gagal menulis key ${key} pada transaksi aktivasi preset.`);
+              try {
+                tx.abort();
+              } catch {}
+              fail(abortReason);
+            };
+          }
+        } catch (syncError) {
+          abortReason = syncError instanceof Error ? syncError : new Error(String(syncError));
+          try {
+            tx.abort();
+          } catch {}
+          fail(abortReason);
+        }
+      });
+    } finally {
+      db.close();
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        for (const [key, value] of entries) {
+          localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
+        }
+      } catch {}
+    }
   },
 
   // STUDIO MEDIA ASSETS (Mode B local images / MP4 / audio stored as Blob in same DB)
@@ -943,6 +1129,97 @@ export const StorageService = {
       }
     }
     return results;
+  },
+
+  /** Returns all requested Studio media kinds, including audio, for portable preset transfer. */
+  async getStudioMediaAssetsForPresetTransfer(
+    ids: string[],
+  ): Promise<Array<StoredStudioMediaAsset & { blob: Blob }>> {
+    const wanted = new Set(
+      (Array.isArray(ids) ? ids : []).filter(
+        (id): id is string => typeof id === 'string' && VALID_STUDIO_MEDIA_ASSET_ID.test(id),
+      ),
+    );
+    if (wanted.size === 0) return [];
+    const index = await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index');
+    if (!Array.isArray(index) || index.length === 0) return [];
+
+    const selected = index.filter(
+      (metadata): metadata is StoredStudioMediaAsset =>
+        Boolean(metadata) &&
+        wanted.has(metadata.id) &&
+        (metadata.type === 'image' || metadata.type === 'video' || metadata.type === 'audio'),
+    );
+    const assets: Array<StoredStudioMediaAsset & { blob: Blob }> = [];
+    for (const metadata of selected) {
+      const blob = await idbGet<Blob>(`studio_media_asset:${metadata.id}`);
+      if (isBlobValue(blob) && blob.size > 0) {
+        assets.push({ ...metadata, blob });
+      }
+    }
+    return assets;
+  },
+
+  /** Atomically restores a set of media files for an imported preset inside one readwrite transaction. */
+  async saveStudioMediaAssetsForPresetTransfer(
+    assets: Array<StoredStudioMediaAsset & { blob: Blob }>,
+  ): Promise<void> {
+    if (!Array.isArray(assets) || assets.length === 0) return;
+    const seenIds = new Set<string>();
+    for (const asset of assets) {
+      if (
+        !asset ||
+        typeof asset.id !== 'string' ||
+        !VALID_STUDIO_MEDIA_ASSET_ID.test(asset.id) ||
+        seenIds.has(asset.id)
+      ) {
+        throw new Error('Identitas media preset yang akan dipulihkan tidak valid.');
+      }
+      if (
+        typeof asset.name !== 'string' ||
+        !asset.name.trim() ||
+        !['image', 'video', 'audio'].includes(asset.type) ||
+        !isBlobValue(asset.blob) ||
+        asset.blob.size <= 0 ||
+        asset.blob.size !== asset.sizeBytes ||
+        typeof asset.mimeType !== 'string' ||
+        !asset.mimeType.trim()
+      ) {
+        throw new Error(`Data media ${asset.name || asset.id} tidak valid.`);
+      }
+      seenIds.add(asset.id);
+    }
+
+    const db = await openDB();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('store', 'readwrite');
+        const store = tx.objectStore('store');
+        const indexRequest = store.get('studio_media_assets_index');
+        indexRequest.onsuccess = () => {
+          const current = Array.isArray(indexRequest.result)
+            ? (indexRequest.result as StoredStudioMediaAsset[])
+            : [];
+          const incomingIds = new Set(assets.map((asset) => asset.id));
+          for (const asset of assets) {
+            store.put(asset.blob, `studio_media_asset:${asset.id}`);
+          }
+          store.put(
+            [
+              ...assets.map(({ blob: _blob, ...metadata }) => metadata),
+              ...current.filter((item) => item && !incomingIds.has(item.id)),
+            ],
+            'studio_media_assets_index',
+          );
+        };
+        indexRequest.onerror = () => tx.abort();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('Pemulihan media preset gagal.'));
+        tx.onabort = () => reject(tx.error || new Error('Pemulihan media preset dibatalkan.'));
+      });
+    } finally {
+      db.close();
+    }
   },
 
   async deleteStudioMediaAsset(id: string): Promise<void> {
@@ -1087,6 +1364,7 @@ export const StorageService = {
       ...(shouldClearTarget ? { tiktokUsername: '' } : {}),
       tiktokConnected: false,
       eulerStreamApiKey: '',
+      eulerStreamJwtKey: '',
     };
     await this.saveSettings(nextSettings);
 

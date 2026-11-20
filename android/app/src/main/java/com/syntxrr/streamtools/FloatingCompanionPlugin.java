@@ -1085,6 +1085,7 @@ public class FloatingCompanionPlugin extends Plugin {
     public void connectTikTokLive(PluginCall call) {
         String username = call.getString("username", "");
         String eulerApiKey = call.getString("eulerApiKey", "");
+        String eulerJwtKey = call.getString("eulerJwtKey", "");
         boolean allowEulerFallback = Boolean.TRUE.equals(call.getBoolean("allowEulerFallback", true));
         String connectionMethod = call.getString("connectionMethod", "direct");
 
@@ -1104,7 +1105,7 @@ public class FloatingCompanionPlugin extends Plugin {
 
         attachTikTokConnectorListener();
         TikTokLiveConnector connector = getTikTokConnector();
-        connector.connect(username, eulerApiKey, allowEulerFallback, connectionMethod);
+        connector.connect(username, eulerApiKey, eulerJwtKey, allowEulerFallback, connectionMethod);
 
         JSObject ret = new JSObject();
         ret.put("accepted", true);

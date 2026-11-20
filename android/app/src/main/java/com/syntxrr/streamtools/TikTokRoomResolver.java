@@ -23,11 +23,11 @@ import java.util.regex.Pattern;
 /**
  * TikTokRoomResolver
  *
- * Melakukan resolusi username TikTok -> LIVE room ID melalui endpoint
+ * Melakukan resolusi username TikTok -> LIVE room ID melalui endpoint publik
  * "https://www.tiktok.com/api-live/user/room/" dengan cadangan halaman publik
- * "https://www.tiktok.com/@<username>/live", serta bootstrap awal ke
- * "https://webcast.tiktok.com/webcast/im/fetch/" sebelum membuka Direct WebSocket
- * (sebagaimana arsitektur StreamingIn).
+ * "https://www.tiktok.com/@<username>/live". Direct WebSocket memakai cookie perangkat
+ * anonim yang diambil secara opportunistic; jalur utama masuk room melalui im_enter_room
+ * tanpa bergantung pada endpoint /webcast/im/fetch yang ditandatangani runtime browser.
  *
  * Memisahkan secara jujur:
  * - input tidak valid
@@ -61,7 +61,7 @@ public final class TikTokRoomResolver {
             "<script[^>]*id=[\"']__UNIVERSAL_DATA_FOR_REHYDRATION__[\"'][^>]*>(.*?)</script>",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE
     );
-    private static final Pattern ROOM_ID_PATTERN = Pattern.compile("\"roomId\"\\s*:\\s*\"(\\d+)\"");
+    private static final Pattern ROOM_ID_PATTERN = Pattern.compile("\"roomId\"\\s*:\\s*\"?(\\d+)\"?");
 
     public enum Status {
         INVALID_INPUT,
@@ -223,6 +223,37 @@ public final class TikTokRoomResolver {
         }
     }
 
+    /**
+     * TikTok issues an anonymous device cookie (commonly ttwid) from the public homepage.
+     * The cookie is used only in memory for this connection attempt; no TikTok-app session
+     * cookies are read or persisted.
+     */
+    @NonNull
+    private static Map<String, String> fetchAnonymousDeviceCookies() {
+        Map<String, String> cookies = new LinkedHashMap<>();
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL("https://www.tiktok.com/").openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
+            conn.setInstanceFollowRedirects(true);
+            applyBrowserHeaders(conn, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", null);
+            int httpCode = conn.getResponseCode();
+            cookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
+            InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            if (stream != null) {
+                readBoundedUtf8(stream, 64 * 1024);
+                stream.close();
+            }
+        } catch (Exception ignored) {
+            // Cookie warm-up is opportunistic; room resolution still proceeds without it.
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return cookies;
+    }
+
     @NonNull
     public static Result resolve(@Nullable String rawUsername) {
         String normalized = normalizeUsername(rawUsername);
@@ -239,7 +270,7 @@ public final class TikTokRoomResolver {
             );
         }
 
-        Map<String, String> cookies = new LinkedHashMap<>();
+        Map<String, String> cookies = new LinkedHashMap<>(fetchAnonymousDeviceCookies());
         HttpURLConnection conn = null;
         try {
             String encodedUser = URLEncoder.encode(normalized, StandardCharsets.UTF_8.name());
@@ -258,14 +289,18 @@ public final class TikTokRoomResolver {
             String body = stream != null ? readBoundedUtf8(stream, MAX_BODY_BYTES) : "";
 
             if (httpCode == 404) {
+                // Do not classify from the API route alone: TikTok edge routes can be
+                // unavailable independently of the public profile/LIVE page.
+                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                if (htmlFallback != null) return htmlFallback;
                 return new Result(
-                        Status.ACCOUNT_NOT_FOUND,
+                        Status.ROOM_UNREADABLE,
                         normalized,
                         "",
                         "",
                         null,
                         httpCode,
-                        "Akun @" + normalized + " tidak ditemukan di TikTok (HTTP 404).",
+                        "Endpoint lookup TikTok mengembalikan HTTP 404 dan halaman LIVE publik belum dapat diverifikasi.",
                         cookies
                 );
             }
@@ -372,19 +407,41 @@ public final class TikTokRoomResolver {
             String roomTitle = liveRoom != null ? liveRoom.optString("title", "") : "";
 
             if (roomId.isEmpty() || "0".equals(roomId)) {
+                // api-live can return a valid user object while its liveRoom payload is stale or
+                // incomplete. Check the public LIVE page before deciding the room state.
+                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                if (htmlFallback != null && htmlFallback.status == Status.RESOLVED_LIVE) {
+                    return htmlFallback;
+                }
+                if (liveRoomStatus != null && liveRoomStatus == 4) {
+                    return new Result(
+                            Status.NOT_LIVE,
+                            normalized,
+                            "",
+                            roomTitle,
+                            liveRoomStatus,
+                            httpCode,
+                            "@" + normalized + " saat ini tidak sedang LIVE (status=4; halaman publik tidak menunjukkan room aktif).",
+                            cookies
+                    );
+                }
                 return new Result(
-                        Status.NOT_LIVE,
+                        Status.ROOM_UNREADABLE,
                         normalized,
                         "",
                         roomTitle,
                         liveRoomStatus,
                         httpCode,
-                        "@" + normalized + " saat ini tidak sedang LIVE.",
+                        "TikTok mengembalikan profil tanpa roomId yang dapat diverifikasi; status OFFLINE belum dapat dipastikan.",
                         cookies
                 );
             }
 
             if (liveRoomStatus != null && liveRoomStatus == 4) {
+                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                if (htmlFallback != null && htmlFallback.status == Status.RESOLVED_LIVE) {
+                    return htmlFallback;
+                }
                 return new Result(
                         Status.NOT_LIVE,
                         normalized,
@@ -392,13 +449,18 @@ public final class TikTokRoomResolver {
                         roomTitle,
                         liveRoomStatus,
                         httpCode,
-                        "@" + normalized + " saat ini tidak sedang LIVE (status=4).",
+                        "@" + normalized + " saat ini tidak sedang LIVE (status=4 dan halaman LIVE publik tidak menunjukkan room aktif).",
                         cookies
                 );
             }
 
-            // Jangan menebak arti status room lain yang belum terverifikasi (hanya 2 = aktif atau tidak disediakan).
+            // Status yang tidak dikenal tidak boleh disamakan dengan OFFLINE. Coba bukti
+            // independen dari halaman LIVE publik; jika tetap tidak jelas, laporkan unreadable.
             if (liveRoomStatus != null && liveRoomStatus != 2) {
+                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                if (htmlFallback != null && htmlFallback.status == Status.RESOLVED_LIVE) {
+                    return htmlFallback;
+                }
                 return new Result(
                         Status.ROOM_UNREADABLE,
                         normalized,
@@ -406,7 +468,7 @@ public final class TikTokRoomResolver {
                         roomTitle,
                         liveRoomStatus,
                         httpCode,
-                        "Status room TikTok tidak terverifikasi (status=" + liveRoomStatus + ").",
+                        "Status room TikTok tidak terverifikasi (status=" + liveRoomStatus + "); halaman LIVE publik tidak mengonfirmasi room aktif.",
                         cookies
                 );
             }
@@ -500,7 +562,7 @@ public final class TikTokRoomResolver {
                 String jsonRaw = sigiMatcher.group(1);
                 if (jsonRaw != null && !jsonRaw.trim().isEmpty()) {
                     Result parsed = parseSigiOrUniversalJson(normalized, jsonRaw.trim(), httpCode, cookies);
-                    if (parsed != null) {
+                    if (parsed != null && parsed.status != Status.ROOM_UNREADABLE) {
                         return parsed;
                     }
                 }
@@ -512,7 +574,7 @@ public final class TikTokRoomResolver {
                 String jsonRaw = univMatcher.group(1);
                 if (jsonRaw != null && !jsonRaw.trim().isEmpty()) {
                     Result parsed = parseSigiOrUniversalJson(normalized, jsonRaw.trim(), httpCode, cookies);
-                    if (parsed != null) {
+                    if (parsed != null && parsed.status != Status.ROOM_UNREADABLE) {
                         return parsed;
                     }
                 }
@@ -609,14 +671,16 @@ public final class TikTokRoomResolver {
             String title = liveRoomObj != null ? liveRoomObj.optString("title", "") : "";
 
             if (roomId.isEmpty()) {
+                // A user profile without a roomId is not proof that the streamer is offline.
+                // Keep the result unreadable so the independent connector fallback can verify it.
                 return new Result(
-                        Status.NOT_LIVE,
+                        Status.ROOM_UNREADABLE,
                         normalized,
                         "",
                         title,
                         liveStatus,
                         httpCode,
-                        "@" + normalized + " saat ini tidak sedang LIVE.",
+                        "Halaman LIVE TikTok tidak memberikan roomId yang dapat diverifikasi.",
                         cookies
                 );
             }

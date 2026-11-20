@@ -93,6 +93,7 @@ export interface AppSettings {
   tiktokConnected?: boolean;
   tiktokConnectionMethod?: TikTokConnectionMethod;
   eulerStreamApiKey?: string;
+  eulerStreamJwtKey?: string;
   tiktokEulerFallbackEnabled?: boolean;
   // Soundboard & Audio routing
   soundboardVolume?: number;
@@ -184,6 +185,56 @@ export interface StudioElement {
 
 export type PresetCategory = 'all' | 'hp_screen' | 'landscape' | 'portrait' | 'favorites';
 
+export type StudioCanvasKind = 'portrait' | 'landscape' | 'square' | 'custom';
+
+export interface StudioCanvasSpec {
+  kind: StudioCanvasKind;
+  width: number;
+  height: number;
+}
+
+/** A group is a stable reference to child elements; elements remain stored once in the preset. */
+export interface StudioPresetGroup {
+  id: string;
+  name: string;
+  elementIds: string[];
+  visible: boolean;
+  locked: boolean;
+  opacity?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  rotation?: number;
+  zIndex?: number;
+  properties?: Record<string, unknown>;
+  eventBinding?: Record<string, unknown> | null;
+  enterAnimation?: string | Record<string, unknown> | null;
+  exitAnimation?: string | Record<string, unknown> | null;
+  enterDurationMs?: number;
+  exitDurationMs?: number;
+  displayDurationMs?: number;
+  alertDurationMs?: number;
+  autoDismiss?: boolean;
+  sequenceOrder?: number;
+  animationDelayMs?: number;
+}
+
+/** A super-group references groups and carries shared presentation/behavior metadata. */
+export interface StudioPresetSuperGroup {
+  id: string;
+  name: string;
+  groupIds: string[];
+  visible: boolean;
+  locked: boolean;
+  properties?: Record<string, unknown>;
+  eventBinding?: Record<string, unknown> | null;
+  enterAnimation?: string | Record<string, unknown> | null;
+  exitAnimation?: string | Record<string, unknown> | null;
+  sequenceOrder?: number;
+  animationDelayMs?: number;
+}
+
 export interface StudioPreset {
   id: string;
   name: string;
@@ -194,10 +245,15 @@ export interface StudioPreset {
   isFavorite: boolean;
   description: string;
   thumbnailColor?: string;
+  /** CanvasSpec equivalent used by structured scene documents. Legacy orientation remains authoritative for UI layout. */
+  canvas?: StudioCanvasSpec;
   backgroundUri?: string;
+  groups?: StudioPresetGroup[];
+  superGroups?: StudioPresetSuperGroup[];
   screensaver?: StudioScreensaverSettings | Record<string, unknown> | string | null;
   transitionIn?: Record<string, unknown> | string | null;
   transitionOut?: Record<string, unknown> | string | null;
+  schema?: number;
 }
 
 export interface StudioScreensaverSettings {

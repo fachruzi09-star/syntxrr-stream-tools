@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   StudioPreset,
   PresetCategory,
   CanvasOrientation,
   StudioElement,
 } from '../types';
+import { importPresetPackageFile, exportPresetPackageFile } from '../services/presetTransfer';
+import { StorageService } from '../services/storage';
 import {
   Layout,
   Plus,
@@ -21,13 +23,16 @@ import {
   ArrowRight,
   Sliders,
   X,
+  Download,
+  Upload,
 } from 'lucide-react';
 
 interface PresetManagerViewProps {
   presets: StudioPreset[];
   activePresetId: string;
   onSelectPreset: (presetId: string) => void;
-  onCreatePreset: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => void;
+  onCreatePreset: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => void | boolean | Promise<void | boolean>;
+  onCanImportPreset?: () => Promise<boolean>;
   onDuplicatePreset: (presetId: string) => void;
   onDeletePreset: (presetId: string) => void;
   onRenamePreset: (presetId: string, newName: string) => void;
@@ -40,6 +45,7 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
   activePresetId,
   onSelectPreset,
   onCreatePreset,
+  onCanImportPreset,
   onDuplicatePreset,
   onDeletePreset,
   onRenamePreset,
@@ -50,6 +56,11 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const presetImportInputRef = useRef<HTMLInputElement>(null);
+  const isTransferringRef = useRef(false);
+  const [isTransferringPreset, setIsTransferringPreset] = useState(false);
+  const [transferNotice, setTransferNotice] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const [createModalError, setCreateModalError] = useState<string | null>(null);
 
   // Form state for creating new preset
   const [newPresetName, setNewPresetName] = useState('');
@@ -78,9 +89,101 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
     setEditingPresetId(null);
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const rollbackImportedMedia = async (assetIds: string[]) => {
+    for (const assetId of assetIds) {
+      try {
+        await StorageService.deleteStudioMediaAsset(assetId);
+      } catch {
+        // Best-effort cleanup of orphaned media when preset creation is cancelled or fails.
+      }
+    }
+  };
+
+  const handleExportPreset = async (preset: StudioPreset) => {
+    if (isTransferringRef.current) return;
+    isTransferringRef.current = true;
+    setIsTransferringPreset(true);
+    setTransferNotice(null);
+    try {
+      await exportPresetPackageFile(preset);
+      setTransferNotice({
+        message: `Preset “${preset.name}” berhasil diekspor beserta media lokal yang dipakai.`,
+        tone: 'success',
+      });
+    } catch (error) {
+      setTransferNotice({
+        message: error instanceof Error ? error.message : 'Preset gagal diekspor.',
+        tone: 'error',
+      });
+    } finally {
+      isTransferringRef.current = false;
+      setIsTransferringPreset(false);
+    }
+  };
+
+  const handleImportPresetFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || isTransferringRef.current) return;
+    isTransferringRef.current = true;
+    setIsTransferringPreset(true);
+    setTransferNotice(null);
+    try {
+      if (onCanImportPreset && !(await onCanImportPreset())) {
+        setTransferNotice({
+          message: 'Impor preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
+          tone: 'error',
+        });
+        return;
+      }
+
+      const imported = await importPresetPackageFile(file);
+      const baseName = imported.preset.name.trim();
+      const existingNames = new Set(presets.map((preset) => preset.name.trim().toLowerCase()));
+      let name = baseName;
+      if (existingNames.has(name.toLowerCase())) {
+        name = `${baseName} (Impor)`;
+        let copyIndex = 2;
+        while (existingNames.has(name.toLowerCase())) {
+          name = `${baseName} (Impor ${copyIndex})`;
+          copyIndex += 1;
+        }
+      }
+
+      let created: void | boolean;
+      try {
+        created = await onCreatePreset({ ...imported.preset, name });
+      } catch (createError) {
+        await rollbackImportedMedia(imported.importedAssetIds);
+        throw createError;
+      }
+      if (created === false) {
+        await rollbackImportedMedia(imported.importedAssetIds);
+        setTransferNotice({
+          message: 'Impor preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
+          tone: 'error',
+        });
+        return;
+      }
+
+      setTransferNotice({
+        message: `Preset “${name}” berhasil diimpor${imported.importedMediaCount ? ` bersama ${imported.importedMediaCount} file media` : ''} dan langsung dipilih.`,
+        tone: 'success',
+      });
+    } catch (error) {
+      setTransferNotice({
+        message: error instanceof Error ? error.message : 'File preset gagal diimpor.',
+        tone: 'error',
+      });
+    } finally {
+      isTransferringRef.current = false;
+      setIsTransferringPreset(false);
+    }
+  };
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPresetName.trim()) return;
+    if (!newPresetName.trim() || isTransferringRef.current) return;
 
     let elements: StudioElement[] = [];
 
@@ -215,19 +318,37 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
       ];
     }
 
-    onCreatePreset({
-      name: newPresetName.trim(),
-      category: newCategory,
-      canvasOrientation: newOrientation,
-      elements,
-      isFavorite: false,
-      description: newDescription.trim() || 'Preset tata letak kustom SYNTXRR STREAM',
-      thumbnailColor: '#1e3a8a',
-    });
+    isTransferringRef.current = true;
+    setIsTransferringPreset(true);
+    setCreateModalError(null);
+    try {
+      const created = await onCreatePreset({
+        name: newPresetName.trim(),
+        category: newCategory,
+        canvasOrientation: newOrientation,
+        elements,
+        isFavorite: false,
+        description: newDescription.trim() || 'Preset tata letak kustom SYNTXRR STREAM',
+        thumbnailColor: '#1e3a8a',
+      });
 
-    setIsCreateModalOpen(false);
-    setNewPresetName('');
-    setNewDescription('');
+      if (created === false) {
+        setCreateModalError('Pembuatan preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.');
+        return;
+      }
+
+      setIsCreateModalOpen(false);
+      setNewPresetName('');
+      setNewDescription('');
+      setCreateModalError(null);
+    } catch (error) {
+      setCreateModalError(
+        error instanceof Error ? error.message : 'Preset gagal disimpan ke penyimpanan lokal.',
+      );
+    } finally {
+      isTransferringRef.current = false;
+      setIsTransferringPreset(false);
+    }
   };
 
   return (
@@ -253,9 +374,28 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={presetImportInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportPresetFile}
+            />
             <button
-              onClick={() => setIsCreateModalOpen(true)}
+              type="button"
+              disabled={isTransferringPreset}
+              onClick={() => presetImportInputRef.current?.click()}
+              className="px-3 py-2.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] text-slate-200 font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Impor Preset</span>
+            </button>
+            <button
+              onClick={() => {
+                setCreateModalError(null);
+                setIsCreateModalOpen(true);
+              }}
               className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 active:scale-95 text-white font-bold text-sm flex items-center space-x-2 transition shadow-lg shadow-blue-600/25"
             >
               <Plus className="w-4 h-4" />
@@ -288,6 +428,22 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
             </button>
           ))}
         </div>
+        {transferNotice && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-relaxed ${
+              transferNotice.tone === 'success'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+            }`}
+          >
+            {transferNotice.message}
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
+          File JSON preset membawa elemen dan media lokal yang dirujuk. Impor membuat salinan baru tanpa menimpa preset yang sudah ada.
+        </p>
       </div>
 
       {/* Preset Cards Grid */}
@@ -388,6 +544,15 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
+                  <button
+                    type="button"
+                    disabled={isTransferringPreset}
+                    onClick={() => void handleExportPreset(preset)}
+                    className="p-2 rounded-lg bg-[#1e293b] hover:bg-blue-500/20 text-slate-300 hover:text-blue-300 text-xs transition disabled:opacity-50"
+                    title="Ekspor Preset beserta Media"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
 
                   {presets.length > 1 && (
                     <button
@@ -432,14 +597,27 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
                 <h3 className="text-base font-bold text-white">Buat Preset Studio Baru</h3>
               </div>
               <button
-                onClick={() => setIsCreateModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                type="button"
+                disabled={isTransferringPreset}
+                onClick={() => {
+                  setCreateModalError(null);
+                  setIsCreateModalOpen(false);
+                }}
+                className="text-slate-400 hover:text-white disabled:opacity-50"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateSubmit} className="space-y-4">
+              {createModalError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 leading-relaxed"
+                >
+                  {createModalError}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Nama Preset
@@ -534,16 +712,21 @@ export const PresetManagerView: React.FC<PresetManagerViewProps> = ({
               <div className="pt-2 flex items-center justify-end space-x-2">
                 <button
                   type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-[#1e293b] text-slate-300 text-xs font-semibold hover:bg-[#334155]"
+                  disabled={isTransferringPreset}
+                  onClick={() => {
+                    setCreateModalError(null);
+                    setIsCreateModalOpen(false);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#1e293b] text-slate-300 text-xs font-semibold hover:bg-[#334155] disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold shadow-lg shadow-blue-600/30"
+                  disabled={isTransferringPreset}
+                  className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold shadow-lg shadow-blue-600/30 disabled:opacity-50"
                 >
-                  Simpan & Buat Preset
+                  {isTransferringPreset ? 'Menyimpan...' : 'Simpan & Buat Preset'}
                 </button>
               </div>
             </form>

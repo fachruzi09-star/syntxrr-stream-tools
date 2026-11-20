@@ -22,7 +22,8 @@ import {
   type NativeStreamingPluginInterface,
 } from '../nativeStreamingBridge';
 import { DEFAULT_SETTINGS, DEFAULT_STUDIO_ELEMENTS } from '../storage';
-import type { StudioPreset } from '../../types';
+import { getPresetGroupBounds, transformPresetGroupElements } from '../presetModel';
+import type { StudioElement, StudioPreset } from '../../types';
 
 let assertionCount = 0;
 
@@ -690,6 +691,392 @@ async function runTests(): Promise<void> {
     });
     assertEqual(blockedAToBModeBNotReady.switched, false, 'Mode A -> B aborts while prior Mode B session cleanup is still pending');
     assertEqual(blockedAToBModeBNotReady.nextMode, 'MODE_A_TIKTOK_COMPANION', 'keeps Mode A when Mode B readiness is false');
+
+    // 11. Group & Supergroup propagation for Go Live (prepareAndStartModeBStream) and Apply-to-LIVE (applyLiveSceneChangeToModeB)
+    const makeEl = (overrides: Partial<StudioElement>): StudioElement => ({
+      id: 'el_default',
+      name: 'Elemen',
+      type: 'text',
+      x: 10,
+      y: 10,
+      width: 30,
+      height: 10,
+      layer: 2,
+      visible: true,
+      locked: false,
+      opacity: 100,
+      rotation: 0,
+      properties: { text: 'Hello' },
+      ...overrides,
+    });
+
+    const screenEl = makeEl({
+      id: 'el_screen',
+      name: 'Screen Capture',
+      type: 'screen_capture',
+      x: 5,
+      y: 10,
+      width: 50,
+      height: 30,
+      layer: 1,
+    });
+    const textInHiddenGroup = makeEl({
+      id: 'el_text_hidden_group',
+      name: 'Overlay Hidden Group',
+      x: 15,
+      y: 15,
+      width: 25,
+      height: 8,
+      layer: 2,
+    });
+    const textInSuperHiddenGroup = makeEl({
+      id: 'el_text_super_hidden',
+      name: 'Overlay Super Hidden',
+      x: 10,
+      y: 50,
+      width: 30,
+      height: 10,
+      layer: 3,
+    });
+    const textInLockedVisibleGroup = makeEl({
+      id: 'el_text_locked_group',
+      name: 'Overlay Locked Visible',
+      x: 20,
+      y: 65,
+      width: 35,
+      height: 10,
+      layer: 4,
+    });
+    const looseVisibleText = makeEl({
+      id: 'el_loose_visible',
+      name: 'Overlay Loose',
+      x: 5,
+      y: 80,
+      width: 40,
+      height: 10,
+      layer: 5,
+    });
+
+    const groupScreenAndHidden = {
+      id: 'grp_hidden',
+      name: 'Grup Hidden',
+      elementIds: ['el_screen', 'el_text_hidden_group'],
+      visible: false,
+      locked: false,
+    };
+    const groupSuperChild = {
+      id: 'grp_super_child',
+      name: 'Grup Anak Super',
+      elementIds: ['el_text_super_hidden'],
+      visible: true,
+      locked: false,
+    };
+    const groupLockedVisible = {
+      id: 'grp_locked_visible',
+      name: 'Grup Terkunci',
+      elementIds: ['el_text_locked_group'],
+      visible: true,
+      locked: true,
+    };
+    const superHidden = {
+      id: 'sgrp_hidden',
+      name: 'Supergroup Hidden',
+      groupIds: ['grp_super_child'],
+      visible: false,
+      locked: false,
+    };
+
+    const groupedElements = [
+      screenEl,
+      textInHiddenGroup,
+      textInSuperHiddenGroup,
+      textInLockedVisibleGroup,
+      looseVisibleText,
+    ];
+    const groupedPreset = createPreset({
+      id: 'preset_grouped_hidden',
+      elements: groupedElements,
+      groups: [groupScreenAndHidden, groupSuperChild, groupLockedVisible],
+      superGroups: [superHidden],
+    });
+
+    nativeStatus = {
+      status: 'idle',
+      message: 'Ready',
+      isStreaming: false,
+      bitrateKbps: 0,
+      canStartNewSession: true,
+    };
+    calls.length = 0;
+
+    const goLiveHiddenRes = await prepareAndStartModeBStream({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        operatingMode: 'MODE_B_STREAMING_ENCODER',
+        rtmpServer: 'rtmp://live.twitch.tv/app',
+        streamKey: 'valid_user_stream_key',
+      },
+      elements: groupedElements,
+      activePreset: groupedPreset,
+      notificationAdapter: {
+        isNativeAndroid: () => true,
+        checkNotificationPermission: async () => ({ granted: true }),
+        requestNotificationPermission: async () => ({ granted: true }),
+      },
+      resolveAssets: async () => [],
+    });
+
+    assertEqual(goLiveHiddenRes.snapshot.status, 'starting', 'Go Live with grouped preset enters starting cleanly');
+    const goLiveStartCall = calls.find((c) => c.method === 'startStream');
+    assert(Boolean(goLiveStartCall), 'Go Live invokes native startStream for grouped preset');
+    const goLiveArgs = goLiveStartCall!.args as {
+      overlayElements: Array<{ id: string; x: number; y: number }>;
+      screenCaptureLayer: { enabled: boolean; grouped: boolean; x: number; y: number; width: number; height: number };
+    };
+    const goLiveOverlayIds = goLiveArgs.overlayElements.map((e) => e.id);
+    assert(!goLiveOverlayIds.includes('el_text_hidden_group'), 'Group visible:false excludes child overlay from Go Live output');
+    assert(!goLiveOverlayIds.includes('el_text_super_hidden'), 'Supergroup visible:false excludes child group overlay from Go Live output');
+    assert(goLiveOverlayIds.includes('el_text_locked_group'), 'Group locked:true keeps visible child overlay in Go Live output');
+    assert(goLiveOverlayIds.includes('el_loose_visible'), 'Non-group visible overlay remains in Go Live output');
+    assertEqual(goLiveArgs.screenCaptureLayer.enabled, false, 'screen_capture in hidden Group disables screenCaptureLayer on Go Live');
+    assertEqual(goLiveArgs.screenCaptureLayer.grouped, true, 'screen_capture in Group sets screenCaptureLayer.grouped=true even when hidden');
+
+    // Group transform updates screen_capture & overlay coordinates in Go Live, and ungrouped screen_capture sets grouped=false
+    const visibleScreenGroup = {
+      id: 'grp_screen_visible',
+      name: 'Grup Screen',
+      elementIds: ['el_screen', 'el_text_locked_group'],
+      visible: true,
+      locked: false,
+    };
+    const ungroupedOverlayPresetElements = [screenEl, textInLockedVisibleGroup, looseVisibleText];
+    const startBounds = getPresetGroupBounds(visibleScreenGroup, ungroupedOverlayPresetElements)!;
+    const targetBounds = {
+      x: startBounds.x + 12,
+      y: startBounds.y + 8,
+      width: Math.round(startBounds.width * 1.2 * 10) / 10,
+      height: Math.round(startBounds.height * 1.1 * 10) / 10,
+    };
+    const transformedElements = transformPresetGroupElements(
+      ungroupedOverlayPresetElements,
+      visibleScreenGroup,
+      ungroupedOverlayPresetElements,
+      startBounds,
+      targetBounds,
+    );
+    const transformedScreenEl = transformedElements.find((e) => e.id === 'el_screen')!;
+    const transformedTextEl = transformedElements.find((e) => e.id === 'el_text_locked_group')!;
+
+    nativeStatus = {
+      status: 'idle',
+      message: 'Ready',
+      isStreaming: false,
+      bitrateKbps: 0,
+      canStartNewSession: true,
+    };
+    calls.length = 0;
+
+    await prepareAndStartModeBStream({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        operatingMode: 'MODE_B_STREAMING_ENCODER',
+        rtmpServer: 'rtmp://live.twitch.tv/app',
+        streamKey: 'valid_user_stream_key',
+      },
+      elements: transformedElements,
+      activePreset: createPreset({
+        id: 'preset_grouped_transformed',
+        elements: transformedElements,
+        groups: [visibleScreenGroup],
+      }),
+      notificationAdapter: {
+        isNativeAndroid: () => true,
+        checkNotificationPermission: async () => ({ granted: true }),
+        requestNotificationPermission: async () => ({ granted: true }),
+      },
+      resolveAssets: async () => [],
+    });
+
+    const transformedStartCall = calls.find((c) => c.method === 'startStream');
+    const transformedArgs = transformedStartCall!.args as {
+      overlayElements: Array<{ id: string; x: number; y: number; width: number; height: number }>;
+      screenCaptureLayer: { enabled: boolean; grouped: boolean; x: number; y: number; width: number; height: number };
+    };
+    assertEqual(transformedArgs.screenCaptureLayer.enabled, true, 'visible grouped screen_capture stays enabled on Go Live');
+    assertEqual(transformedArgs.screenCaptureLayer.grouped, true, 'grouped screen_capture forwards grouped=true on Go Live');
+    assertEqual(transformedArgs.screenCaptureLayer.x, transformedScreenEl.x, 'Go Live screenCaptureLayer receives transformed X');
+    assertEqual(transformedArgs.screenCaptureLayer.y, transformedScreenEl.y, 'Go Live screenCaptureLayer receives transformed Y');
+    assertEqual(transformedArgs.screenCaptureLayer.width, transformedScreenEl.width, 'Go Live screenCaptureLayer receives transformed width');
+    assertEqual(transformedArgs.screenCaptureLayer.height, transformedScreenEl.height, 'Go Live screenCaptureLayer receives transformed height');
+    const syncedOverlay = transformedArgs.overlayElements.find((e) => e.id === 'el_text_locked_group')!;
+    assertEqual(syncedOverlay.x, transformedTextEl.x, 'Go Live overlay receives transformed X from Group transform');
+    assertEqual(syncedOverlay.y, transformedTextEl.y, 'Go Live overlay receives transformed Y from Group transform');
+
+    // Ungrouped screen_capture must produce grouped=false on Go Live
+    nativeStatus = {
+      status: 'idle',
+      message: 'Ready',
+      isStreaming: false,
+      bitrateKbps: 0,
+      canStartNewSession: true,
+    };
+    calls.length = 0;
+
+    await prepareAndStartModeBStream({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        operatingMode: 'MODE_B_STREAMING_ENCODER',
+        rtmpServer: 'rtmp://live.twitch.tv/app',
+        streamKey: 'valid_user_stream_key',
+      },
+      elements: ungroupedOverlayPresetElements,
+      activePreset: createPreset({
+        id: 'preset_ungrouped_screen',
+        elements: ungroupedOverlayPresetElements,
+        groups: [
+          {
+            id: 'grp_overlay_only',
+            name: 'Overlay Only',
+            elementIds: ['el_text_locked_group', 'el_loose_visible'],
+            visible: true,
+            locked: false,
+          },
+        ],
+      }),
+      notificationAdapter: {
+        isNativeAndroid: () => true,
+        checkNotificationPermission: async () => ({ granted: true }),
+        requestNotificationPermission: async () => ({ granted: true }),
+      },
+      resolveAssets: async () => [],
+    });
+    const ungroupedStartArgs = calls.find((c) => c.method === 'startStream')!.args as {
+      screenCaptureLayer: { grouped: boolean };
+    };
+    assertEqual(ungroupedStartArgs.screenCaptureLayer.grouped, false, 'ungrouped screen_capture forwards grouped=false on Go Live');
+
+    // Apply-to-LIVE (applyLiveSceneChangeToModeB) also honors Group/Supergroup visibility, lock, transforms, and grouped flag
+    let capturedLiveReplaceArgs: {
+      overlayElements: Array<{ id: string; x: number; y: number }>;
+      screenCaptureLayer?: { enabled: boolean; grouped: boolean; x: number; y: number; width: number; height: number };
+    } | null = null;
+
+    const hiddenCamInGroup = makeEl({
+      id: 'el_hidden_cam',
+      name: 'Hidden Grouped Cam',
+      type: 'camera',
+      layer: 6,
+    });
+    const liveGroupTestPreset = createPreset({
+      id: 'preset_live_group_test',
+      elements: [
+        transformedScreenEl,
+        textInHiddenGroup,
+        textInSuperHiddenGroup,
+        transformedTextEl,
+        looseVisibleText,
+        hiddenCamInGroup,
+      ],
+      groups: [
+        {
+          id: 'grp_screen_live',
+          name: 'Grup Screen Live',
+          elementIds: ['el_screen', 'el_text_locked_group'],
+          visible: true,
+          locked: true,
+        },
+        {
+          id: 'grp_hidden_live',
+          name: 'Grup Hidden Live',
+          elementIds: ['el_text_hidden_group', 'el_hidden_cam'],
+          visible: false,
+          locked: false,
+        },
+        groupSuperChild,
+      ],
+      superGroups: [superHidden],
+      transitionIn: { type: 'fade', durationMs: 300 },
+    });
+
+    const liveApplyResult = await applyLiveSceneChangeToModeB({
+      elements: liveGroupTestPreset.elements,
+      targetPreset: liveGroupTestPreset,
+      activePreset: createPreset({ id: 'preset_live_base', elements: [looseVisibleText], transitionOut: 'cut' }),
+      modeBStatus: { status: 'live', message: 'LIVE', isStreaming: true, bitrateKbps: 4200, canStartNewSession: false },
+      resolveAssets: async () => [],
+      replaceSceneFn: async (opts) => {
+        capturedLiveReplaceArgs = {
+          overlayElements: opts.overlayElements,
+          screenCaptureLayer: opts.screenCaptureLayer,
+        };
+        return { success: true, status: 'live', message: 'Scene LIVE diperbarui' };
+      },
+    });
+    assertEqual(liveApplyResult.allowed, true, 'Apply-to-LIVE allows transition when camera is inside hidden Group');
+    assertEqual(liveApplyResult.applied, true, 'Apply-to-LIVE applies grouped scene cleanly');
+    assert(Boolean(capturedLiveReplaceArgs), 'replaceSceneFn receives live grouped scene payload');
+    assert(Boolean(capturedLiveReplaceArgs!.screenCaptureLayer), 'replaceSceneFn receives screenCaptureLayer');
+    const liveOverlayIds = capturedLiveReplaceArgs!.overlayElements.map((e) => e.id);
+    assert(!liveOverlayIds.includes('el_text_hidden_group'), 'Apply-to-LIVE excludes Group visible:false overlay');
+    assert(!liveOverlayIds.includes('el_text_super_hidden'), 'Apply-to-LIVE excludes Supergroup visible:false overlay');
+    assert(liveOverlayIds.includes('el_text_locked_group'), 'Apply-to-LIVE includes Group locked:true visible overlay');
+    assert(liveOverlayIds.includes('el_loose_visible'), 'Apply-to-LIVE includes non-grouped visible overlay');
+    assertEqual(capturedLiveReplaceArgs!.screenCaptureLayer!.grouped, true, 'Apply-to-LIVE sets screenCaptureLayer.grouped=true when screen_capture is grouped');
+    assertEqual(capturedLiveReplaceArgs!.screenCaptureLayer!.x, transformedScreenEl.x, 'Apply-to-LIVE propagates transformed screen_capture X');
+
+    // Apply-to-LIVE with ungrouped screen_capture sets grouped=false
+    let ungroupedLiveArgs: { screenCaptureLayer?: { grouped: boolean } } | null = null;
+    await applyLiveSceneChangeToModeB({
+      elements: [screenEl, looseVisibleText],
+      targetPreset: createPreset({ id: 'preset_live_ungrouped', elements: [screenEl, looseVisibleText], groups: [] }),
+      activePreset: null,
+      modeBStatus: { status: 'live', message: 'LIVE', isStreaming: true, bitrateKbps: 4200, canStartNewSession: false },
+      replaceSceneFn: async (opts) => {
+        ungroupedLiveArgs = { screenCaptureLayer: opts.screenCaptureLayer };
+        return { success: true, status: 'live', message: 'OK' };
+      },
+    });
+    assertEqual(ungroupedLiveArgs!.screenCaptureLayer?.grouped, false, 'Apply-to-LIVE sets screenCaptureLayer.grouped=false when screen_capture is ungrouped');
+
+    // Failure path: snapshot / native replace failure returns honest error and leaves coordinator state & revision intact
+    const groupCoordinator = createModeBLifecycleCoordinator({
+      status: 'live',
+      message: 'LIVE aktif',
+      isStreaming: true,
+      bitrateKbps: 4200,
+      canStartNewSession: false,
+    });
+    const initialRev = groupCoordinator.getRevision();
+
+    const failedReplaceRes = await applyLiveSceneChangeToModeB({
+      elements: [screenEl, looseVisibleText],
+      targetPreset: createPreset({ id: 'preset_fail_replace', elements: [screenEl, looseVisibleText] }),
+      activePreset: null,
+      modeBStatus: groupCoordinator.getSnapshot(),
+      replaceSceneFn: async () => ({
+        success: false,
+        status: 'live',
+        message: 'Native scene swap ditolak',
+      }),
+    });
+    assertEqual(failedReplaceRes.allowed, false, 'failed native replace returns allowed=false');
+    assertEqual(failedReplaceRes.applied, false, 'failed native replace returns applied=false');
+    assertEqual(failedReplaceRes.message, 'Native scene swap ditolak', 'failed native replace preserves error message');
+    assertEqual(groupCoordinator.getRevision(), initialRev, 'failed Apply-to-LIVE does not mutate coordinator revision');
+    assertEqual(groupCoordinator.getSnapshot().status, 'live', 'failed Apply-to-LIVE does not corrupt coordinator snapshot');
+
+    const invalidLayerOrderRes = await applyLiveSceneChangeToModeB({
+      elements: [
+        makeEl({ id: 'el_screen_bad', type: 'screen_capture', layer: 5 }),
+        makeEl({ id: 'el_overlay_below', layer: 2 }),
+      ],
+      targetPreset: null,
+      activePreset: null,
+      modeBStatus: groupCoordinator.getSnapshot(),
+    });
+    assertEqual(invalidLayerOrderRes.allowed, false, 'snapshot validation error fails closed in Apply-to-LIVE');
+    assertEqual(invalidLayerOrderRes.applied, false, 'snapshot validation error never marks applied=true');
+    assert(Boolean(invalidLayerOrderRes.message), 'snapshot validation error returns descriptive message');
   } finally {
     __resetNativeStreamingBridgeForTests();
   }

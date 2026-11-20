@@ -27,12 +27,12 @@ public final class ModeBSafeMicrophoneSourceTest {
         assertEquals(1, manager.startCalls);
         assertTrue(source.isRunning());
 
-        source.inputPCMData(new Frame(new byte[] {1, 2}, 0, 2, 1L));
+        source.inputPCMData(new Frame(new byte[] {1, 2, 3, 4}, 0, 4, 1L));
         assertEquals(1, frames[0]);
 
         source.stop();
         assertFalse(source.isRunning());
-        source.inputPCMData(new Frame(new byte[] {3, 4}, 0, 2, 2L));
+        source.inputPCMData(new Frame(new byte[] {5, 6, 7, 8}, 0, 4, 2L));
         assertEquals(1, frames[0]);
 
         source.start(sink);
@@ -52,7 +52,7 @@ public final class ModeBSafeMicrophoneSourceTest {
 
         assertThrows(IllegalStateException.class, () -> source.start(sink));
         assertFalse(source.isRunning());
-        source.inputPCMData(new Frame(new byte[] {1, 2}, 0, 2, 1L));
+        source.inputPCMData(new Frame(new byte[] {1, 2, 3, 4}, 0, 4, 1L));
         assertEquals(0, frames[0]);
         assertThrows(IllegalStateException.class, () -> source.start(sink));
 
@@ -60,7 +60,7 @@ public final class ModeBSafeMicrophoneSourceTest {
         manager.createResult = true;
         source.start(sink);
         assertTrue(source.isRunning());
-        source.inputPCMData(new Frame(new byte[] {3, 4}, 0, 2, 2L));
+        source.inputPCMData(new Frame(new byte[] {5, 6, 7, 8}, 0, 4, 2L));
         assertEquals(1, frames[0]);
         source.stop();
     }
@@ -92,7 +92,7 @@ public final class ModeBSafeMicrophoneSourceTest {
         int[] frames = {0};
 
         assertThrows(IllegalStateException.class, () -> source.start(frame -> frames[0]++));
-        source.inputPCMData(new Frame(new byte[] {1, 2}, 0, 2, 1L));
+        source.inputPCMData(new Frame(new byte[] {1, 2, 3, 4}, 0, 4, 1L));
         assertEquals(0, frames[0]);
         source.stop();
     }
@@ -125,7 +125,7 @@ public final class ModeBSafeMicrophoneSourceTest {
         assertFalse(starter.isAlive());
         assertFalse(stopper.isAlive());
         assertEquals(null, failure[0]);
-        source.inputPCMData(new Frame(new byte[] {1, 2}, 0, 2, 1L));
+        source.inputPCMData(new Frame(new byte[] {1, 2, 3, 4}, 0, 4, 1L));
         assertEquals(0, frames[0]);
     }
 

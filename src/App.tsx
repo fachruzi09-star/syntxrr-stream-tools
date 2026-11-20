@@ -43,6 +43,7 @@ import {
   DEFAULT_INTEGRATIONS,
   DEFAULT_TIKTOK_ACCOUNT_STATE,
 } from './services/storage';
+import { normalizeStudioPreset } from './services/presetModel';
 import { triggerHaptic } from './services/haptics';
 import { audioEngine, type AudioEngineState } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
@@ -161,6 +162,41 @@ export default function App() {
   const [presets, setPresets] = useState<StudioPreset[]>(DEFAULT_PRESETS);
   const [activePresetId, setActivePresetId] = useState<string>(DEFAULT_PRESETS[0].id);
   const [studioElements, setStudioElements] = useState<StudioElement[]>(DEFAULT_STUDIO_ELEMENTS);
+  const pendingStudioPersistenceRef = useRef<{ elements: StudioElement[]; presets: StudioPreset[] } | null>(null);
+  const studioPersistenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Studio drag emits many visual updates per second. Keep UI state immediate, but coalesce
+  // IndexedDB writes so a gesture cannot flood storage or race a preset switch.
+  const flushStudioPersistence = useCallback(async () => {
+    if (studioPersistenceTimerRef.current) {
+      clearTimeout(studioPersistenceTimerRef.current);
+      studioPersistenceTimerRef.current = null;
+    }
+    const pending = pendingStudioPersistenceRef.current;
+    if (!pending) return;
+    pendingStudioPersistenceRef.current = null;
+    await Promise.all([
+      StorageService.saveStudioElements(pending.elements),
+      StorageService.savePresets(pending.presets),
+    ]);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (studioPersistenceTimerRef.current) {
+        clearTimeout(studioPersistenceTimerRef.current);
+        studioPersistenceTimerRef.current = null;
+      }
+      const pending = pendingStudioPersistenceRef.current;
+      if (pending) {
+        pendingStudioPersistenceRef.current = null;
+        void Promise.all([
+          StorageService.saveStudioElements(pending.elements),
+          StorageService.savePresets(pending.presets),
+        ]).catch((error) => console.error('Gagal menyimpan perubahan Studio saat keluar:', error));
+      }
+    };
+  }, []);
 
   // Soundboard & TTS State
   const [soundboardItems, setSoundboardItems] = useState<SoundboardItem[]>(DEFAULT_SOUNDBOARD);
@@ -280,11 +316,40 @@ export default function App() {
           StorageService.getTikTokAccount(),
         ]);
 
-        setSettings(savedSettings);
-        setPresets(savedPresets);
-        setActivePresetId(savedActivePresetId);
+        // The dedicated canvas record is the same source previously used by Studio on load.
+        // Keep it authoritative when reconciling legacy preset data, including a deliberately
+        // empty canvas; then repair the selected preset so both records become consistent.
+        const activePresetFromStorage =
+          savedPresets.find((preset) => preset.id === savedActivePresetId) || savedPresets[0] || null;
+        const effectiveActivePresetId = activePresetFromStorage?.id || savedActivePresetId;
+        const hydratedSettings = activePresetFromStorage
+          ? { ...savedSettings, canvasOrientation: activePresetFromStorage.canvasOrientation }
+          : savedSettings;
+        setSettings(hydratedSettings);
+        settingsRef.current = hydratedSettings;
         const sanitizedElements = ensureUniqueElementIds(savedStudioElements);
+        const hydratedPresets = activePresetFromStorage
+          ? savedPresets.map((preset) =>
+              preset.id === activePresetFromStorage.id
+                ? normalizeStudioPreset({ ...preset, elements: sanitizedElements })
+                : preset,
+            )
+          : savedPresets;
+        setPresets(hydratedPresets);
+        setActivePresetId(effectiveActivePresetId);
         setStudioElements(sanitizedElements);
+        if (effectiveActivePresetId !== savedActivePresetId) {
+          await StorageService.saveActivePresetId(effectiveActivePresetId);
+        }
+        if (hydratedSettings.canvasOrientation !== savedSettings.canvasOrientation) {
+          await StorageService.saveSettings(hydratedSettings);
+        }
+        if (JSON.stringify(savedStudioElements) !== JSON.stringify(sanitizedElements)) {
+          await StorageService.saveStudioElements(sanitizedElements);
+        }
+        if (JSON.stringify(savedPresets) !== JSON.stringify(hydratedPresets)) {
+          await StorageService.savePresets(hydratedPresets);
+        }
         const hydratedSoundboard = await Promise.all(
           savedSoundboard.map(async (item) => {
             const audioBlob = await StorageService.getSoundboardAudio(item.id);
@@ -823,7 +888,10 @@ export default function App() {
       'backgroundUri' | 'screensaver' | 'transitionIn' | 'transitionOut'
     >,
   ) => {
-    const updatedPresets = presets.map((p) => (p.id === presetId ? { ...p, ...patch } : p));
+    await flushStudioPersistence();
+    const updatedPresets = presets.map((p) =>
+      p.id === presetId ? normalizeStudioPreset({ ...p, ...patch }) : p,
+    );
     setPresets(updatedPresets);
     await StorageService.savePresets(updatedPresets);
   };
@@ -840,6 +908,23 @@ export default function App() {
     return true;
   };
 
+  const handleUpdateActivePresetMetadata = async (patch: Partial<StudioPreset>) => {
+    if (!(await guardModeBStructuralPresetAction())) return;
+    await flushStudioPersistence();
+    const latestElements = ensureUniqueElementIds(studioElements);
+    const updated = presets.map((preset) =>
+      preset.id === activePresetId
+        ? normalizeStudioPreset({
+            ...preset,
+            ...patch,
+            elements: latestElements,
+          })
+        : preset,
+    );
+    setPresets(updated);
+    await StorageService.savePresets(updated);
+  };
+
   // Canvas Orientation
   const handleOrientationChange = async (orientation: CanvasOrientation) => {
     if (isModeBMutationLocked) {
@@ -848,13 +933,29 @@ export default function App() {
       );
       return;
     }
-    const updated = { ...settings, canvasOrientation: orientation };
+    await flushStudioPersistence();
+    const updated = { ...settingsRef.current, canvasOrientation: orientation };
+    const updatedPresets = presets.map((preset) =>
+      preset.id === activePresetId
+        ? normalizeStudioPreset({
+            ...preset,
+            canvasOrientation: orientation,
+            category: (orientation === '9:16' ? 'hp_screen' : orientation === '16:9' ? 'landscape' : 'portrait') as StudioPreset['category'],
+            canvas: undefined,
+          })
+        : preset,
+    );
+    settingsRef.current = updated;
     setSettings(updated);
-    await StorageService.saveSettings(updated);
+    setPresets(updatedPresets);
+    await Promise.all([
+      StorageService.saveSettings(updated),
+      StorageService.savePresets(updatedPresets),
+    ]);
   };
 
   // Studio Elements Handlers
-  const handleUpdateStudioElements = async (newElements: StudioElement[]) => {
+  const handleUpdateStudioElements = (newElements: StudioElement[]) => {
     if (isModeBMutationLocked && modeBStatusRef.current.status !== 'live') {
       setModeBNoticeBanner(
         'Kanvas Studio dikunci sementara selama Mode B memulai/mengakhiri atau berbagi layar.',
@@ -863,17 +964,20 @@ export default function App() {
     }
     const sanitized = ensureUniqueElementIds(newElements);
     setStudioElements(sanitized);
-    await StorageService.saveStudioElements(sanitized);
 
-    // Also sync elements to active preset
-    const updatedPresets = presets.map((p) => {
-      if (p.id === activePresetId) {
-        return { ...p, elements: sanitized };
-      }
-      return p;
-    });
+    // The active preset and live canvas are one editing document. Update both in memory
+    // immediately, then persist one coalesced snapshot after the current gesture settles.
+    const updatedPresets = presets.map((preset) =>
+      preset.id === activePresetId ? normalizeStudioPreset({ ...preset, elements: sanitized }) : preset,
+    );
     setPresets(updatedPresets);
-    await StorageService.savePresets(updatedPresets);
+    pendingStudioPersistenceRef.current = { elements: sanitized, presets: updatedPresets };
+    if (studioPersistenceTimerRef.current) clearTimeout(studioPersistenceTimerRef.current);
+    studioPersistenceTimerRef.current = setTimeout(() => {
+      void flushStudioPersistence().catch((error) => {
+        console.error('Gagal menyimpan perubahan Studio:', error);
+      });
+    }, 220);
   };
 
   const handleAddSingleElementToStudio = async (newElement: StudioElement) => {
@@ -882,7 +986,8 @@ export default function App() {
         ? newElement.id
         : `elem_${newElement.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const updated = [...studioElements, { ...newElement, id: uniqueId }];
-    await handleUpdateStudioElements(updated);
+    handleUpdateStudioElements(updated);
+    await flushStudioPersistence();
   };
 
   const handleInstallMarketplaceElements = async (elementsPayload: StudioElement[]) => {
@@ -892,31 +997,44 @@ export default function App() {
       id: `elem_${elem.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     }));
     const updated = [...studioElements, ...freshElements];
-    await handleUpdateStudioElements(updated);
+    handleUpdateStudioElements(updated);
+    await flushStudioPersistence();
   };
 
   const handleSaveCanvasAsPreset = async () => {
     if (!(await guardModeBStructuralPresetAction())) return;
-    const newPreset: StudioPreset = {
+    await flushStudioPersistence();
+    const currentOrientation = settingsRef.current.canvasOrientation;
+    const newPreset: StudioPreset = normalizeStudioPreset({
       id: `preset_${Date.now()}`,
       name: `Preset Baru ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-      category: settings.canvasOrientation === '9:16' ? 'hp_screen' : settings.canvasOrientation === '16:9' ? 'landscape' : 'portrait',
-      canvasOrientation: settings.canvasOrientation,
+      category: currentOrientation === '9:16' ? 'hp_screen' : currentOrientation === '16:9' ? 'landscape' : 'portrait',
+      canvasOrientation: currentOrientation,
       elements: ensureUniqueElementIds([...studioElements]),
       createdAt: Date.now(),
       isFavorite: false,
       description: 'Preset tersimpan dari Studio Canvas',
       thumbnailColor: '#2563EB',
-    };
+    });
     const updated = [newPreset, ...presets];
     setPresets(updated);
     setActivePresetId(newPreset.id);
+    setStudioElements(newPreset.elements);
+    const updatedSettings = {
+      ...settingsRef.current,
+      canvasOrientation: newPreset.canvasOrientation,
+    };
+    settingsRef.current = updatedSettings;
+    setSettings(updatedSettings);
     await StorageService.savePresets(updated);
     await StorageService.saveActivePresetId(newPreset.id);
+    await StorageService.saveStudioElements(newPreset.elements);
+    await StorageService.saveSettings(updatedSettings);
   };
 
   // Preset Handlers
   const handleSelectPreset = async (presetId: string) => {
+    await flushStudioPersistence();
     const target = presets.find((p) => p.id === presetId);
     if (!target || presetId === activePresetId) return;
 
@@ -971,37 +1089,74 @@ export default function App() {
     await StorageService.saveSettings(updatedSettings);
   };
 
-  const handleCreatePreset = async (presetData: Omit<StudioPreset, 'id' | 'createdAt'>) => {
-    if (!(await guardModeBStructuralPresetAction())) return;
-    const newPreset: StudioPreset = {
+  const handleCreatePreset = async (presetData: Omit<StudioPreset, 'id' | 'createdAt'>): Promise<boolean> => {
+    if (!(await guardModeBStructuralPresetAction())) return false;
+    await flushStudioPersistence();
+    const newPreset: StudioPreset = normalizeStudioPreset({
       ...presetData,
       id: `preset_${Date.now()}`,
       elements: ensureUniqueElementIds(presetData.elements),
       createdAt: Date.now(),
-    };
+    });
     const updated = [newPreset, ...presets];
+    const updatedSettings = {
+      ...settingsRef.current,
+      canvasOrientation: newPreset.canvasOrientation,
+    };
+    await StorageService.savePresetActivationAtomically({
+      presets: updated,
+      activePresetId: newPreset.id,
+      studioElements: newPreset.elements,
+      settings: updatedSettings,
+    });
     setPresets(updated);
     setActivePresetId(newPreset.id);
     setStudioElements(newPreset.elements);
-    await StorageService.savePresets(updated);
-    await StorageService.saveActivePresetId(newPreset.id);
+    settingsRef.current = updatedSettings;
+    setSettings(updatedSettings);
+    return true;
   };
 
   const handleDuplicatePreset = async (presetId: string) => {
     if (!(await guardModeBStructuralPresetAction())) return;
+    await flushStudioPersistence();
     const source = presets.find((p) => p.id === presetId);
     if (!source) return;
-    const duplicated: StudioPreset = {
+    const elementIdMap = new Map<string, string>();
+    const duplicatedElements = source.elements.map((el, index) => {
+      const id = `elem_${el.type}_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}`;
+      elementIdMap.set(el.id, id);
+      return { ...el, id };
+    });
+    const groupIdMap = new Map<string, string>();
+    const duplicatedGroups = (source.groups || []).map((group, index) => {
+      const id = `group_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`;
+      groupIdMap.set(group.id, id);
+      return {
+        ...group,
+        id,
+        elementIds: group.elementIds
+          .map((elementId) => elementIdMap.get(elementId))
+          .filter((value): value is string => Boolean(value)),
+      };
+    });
+    const duplicatedSuperGroups = (source.superGroups || []).map((group, index) => ({
+      ...group,
+      id: `super_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+      groupIds: group.groupIds
+        .map((groupId) => groupIdMap.get(groupId))
+        .filter((value): value is string => Boolean(value)),
+    }));
+    const duplicated: StudioPreset = normalizeStudioPreset({
       ...source,
       id: `preset_${Date.now()}`,
       name: `${source.name} (Salinan)`,
-      elements: source.elements.map((el) => ({
-        ...el,
-        id: `elem_${el.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      })),
+      elements: duplicatedElements,
+      groups: duplicatedGroups,
+      superGroups: duplicatedSuperGroups,
       createdAt: Date.now(),
       isFavorite: false,
-    };
+    });
     const updated = [...presets, duplicated];
     setPresets(updated);
     await StorageService.savePresets(updated);
@@ -1010,26 +1165,42 @@ export default function App() {
   const handleDeletePreset = async (presetId: string) => {
     if (presets.length <= 1) return;
     if (!(await guardModeBStructuralPresetAction())) return;
+    await flushStudioPersistence();
     const updated = presets.filter((p) => p.id !== presetId);
+    if (updated.length === 0) return;
     setPresets(updated);
     await StorageService.savePresets(updated);
     if (activePresetId === presetId) {
       const nextPreset = updated[0];
+      const sanitizedElements = ensureUniqueElementIds(nextPreset.elements);
+      const updatedSettings = {
+        ...settingsRef.current,
+        canvasOrientation: nextPreset.canvasOrientation,
+      };
       setActivePresetId(nextPreset.id);
-      setStudioElements(nextPreset.elements);
+      setStudioElements(sanitizedElements);
+      settingsRef.current = updatedSettings;
+      setSettings(updatedSettings);
       await StorageService.saveActivePresetId(nextPreset.id);
-      await StorageService.saveStudioElements(nextPreset.elements);
+      await StorageService.saveStudioElements(sanitizedElements);
+      await StorageService.saveSettings(updatedSettings);
     }
   };
 
   const handleRenamePreset = async (presetId: string, newName: string) => {
-    const updated = presets.map((p) => (p.id === presetId ? { ...p, name: newName } : p));
+    await flushStudioPersistence();
+    const updated = presets.map((p) =>
+      p.id === presetId ? normalizeStudioPreset({ ...p, name: newName }) : p,
+    );
     setPresets(updated);
     await StorageService.savePresets(updated);
   };
 
   const handleToggleFavoritePreset = async (presetId: string) => {
-    const updated = presets.map((p) => (p.id === presetId ? { ...p, isFavorite: !p.isFavorite } : p));
+    await flushStudioPersistence();
+    const updated = presets.map((p) =>
+      p.id === presetId ? normalizeStudioPreset({ ...p, isFavorite: !p.isFavorite }) : p,
+    );
     setPresets(updated);
     await StorageService.savePresets(updated);
   };
@@ -1237,6 +1408,8 @@ export default function App() {
     fallbackEnabled: boolean;
     eulerApiKey?: string;
     clearEulerApiKey?: boolean;
+    eulerJwtKey?: string;
+    clearEulerJwtKey?: boolean;
   }) => {
     const savedAccount = await StorageService.saveTikTokAccount({
       ...tiktokAccountRef.current,
@@ -1245,35 +1418,68 @@ export default function App() {
     });
     setTiktokAccount(savedAccount);
 
+    const credentialUpdates: Partial<AppSettings> = {};
+    if (prefs.clearEulerApiKey) {
+      credentialUpdates.eulerStreamApiKey = '';
+    } else if (prefs.eulerApiKey !== undefined) {
+      const trimmedApiKey = prefs.eulerApiKey.trim();
+      credentialUpdates.eulerStreamApiKey = trimmedApiKey;
+      if (trimmedApiKey) {
+        // Exactly one Euler credential may be active at a time.
+        credentialUpdates.eulerStreamJwtKey = '';
+      }
+    }
+
+    if (prefs.clearEulerJwtKey) {
+      credentialUpdates.eulerStreamJwtKey = '';
+    } else if (prefs.eulerJwtKey !== undefined) {
+      const trimmedJwtKey = prefs.eulerJwtKey.trim();
+      credentialUpdates.eulerStreamJwtKey = trimmedJwtKey;
+      if (trimmedJwtKey) {
+        // Exactly one Euler credential may be active at a time.
+        credentialUpdates.eulerStreamApiKey = '';
+      }
+    }
+
     const nextSettings: AppSettings = {
       ...settingsRef.current,
       tiktokConnectionMethod: prefs.connectionMethod,
       tiktokEulerFallbackEnabled: prefs.fallbackEnabled,
-      ...(prefs.clearEulerApiKey
-        ? { eulerStreamApiKey: '' }
-        : prefs.eulerApiKey !== undefined
-        ? { eulerStreamApiKey: prefs.eulerApiKey }
-        : {}),
+      ...credentialUpdates,
     };
     settingsRef.current = nextSettings;
     setSettings(nextSettings);
     await writeSettingsToStorage(nextSettings);
+
+    const activeStatus = tiktokLiveConnector.getStatus();
+    if (
+      (prefs.clearEulerApiKey || prefs.clearEulerJwtKey) &&
+      (tiktokLiveConnector.isActiveSession() || activeStatus.state === 'waiting_for_live') &&
+      (prefs.connectionMethod === 'euler' ||
+        activeStatus.connectionMethod === 'euler' ||
+        activeStatus.transport === 'euler')
+    ) {
+      await tiktokLiveConnector.disconnect();
+    }
   };
 
   const handleConnectTikTok = async (
     username: string,
     eulerApiKey?: string,
     allowEulerFallback?: boolean,
-    connectionMethod?: TikTokConnectionMethod
+    connectionMethod?: TikTokConnectionMethod,
+    eulerJwtKey?: string
   ) => {
     const normalized = normalizeTikTokTargetUsername(username);
     if (!isValidTikTokTargetUsername(normalized)) {
       return;
     }
 
+    const useCallerCredentials = eulerApiKey !== undefined || eulerJwtKey !== undefined;
     await tiktokLiveConnector.connect({
       username: normalized,
-      eulerApiKey: eulerApiKey ?? settingsRef.current.eulerStreamApiKey,
+      eulerApiKey: useCallerCredentials ? eulerApiKey : settingsRef.current.eulerStreamApiKey,
+      eulerJwtKey: useCallerCredentials ? eulerJwtKey : settingsRef.current.eulerStreamJwtKey,
       allowEulerFallback:
         allowEulerFallback ??
         tiktokAccountRef.current.fallbackEnabled ??
@@ -1916,6 +2122,7 @@ export default function App() {
       username: targetUsername,
       connectionMethod: acct.connectionMethod ?? activeSettings.tiktokConnectionMethod ?? 'direct',
       eulerApiKey: activeSettings.eulerStreamApiKey,
+      eulerJwtKey: activeSettings.eulerStreamJwtKey,
       allowEulerFallback: acct.fallbackEnabled ?? activeSettings.tiktokEulerFallbackEnabled ?? true,
     });
   };
@@ -1982,6 +2189,7 @@ export default function App() {
       const pending = pendingSettingsRef.current;
       pendingSettingsRef.current = null;
       if (pending) void writeSettingsToStorage(pending);
+      void flushStudioPersistence();
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushPending();
@@ -1997,6 +2205,7 @@ export default function App() {
   }, []);
 
   const handleExportData = async () => {
+    await flushStudioPersistence();
     const jsonString = await StorageService.exportAllData();
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2010,18 +2219,21 @@ export default function App() {
   };
 
   const handleImportData = async (json: string): Promise<boolean> => {
-    // Selesaikan tulisan settings yang tertunda agar tidak menimpa hasil pemulihan.
+    // Selesaikan tulisan tertunda agar tidak menimpa hasil pemulihan.
     await flushPendingSettings();
+    await flushStudioPersistence();
     const success = await StorageService.importData(json);
     if (success) {
-      const [reloadedSettings, reloadedPresets, reloadedElements, reloadedIntegrations] = await Promise.all([
+      const [reloadedSettings, reloadedPresets, reloadedActivePresetId, reloadedElements, reloadedIntegrations] = await Promise.all([
         StorageService.getSettings(),
         StorageService.getPresets(),
+        StorageService.getActivePresetId(),
         StorageService.getStudioElements(),
         StorageService.getIntegrations(),
       ]);
       setSettings(reloadedSettings);
       setPresets(reloadedPresets);
+      setActivePresetId(reloadedActivePresetId);
       setStudioElements(reloadedElements);
       setIntegrations(reloadedIntegrations);
     }
@@ -2030,8 +2242,9 @@ export default function App() {
 
   const handleResetDefaults = async () => {
     if (window.confirm('Apakah Anda yakin ingin mengembalikan seluruh pengaturan ke default?')) {
-      // Selesaikan tulisan tertunda agar settings lama tidak dibangkitkan setelah reset.
+      // Selesaikan tulisan tertunda agar data lama tidak dibangkitkan setelah reset.
       await flushPendingSettings();
+      await flushStudioPersistence();
       soundboardItems.forEach((item) => {
         soundboardEngine.removeCustomFile(item.id);
         if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
@@ -2609,6 +2822,8 @@ export default function App() {
             onSaveAsPreset={handleSaveCanvasAsPreset}
             presets={presets}
             activePresetId={activePresetId}
+            activePreset={activePreset}
+            onUpdateActivePreset={handleUpdateActivePresetMetadata}
             onSelectPreset={handleSelectPreset}
             onCreatePreset={handleCreatePreset}
             onDuplicatePreset={handleDuplicatePreset}
@@ -2639,6 +2854,7 @@ export default function App() {
             activePresetId={activePresetId}
             onSelectPreset={handleSelectPreset}
             onCreatePreset={handleCreatePreset}
+            onCanImportPreset={guardModeBStructuralPresetAction}
             onDuplicatePreset={handleDuplicatePreset}
             onDeletePreset={handleDeletePreset}
             onRenamePreset={handleRenamePreset}
