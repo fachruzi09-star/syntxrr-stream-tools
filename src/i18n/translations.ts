@@ -1,7 +1,9 @@
 import { AppLanguage } from '../types';
+import { STUDIO_KEYS_ID, STUDIO_KEYS_EN } from './studioTranslations';
 
 export const TRANSLATIONS: Record<AppLanguage, Record<string, string>> = {
   'id-ID': {
+    ...STUDIO_KEYS_ID,
     // Brand & App
     'app.title': 'SYNTXRR STREAM',
     'app.subtitle': 'Mobile Streaming Studio & TikTok LIVE Companion',
@@ -436,6 +438,7 @@ export const TRANSLATIONS: Record<AppLanguage, Record<string, string>> = {
   },
 
   'en-US': {
+    ...STUDIO_KEYS_EN,
     // Brand & App
     'app.title': 'SYNTXRR STREAM',
     'app.subtitle': 'Mobile Streaming Studio & TikTok LIVE Companion',

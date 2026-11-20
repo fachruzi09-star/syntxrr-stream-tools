@@ -84,6 +84,8 @@ export const STUDIO_KEYS_ID: Record<string, string> = {
   'studio.library.createBlocked':
     'Pembuatan preset diblokir saat siaran Mode B aktif atau sibuk. Hentikan siaran terlebih dahulu.',
   'studio.library.createFail': 'Preset gagal disimpan ke penyimpanan lokal.',
+  'common.cancel': 'Batal',
+  'common.close': 'Tutup',
 };
 
 export const STUDIO_KEYS_EN: Record<string, string> = {
@@ -165,4 +167,6 @@ export const STUDIO_KEYS_EN: Record<string, string> = {
   'studio.library.createBlocked':
     'Creating presets is blocked while a Mode B stream is live or busy. Stop the stream first.',
   'studio.library.createFail': 'The preset could not be saved to local storage.',
+  'common.cancel': 'Cancel',
+  'common.close': 'Close',
 };
