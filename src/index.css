@@ -2,88 +2,387 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ==========================================================================
-   CENTRALIZED THEME DESIGN TOKENS — SYNTXRR STREAM
-   Supported Themes: navy_dark (default), obsidian_dark, cyber_slate
+   SYNTXRR STREAM — DESIGN FOUNDATION (Batch 7.1A)
+   Adaptive Luxury design system.
+
+   STRUCTURE
+   1. Local typography (Geist, bundled — no runtime CDN request)
+   2. Semantic design tokens (single source of truth, CSS custom properties)
+      - adaptive_dark  (default)
+      - adaptive_light (complete alternative)
+      - legacy themes (navy_dark / obsidian_dark / cyber_slate) mapped to dark
+   3. Tailwind theme bridge (@theme inline -> semantic utilities)
+   4. Base layer + legacy compatibility overrides (kept until each screen migrates)
+   5. Motion foundation + reduced-motion support
    ========================================================================== */
-:root {
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+/* --------------------------------------------------------------------------
+   1. LOCAL TYPOGRAPHY
+   Geist Sans Variable + Geist Mono, self-hosted from public/fonts.
+   License: SIL Open Font License 1.1 — public/fonts/LICENSE-GEIST.txt
+   -------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Geist Sans Variable';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --------------------------------------------------------------------------
+   2. SEMANTIC DESIGN TOKENS
+   Brand accent is solid yellow (#F2C230). Yellow is NEVER a status colour and
+   never carries small white text — yellow fills always use --sx-accent-fg.
+   -------------------------------------------------------------------------- */
+
+/* --- ADAPTIVE DARK (default) + legacy dark themes mapped to it --- */
+:root,
+[data-theme="adaptive_dark"],
+[data-theme="navy_dark"],
+[data-theme="obsidian_dark"],
+[data-theme="cyber_slate"] {
   color-scheme: dark;
 
-  /* Default: Navy Dark */
-  --app-bg: #080c16;
-  --app-surface: #0e1626;
-  --app-surface-hover: #131f36;
-  --app-card: #131f36;
-  --app-border: #1e293b;
-  --app-border-light: #334155;
-  --app-text: #f8fafc;
-  --app-text-muted: #94a3b8;
-  --app-accent: #2563eb;
-  --app-accent-hover: #1d4ed8;
-  --app-accent-text: #60a5fa;
-  --app-accent-subtle: rgba(37, 99, 235, 0.15);
-  --app-accent-border: rgba(59, 130, 246, 0.4);
+  /* Surfaces */
+  --sx-bg: #0d1017;
+  --sx-surface-1: #141923;
+  --sx-surface-2: #191e28;
+  --sx-surface-3: #222b38;
+
+  /* Text */
+  --sx-text: #f5f6f8;
+  --sx-text-secondary: #a5adba;
+  --sx-text-muted: #7d8795;
+
+  /* Brand accent */
+  --sx-accent: #f2c230;
+  --sx-accent-hover: #ffd34d;
+  --sx-accent-pressed: #d5a719;
+  --sx-accent-soft: rgba(242, 194, 48, 0.12);
+  --sx-accent-fg: #171b22;
+  --sx-accent-text: #f2c230;
+
+  /* Borders */
+  --sx-border-subtle: rgba(255, 255, 255, 0.07);
+  --sx-border: rgba(255, 255, 255, 0.11);
+  --sx-border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Focus */
+  --sx-focus: #ffd34d;
+  --sx-focus-offset: #0d1017;
+
+  /* Interaction states */
+  --sx-input-bg: #191e28;
+  --sx-input-border: rgba(255, 255, 255, 0.13);
+  --sx-disabled-bg: rgba(255, 255, 255, 0.04);
+  --sx-disabled-text: #6a7381;
+  --sx-selected-bg: rgba(242, 194, 48, 0.12);
+  --sx-selected-border: rgba(242, 194, 48, 0.42);
+
+  /* Status — deliberately distinct from brand yellow */
+  --sx-success: #34d399;
+  --sx-success-soft: rgba(52, 211, 153, 0.12);
+  --sx-warning: #f08519;
+  --sx-warning-soft: rgba(240, 133, 25, 0.14);
+  --sx-danger: #ef4a45;
+  --sx-danger-soft: rgba(239, 74, 69, 0.14);
+  --sx-info: #4c9bff;
+  --sx-info-soft: rgba(76, 155, 255, 0.14);
+  --sx-neutral: #8a93a1;
+  --sx-neutral-soft: rgba(138, 147, 161, 0.14);
+
+  /* Elevation — restrained, no decorative glow */
+  --sx-shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
+  --sx-shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.26);
+
+  /* Legacy aliases (consumed by existing screens + compatibility selectors) */
+  --app-bg: var(--sx-bg);
+  --app-surface: var(--sx-surface-1);
+  --app-surface-hover: var(--sx-surface-2);
+  --app-card: var(--sx-surface-2);
+  --app-border: var(--sx-border);
+  --app-border-light: var(--sx-border-strong);
+  --app-text: var(--sx-text);
+  --app-text-muted: var(--sx-text-secondary);
+  --app-accent: var(--sx-accent);
+  --app-accent-hover: var(--sx-accent-hover);
+  --app-accent-text: var(--sx-accent-text);
+  --app-accent-subtle: var(--sx-accent-soft);
+  --app-accent-border: var(--sx-selected-border);
 }
 
-[data-theme="navy_dark"] {
-  --app-bg: #080c16;
-  --app-surface: #0e1626;
-  --app-surface-hover: #131f36;
-  --app-card: #131f36;
-  --app-border: #1e293b;
-  --app-border-light: #334155;
-  --app-text: #f8fafc;
-  --app-text-muted: #94a3b8;
-  --app-accent: #2563eb;
-  --app-accent-hover: #1d4ed8;
-  --app-accent-text: #60a5fa;
-  --app-accent-subtle: rgba(37, 99, 235, 0.15);
-  --app-accent-border: rgba(59, 130, 246, 0.4);
+/* --- ADAPTIVE LIGHT (complete alternative) --- */
+[data-theme="adaptive_light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --sx-bg: #f4f5f2;
+  --sx-surface-1: #ffffff;
+  --sx-surface-2: #f8f8f6;
+  --sx-surface-3: #ecedE9;
+
+  /* Text */
+  --sx-text: #171b22;
+  --sx-text-secondary: #5b6470;
+  --sx-text-muted: #7d8691;
+
+  /* Brand accent */
+  --sx-accent: #f2c230;
+  --sx-accent-hover: #f7cb4a;
+  --sx-accent-pressed: #d5a719;
+  --sx-accent-soft: rgba(242, 194, 48, 0.18);
+  --sx-accent-fg: #171b22;
+  --sx-accent-text: #705400;
+
+  /* Borders — remain visible on light surfaces */
+  --sx-border-subtle: rgba(23, 27, 34, 0.08);
+  --sx-border: rgba(23, 27, 34, 0.14);
+  --sx-border-strong: rgba(23, 27, 34, 0.24);
+
+  /* Focus */
+  --sx-focus: #8a6a00;
+  --sx-focus-offset: #f4f5f2;
+
+  /* Interaction states */
+  --sx-input-bg: #ffffff;
+  --sx-input-border: rgba(23, 27, 34, 0.18);
+  --sx-disabled-bg: rgba(23, 27, 34, 0.05);
+  --sx-disabled-text: #98a0aa;
+  --sx-selected-bg: rgba(242, 194, 48, 0.22);
+  --sx-selected-border: rgba(112, 84, 0, 0.45);
+
+  /* Status */
+  --sx-success: #0e7c4a;
+  --sx-success-soft: rgba(14, 124, 74, 0.1);
+  --sx-warning: #9a5b00;
+  --sx-warning-soft: rgba(154, 91, 0, 0.1);
+  --sx-danger: #b3261e;
+  --sx-danger-soft: rgba(179, 38, 30, 0.1);
+  --sx-info: #1d5fd0;
+  --sx-info-soft: rgba(29, 95, 208, 0.1);
+  --sx-neutral: #5b6470;
+  --sx-neutral-soft: rgba(91, 100, 112, 0.1);
+
+  /* Elevation — soft, neutral, no blue tint */
+  --sx-shadow-raised: 0 1px 2px rgba(23, 27, 34, 0.06), 0 2px 8px rgba(23, 27, 34, 0.08);
+  --sx-shadow-overlay: 0 8px 24px rgba(23, 27, 34, 0.14), 0 2px 6px rgba(23, 27, 34, 0.08);
+
+  /* Legacy aliases */
+  --app-bg: var(--sx-bg);
+  --app-surface: var(--sx-surface-1);
+  --app-surface-hover: var(--sx-surface-2);
+  --app-card: var(--sx-surface-2);
+  --app-border: var(--sx-border);
+  --app-border-light: var(--sx-border-strong);
+  --app-text: var(--sx-text);
+  --app-text-muted: var(--sx-text-secondary);
+  --app-accent: var(--sx-accent);
+  --app-accent-hover: var(--sx-accent-hover);
+  --app-accent-text: var(--sx-accent-text);
+  --app-accent-subtle: var(--sx-accent-soft);
+  --app-accent-border: var(--sx-selected-border);
 }
 
-[data-theme="obsidian_dark"] {
-  --app-bg: #030305;
-  --app-surface: #0d0d12;
-  --app-surface-hover: #171720;
-  --app-card: #14141c;
-  --app-border: #22222d;
-  --app-border-light: #323242;
-  --app-text: #ffffff;
-  --app-text-muted: #9ca3af;
-  --app-accent: #6366f1;
-  --app-accent-hover: #4f46e5;
-  --app-accent-text: #818cf8;
-  --app-accent-subtle: rgba(99, 102, 241, 0.15);
-  --app-accent-border: rgba(129, 140, 248, 0.4);
+/* --------------------------------------------------------------------------
+   2b. SPACING / RADIUS / MOTION TOKENS
+   Spacing uses a strict 4px scale. Tailwind's default spacing scale is already
+   4px-based, so no override is needed there — these tokens expose the scale to
+   JS and to custom utilities.
+   -------------------------------------------------------------------------- */
+:root {
+  --sx-space-0: 0px;
+  --sx-space-1: 4px;
+  --sx-space-2: 8px;
+  --sx-space-3: 12px;
+  --sx-space-4: 16px;
+  --sx-space-5: 20px;
+  --sx-space-6: 24px;
+  --sx-space-8: 32px;
+  --sx-space-10: 40px;
+  --sx-space-12: 48px;
+  --sx-space-16: 64px;
+
+  --sx-radius-sm: 6px;
+  --sx-radius-md: 10px;
+  --sx-radius-lg: 14px;
+  --sx-radius-xl: 20px;
+  --sx-radius-full: 9999px;
+
+  --sx-duration-instant: 80ms;
+  --sx-duration-fast: 120ms;
+  --sx-duration-base: 180ms;
+  --sx-duration-slow: 260ms;
+  --sx-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --sx-ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --sx-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Typography stacks (semantic, referenced by Tailwind font utilities) */
+  --sx-font-sans: 'Geist Sans Variable', ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --sx-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo,
+    Consolas, 'Liberation Mono', monospace;
 }
 
-[data-theme="cyber_slate"] {
-  --app-bg: #0a0f18;
-  --app-surface: #131b28;
-  --app-surface-hover: #1c283c;
-  --app-card: #182233;
-  --app-border: #2a3a52;
-  --app-border-light: #3c5274;
-  --app-text: #f0fdf4;
-  --app-text-muted: #94a3b8;
-  --app-accent: #06b6d4;
-  --app-accent-hover: #0891b2;
-  --app-accent-text: #38bdf8;
-  --app-accent-subtle: rgba(6, 182, 212, 0.15);
-  --app-accent-border: rgba(56, 189, 248, 0.4);
+/* --------------------------------------------------------------------------
+   3. TAILWIND THEME BRIDGE
+   `@theme inline` emits utilities that resolve to the runtime CSS variables,
+   so a single token definition drives both plain CSS and Tailwind utilities.
+   Names are `sx`-prefixed to avoid overriding Tailwind defaults used by
+   existing screens (rounded-lg, text-sm, etc. stay untouched).
+   -------------------------------------------------------------------------- */
+@theme inline {
+  --font-sans: var(--sx-font-sans);
+  --font-mono: var(--sx-font-mono);
+
+  /* Surfaces */
+  --color-sx-bg: var(--sx-bg);
+  --color-sx-surface: var(--sx-surface-1);
+  --color-sx-surface-2: var(--sx-surface-2);
+  --color-sx-surface-3: var(--sx-surface-3);
+
+  /* Text */
+  --color-sx-text: var(--sx-text);
+  --color-sx-text-secondary: var(--sx-text-secondary);
+  --color-sx-text-muted: var(--sx-text-muted);
+
+  /* Accent */
+  --color-sx-accent: var(--sx-accent);
+  --color-sx-accent-hover: var(--sx-accent-hover);
+  --color-sx-accent-pressed: var(--sx-accent-pressed);
+  --color-sx-accent-soft: var(--sx-accent-soft);
+  --color-sx-accent-fg: var(--sx-accent-fg);
+  --color-sx-accent-text: var(--sx-accent-text);
+
+  /* Borders + focus */
+  --color-sx-border-subtle: var(--sx-border-subtle);
+  --color-sx-border: var(--sx-border);
+  --color-sx-border-strong: var(--sx-border-strong);
+  --color-sx-focus: var(--sx-focus);
+  --color-sx-focus-offset: var(--sx-focus-offset);
+
+  /* Interaction states */
+  --color-sx-input: var(--sx-input-bg);
+  --color-sx-input-border: var(--sx-input-border);
+  --color-sx-disabled: var(--sx-disabled-bg);
+  --color-sx-disabled-text: var(--sx-disabled-text);
+  --color-sx-selected: var(--sx-selected-bg);
+  --color-sx-selected-border: var(--sx-selected-border);
+
+  /* Status */
+  --color-sx-success: var(--sx-success);
+  --color-sx-success-soft: var(--sx-success-soft);
+  --color-sx-warning: var(--sx-warning);
+  --color-sx-warning-soft: var(--sx-warning-soft);
+  --color-sx-danger: var(--sx-danger);
+  --color-sx-danger-soft: var(--sx-danger-soft);
+  --color-sx-info: var(--sx-info);
+  --color-sx-info-soft: var(--sx-info-soft);
+  --color-sx-neutral: var(--sx-neutral);
+  --color-sx-neutral-soft: var(--sx-neutral-soft);
+
+  /* Radius */
+  --radius-sx-sm: var(--sx-radius-sm);
+  --radius-sx-md: var(--sx-radius-md);
+  --radius-sx-lg: var(--sx-radius-lg);
+  --radius-sx-xl: var(--sx-radius-xl);
+  --radius-sx-full: var(--sx-radius-full);
+
+  /* Elevation */
+  --shadow-sx-raised: var(--sx-shadow-raised);
+  --shadow-sx-overlay: var(--sx-shadow-overlay);
+
+  /* Motion */
+  --ease-sx-standard: var(--sx-ease-standard);
+  --ease-sx-emphasized: var(--sx-ease-emphasized);
+  --ease-sx-exit: var(--sx-ease-exit);
+
+  /* Type scale */
+  --text-sx-display: 2rem;
+  --text-sx-display--line-height: 1.1;
+  --text-sx-display--letter-spacing: -0.02em;
+  --text-sx-display--font-weight: 700;
+
+  --text-sx-title: 1.5rem;
+  --text-sx-title--line-height: 1.2;
+  --text-sx-title--letter-spacing: -0.015em;
+  --text-sx-title--font-weight: 650;
+
+  --text-sx-section: 1.125rem;
+  --text-sx-section--line-height: 1.3;
+  --text-sx-section--letter-spacing: -0.01em;
+  --text-sx-section--font-weight: 600;
+
+  --text-sx-body: 0.9375rem;
+  --text-sx-body--line-height: 1.55;
+
+  --text-sx-secondary: 0.8125rem;
+  --text-sx-secondary--line-height: 1.5;
+
+  --text-sx-caption: 0.75rem;
+  --text-sx-caption--line-height: 1.4;
+  --text-sx-caption--letter-spacing: 0.01em;
+
+  --text-sx-numeric: 0.8125rem;
+  --text-sx-numeric--line-height: 1.2;
 }
 
-/* Global Dynamic Theme Binding */
-body {
-  background-color: var(--app-bg) !important;
-  color: var(--app-text) !important;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  overscroll-behavior-y: none;
-  touch-action: manipulation;
-  transition: background-color 0.25s ease, color 0.25s ease;
+/* --------------------------------------------------------------------------
+   4. BASE LAYER
+   -------------------------------------------------------------------------- */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--sx-bg) !important;
+    color: var(--sx-text) !important;
+    font-family: var(--sx-font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    font-variation-settings: normal;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
+    touch-action: manipulation;
+    transition: background-color var(--sx-duration-base) var(--sx-ease-standard),
+      color var(--sx-duration-base) var(--sx-ease-standard);
+  }
+
+  /* Numeric/technical data always uses tabular Geist Mono */
+  .sx-numeric {
+    font-family: var(--sx-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background-color: var(--sx-accent);
+    color: var(--sx-accent-fg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sx-focus);
+    outline-offset: 2px;
+  }
 }
 
+/* --------------------------------------------------------------------------
+   4b. LEGACY COMPATIBILITY LAYER
+   Existing screens still use hardcoded Tailwind colour utilities. These
+   selectors remap them onto the semantic tokens so the whole app follows the
+   active theme during the transition. They are removed screen-by-screen in
+   later batches once each screen is migrated to the new primitives.
+   -------------------------------------------------------------------------- */
 [data-theme] .bg-\[\#080c16\] {
   background-color: var(--app-bg) !important;
 }
@@ -191,6 +490,34 @@ body {
   background: var(--app-border-light);
 }
 
+/* --------------------------------------------------------------------------
+   5. MOTION FOUNDATION
+   Restrained durations/easings only. Page-level choreography belongs to the
+   screen implementation batches.
+   -------------------------------------------------------------------------- */
+@layer utilities {
+  .sx-transition {
+    transition-duration: var(--sx-duration-base);
+    transition-timing-function: var(--sx-ease-standard);
+  }
+
+  .sx-transition-fast {
+    transition-duration: var(--sx-duration-fast);
+    transition-timing-function: var(--sx-ease-standard);
+  }
+
+  .sx-transition-slow {
+    transition-duration: var(--sx-duration-slow);
+    transition-timing-function: var(--sx-ease-emphasized);
+  }
+
+  /* Guaranteed 44dp primary touch target */
+  .sx-touch {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 /* Audio visualizer bar animations */
 @keyframes barBounce {
   0%, 100% { height: 6px; }
@@ -210,4 +537,20 @@ body {
 
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+
+/* --------------------------------------------------------------------------
+   6. REDUCED MOTION
+   Respect the OS preference: keep state changes instant, never animate.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }
