@@ -98,6 +98,9 @@ import {
   Download,
   Move,
 } from 'lucide-react';
+import { StudioWorkspaceHeader } from './studio/StudioWorkspaceHeader';
+import { StudioPanelNav, type StudioPanelId } from './studio/StudioPanelNav';
+import { PresetLibrary } from './studio/PresetLibrary';
 
 interface StudioViewProps {
   elements: StudioElement[];
@@ -105,6 +108,8 @@ interface StudioViewProps {
   onChangeOrientation: (orientation: CanvasOrientation) => void;
   onUpdateElements: (elements: StudioElement[]) => void;
   onSaveAsPreset: () => void;
+  /** Batch 7.2: which tool panel the workspace opens with (used by the Presets route). */
+  initialSidePanel?: StudioPanelId;
   // Shared Presets System integration
   presets?: StudioPreset[];
   activePresetId?: string;
@@ -179,6 +184,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   isModeBSelected = false,
   modeBStatus,
   isModeBMutationLocked = false,
+  initialSidePanel = 'properties',
   isModeBActionPending = false,
   onApplyLiveSceneToModeB,
   onUpdatePresetModeBSettings,
@@ -190,9 +196,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   // Studio Sub-Sections: 'properties' | 'elements' | 'sources' | 'presets' | 'media' | 'layers' | 'simulator' | 'marketplace'
-  const [activeSidePanel, setActiveSidePanel] = useState<
-    'properties' | 'elements' | 'sources' | 'presets' | 'media' | 'layers' | 'simulator' | 'marketplace'
-  >('properties');
+  const [activeSidePanel, setActiveSidePanel] = useState<StudioPanelId>(initialSidePanel);
 
   // Sources Catalog Filter & Search States
   const [sourceCategoryFilter, setSourceCategoryFilter] = useState<'all' | 'basic' | 'dynamic'>('all');
@@ -268,7 +272,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [newPresetDescInput, setNewPresetDescInput] = useState('');
 
   // Preset Selector (entry screen before canvas)
-  const [showPresetSelector, setShowPresetSelector] = useState(true);
+  const [showPresetSelector, setShowPresetSelector] = useState(false);
   const [selectorCreateModalOpen, setSelectorCreateModalOpen] = useState(false);
   const [selectorPresetName, setSelectorPresetName] = useState('');
   const [selectorCategory, setSelectorCategory] = useState<PresetCategory>('hp_screen');
@@ -2595,83 +2599,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
       ) : (
       /* === MAIN STUDIO CANVAS VIEW === */
       <>
-      {/* Studio Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-blue-400 uppercase">
-            <span>Workspace Visual Tunggal</span>
-            <span className="text-slate-500">·</span>
-            <span>SYNTXRR STUDIO</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2 mt-0.5">
-            <Tv className="w-6 h-6 text-blue-400" />
-            Studio Produksi &amp; Presets
-          </h1>
-          <p className="text-xs text-slate-400">
-            Pusat penyusunan visual siaran, preset bersama, import media lokal, multi-kamera, dan uji live pipeline
-          </p>
-        </div>
-
-        {/* Canvas Ratio & Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Orientation Selector */}
-          <div className="flex items-center p-1 bg-[#0e1626] rounded-xl border border-slate-800 text-xs font-semibold">
-            <button
-              type="button"
-              disabled={isModeBMutationLocked}
-              onClick={() => onChangeOrientation('9:16')}
-              className={`px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                canvasOrientation === '9:16'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              9:16 Vertikal
-            </button>
-            <button
-              type="button"
-              disabled={isModeBMutationLocked}
-              onClick={() => onChangeOrientation('16:9')}
-              className={`px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                canvasOrientation === '16:9'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              16:9 Horisontal
-            </button>
-            <button
-              type="button"
-              disabled={isModeBMutationLocked}
-              onClick={() => onChangeOrientation('1:1')}
-              className={`px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                canvasOrientation === '1:1'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              1:1 Kotak
-            </button>
-          </div>
-
-          <button
-            type="button"
-            disabled={isModeBMutationLocked}
-            onClick={onSaveAsPreset}
-            className="min-h-[38px] px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Sparkles className="w-4 h-4" /> Simpan Preset
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowPresetSelector(true)}
-            className="min-h-[38px] px-3.5 rounded-xl bg-[#1e293b] hover:bg-[#334155] text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-            title="Ganti Preset"
-          >
-            <Layout className="w-4 h-4" /> Ganti Preset
-          </button>
-        </div>
-      </div>
+      {/* Studio workspace header — Batch 7.2 */}
+      <StudioWorkspaceHeader
+        presetName={activePreset?.name ?? null}
+        elementCount={elements.length}
+        orientation={canvasOrientation}
+        onChangeOrientation={onChangeOrientation}
+        locked={isModeBMutationLocked}
+        canUndo={history.length > 0}
+        canRedo={redoStack.length > 0}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onSaveAsPreset={onSaveAsPreset}
+        onOpenPresetLibrary={() => setActiveSidePanel('presets')}
+      />
 
       {/* Mode B Active Status / Lock / Live Apply Banner */}
       {isModeBSelected && isModeBMutationLocked && (
@@ -2972,108 +2913,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
         {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
         <div className="lg:col-span-5 bg-[#0a0f1d] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4">
-          {/* Main Module Tabs (Properties, Elements, Sources, Presets, Media, Layers, Simulator, Marketplace) */}
-          <div
-            className="flex overflow-x-auto no-scrollbar gap-1 p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[11px] font-semibold select-none"
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('properties')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'properties'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Sliders className="w-3.5 h-3.5 shrink-0" />
-              <span>Properti</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('elements')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'elements'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span>Elemen</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('sources')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'sources'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Box className="w-3.5 h-3.5 shrink-0" />
-              <span>Sumber</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('presets')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'presets'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-              <span>Preset</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('media')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'media'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
-              <span>Media</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('layers')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'layers'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 shrink-0" />
-              <span>Lapisan</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('simulator')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'simulator'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Uji Live</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('marketplace')}
-              className={`shrink-0 px-3 py-2 min-w-[70px] sm:min-w-[78px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'marketplace'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <ShoppingBag className="w-3.5 h-3.5 shrink-0 text-purple-400" />
-              <span>Marketplace</span>
-            </button>
-          </div>
+          {/* Studio panel navigation — Batch 7.2 */}
+          <StudioPanelNav active={activeSidePanel} onChange={setActiveSidePanel} />
 
           {/* TAB 1: CONTEXTUAL PROPERTIES PANEL */}
           {activeSidePanel === 'properties' && (
@@ -4178,429 +4019,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           )}
 
-          {/* TAB 3: ONE SHARED PRESET SYSTEM */}
+          {/* TAB 3: SHARED PRESET LIBRARY — one implementation for Studio and the Presets route */}
           {activeSidePanel === 'presets' && (
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <FolderOpen className="w-4 h-4 text-blue-400" /> Pustaka Preset Bersama
-                  </h3>
-                  <p className="text-[10px] text-slate-400">
-                    Pilih preset untuk langsung diterapkan ke canvas atau simpan scene aktif
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={isModeBMutationLocked}
-                  onClick={() => setNewPresetModalOpen(true)}
-                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Plus className="w-3 h-3" /> Baru
-                </button>
-              </div>
-
-              {/* Preset Category Filter */}
-              <div className="flex items-center p-1 bg-[#080c16] rounded-xl border border-slate-800 text-[10px] font-semibold">
-                {(['all', 'hp_screen', 'landscape', 'favorites'] as PresetCategory[]).map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setPresetFilterCategory(cat)}
-                    className={`flex-1 py-1 rounded-md transition-colors capitalize ${
-                      presetFilterCategory === cat ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {cat === 'all' ? 'Semua' : cat === 'hp_screen' ? '9:16 HP' : cat === 'landscape' ? '16:9 PC' : 'Favorit'}
-                  </button>
-                ))}
-              </div>
-
-              {/* Presets List */}
-              <div className="space-y-2">
-                {filteredPresets.map((preset) => {
-                  const isActive = preset.id === activePresetId;
-
-                  return (
-                    <div
-                      key={preset.id}
-                      className={`p-3 rounded-xl border transition-all ${
-                        isActive
-                          ? 'bg-blue-950/60 border-blue-500 shadow-md ring-1 ring-blue-500/50'
-                          : 'bg-[#080c16] border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          {editingPresetIdInSidebar === preset.id ? (
-                            <div className="flex items-center space-x-1.5 my-1">
-                              <input
-                                type="text"
-                                value={editingNameInSidebar}
-                                onChange={(e) => setEditingNameInSidebar(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSidebarSaveRename(preset.id);
-                                  if (e.key === 'Escape') setEditingPresetIdInSidebar(null);
-                                }}
-                                className="flex-1 bg-[#0e1626] border border-blue-500 rounded px-2 py-0.5 text-xs text-white focus:outline-none font-bold"
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleSidebarSaveRename(preset.id)}
-                                className="px-2 py-0.5 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-500 font-bold shrink-0"
-                              >
-                                Simpan
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingPresetIdInSidebar(null)}
-                                className="px-1.5 py-0.5 bg-slate-800 text-slate-300 text-[10px] rounded hover:bg-slate-700 shrink-0"
-                              >
-                                Batal
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-xs text-white truncate">{preset.name}</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingPresetIdInSidebar(preset.id);
-                                  setEditingNameInSidebar(preset.name);
-                                }}
-                                className="text-slate-500 hover:text-blue-400 p-0.5"
-                                title="Ganti Nama Preset"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                              </button>
-                              <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono text-[9px]">
-                                {preset.canvasOrientation}
-                              </span>
-                              {isActive && (
-                                <span className="px-1.5 py-0.2 rounded bg-blue-500/30 text-blue-300 font-bold text-[8px]">
-                                  Aktif
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          <p className="text-[10px] text-slate-400 mt-1 line-clamp-1">{preset.description}</p>
-                          <div className="text-[9px] text-slate-500 mt-0.5">
-                            {preset.elements.length} elemen visual tersimpan
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          {onToggleFavoritePreset && (
-                            <button
-                              type="button"
-                              onClick={() => onToggleFavoritePreset(preset.id)}
-                              className={`p-1.5 rounded-lg border text-xs ${
-                                preset.isFavorite ? 'text-amber-400 border-amber-500/30 bg-amber-950/30' : 'text-slate-500 border-slate-800'
-                              }`}
-                              title="Favorit"
-                            >
-                              <Star className="w-3.5 h-3.5 fill-current" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            disabled={isStrictModeBLocked || isModeBActionPending}
-                            onClick={() => handleApplyPresetToScene(preset)}
-                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            Terapkan
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Active Preset Mode B Background & Screensaver Settings */}
-              {activePreset && onUpdatePresetModeBSettings && (() => {
-                const screensaver = toStudioScreensaverSettings(activePreset.screensaver);
-                const savedLocalVisualAssets = mediaLibrary.filter((m) => Boolean(m.assetId));
-                const compatibleScreensaverAssets = savedLocalVisualAssets.filter((m) =>
-                  isSupportedScreensaverAssetSelection(
-                    screensaver.mediaType === 'video' ? 'video' : 'image',
-                    m.type,
-                    m.mimeType || '',
-                  ),
-                );
-                const readTransitionType = (t: unknown): 'fade' | 'cut' => {
-                  if (t === 'cut' || t === 'none') return 'cut';
-                  if (t && typeof t === 'object' && (t as any).type === 'cut') return 'cut';
-                  return 'fade';
-                };
-
-                return (
-                  <div className="p-3.5 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-emerald-400">
-                        Pengaturan Mode B Preset Aktif
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-400 truncate max-w-[140px]">
-                        {activePreset.name}
-                      </span>
-                    </div>
-
-                    {/* Background Studio Media */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-300 block">
-                        Background Studio (Opsional)
-                      </label>
-                      <select
-                        disabled={isStrictModeBLocked}
-                        value={activePreset.backgroundUri || ''}
-                        onChange={(e) =>
-                          void onUpdatePresetModeBSettings(activePreset.id, {
-                            backgroundUri: e.target.value || undefined,
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
-                      >
-                        <option value="">Tanpa Background Studio</option>
-                        {savedLocalVisualAssets.map((item) => {
-                          const uri = createStudioMediaAssetUri(item.assetId!) || '';
-                          return (
-                            <option key={item.id} value={uri}>
-                              {item.type === 'video' ? '[Video]' : '[Gambar]'} {item.name}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
-
-                    {/* Layar Tunggu / Host Wait */}
-                    <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-[11px] font-bold text-white">Layar Tunggu (Screensaver)</div>
-                          <div className="text-[10px] text-slate-400">
-                            Ditampilkan saat mode Layar Tunggu diaktifkan ketika LIVE.
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={isStrictModeBLocked}
-                          onClick={() =>
-                            void onUpdatePresetModeBSettings(activePreset.id, {
-                              screensaver: { ...screensaver, on: !screensaver.on },
-                            })
-                          }
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors disabled:opacity-50 ${
-                            screensaver.on
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-slate-800 text-slate-400'
-                          }`}
-                        >
-                          {screensaver.on ? 'Siap Pakai' : 'Standby'}
-                        </button>
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
-                          Teks Layar Tunggu
-                        </label>
-                        <input
-                          type="text"
-                          disabled={isStrictModeBLocked}
-                          value={screensaver.text || ''}
-                          onChange={(e) =>
-                            void onUpdatePresetModeBSettings(activePreset.id, {
-                              screensaver: { ...screensaver, text: e.target.value },
-                            })
-                          }
-                          placeholder={MODE_B_SCREENSAVER_DEFAULT_TEXT}
-                          className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
-                            Jenis Media
-                          </label>
-                          <select
-                            disabled={isStrictModeBLocked}
-                            value={screensaver.mediaType === 'video' ? 'video' : 'image'}
-                            onChange={(e) =>
-                              void onUpdatePresetModeBSettings(activePreset.id, {
-                                screensaver: {
-                                  ...screensaver,
-                                  mediaType: e.target.value === 'video' ? 'video' : 'image',
-                                  media: '',
-                                },
-                              })
-                            }
-                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
-                          >
-                            <option value="image">Gambar (PNG/JPG/GIF)</option>
-                            <option value="video">Video MP4</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
-                            Asset Lokal
-                          </label>
-                          <select
-                            disabled={isStrictModeBLocked}
-                            value={screensaver.media || ''}
-                            onChange={(e) =>
-                              void onUpdatePresetModeBSettings(activePreset.id, {
-                                screensaver: { ...screensaver, media: e.target.value },
-                              })
-                            }
-                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
-                          >
-                            <option value="">Teks saja</option>
-                            {compatibleScreensaverAssets.map((item) => {
-                              const uri = createStudioMediaAssetUri(item.assetId!) || '';
-                              return (
-                                <option key={item.id} value={uri}>
-                                  {item.name}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </div>
-                      </div>
-
-                      {screensaver.mediaType === 'video' && (
-                        <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            disabled={isStrictModeBLocked}
-                            checked={screensaver.mediaSound === true}
-                            onChange={(e) =>
-                              void onUpdatePresetModeBSettings(activePreset.id, {
-                                screensaver: { ...screensaver, mediaSound: e.target.checked },
-                              })
-                            }
-                            className="accent-emerald-500"
-                          />
-                          <span>Putar audio video layar tunggu</span>
-                        </label>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
-                            Transisi Masuk
-                          </label>
-                          <select
-                            disabled={isStrictModeBLocked}
-                            value={readTransitionType(screensaver.enter)}
-                            onChange={(e) =>
-                              void onUpdatePresetModeBSettings(activePreset.id, {
-                                screensaver: {
-                                  ...screensaver,
-                                  enter:
-                                    e.target.value === 'cut'
-                                      ? { type: 'cut', duration: 0 }
-                                      : { type: 'fade', duration: MODE_B_SCREENSAVER_DEFAULT_FADE_MS },
-                                },
-                              })
-                            }
-                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
-                          >
-                            <option value="fade">Fade (300ms)</option>
-                            <option value="cut">Cut (Instan)</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-300 block mb-0.5">
-                            Transisi Keluar
-                          </label>
-                          <select
-                            disabled={isStrictModeBLocked}
-                            value={readTransitionType(screensaver.exit)}
-                            onChange={(e) =>
-                              void onUpdatePresetModeBSettings(activePreset.id, {
-                                screensaver: {
-                                  ...screensaver,
-                                  exit:
-                                    e.target.value === 'cut'
-                                      ? { type: 'cut', duration: 0 }
-                                      : { type: 'fade', duration: MODE_B_SCREENSAVER_DEFAULT_FADE_MS },
-                                },
-                              })
-                            }
-                            className="w-full px-2 py-1.5 bg-[#0e1626] border border-slate-800 rounded-lg text-xs text-white disabled:opacity-50"
-                          >
-                            <option value="fade">Fade (300ms)</option>
-                            <option value="cut">Cut (Instan)</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Modal Save Scene as New Preset */}
-              {newPresetModalOpen && (
-                <div className="p-3.5 rounded-xl bg-[#080c16] border border-blue-900/60 space-y-3">
-                  <div className="text-xs font-bold text-blue-400">Simpan Scene Sebagai Preset Baru</div>
-                  <div>
-                    <label className="text-[10px] text-slate-300">Nama Preset</label>
-                    <input
-                      type="text"
-                      value={newPresetNameInput}
-                      onChange={(e) => setNewPresetNameInput(e.target.value)}
-                      placeholder="Contoh: Mobile Legends Pro 9:16"
-                      className="w-full mt-0.5 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-300">Keterangan Singkat</label>
-                    <input
-                      type="text"
-                      value={newPresetDescInput}
-                      onChange={(e) => setNewPresetDescInput(e.target.value)}
-                      placeholder="Deskripsi tata letak elemen..."
-                      className="w-full mt-0.5 px-3 py-1.5 bg-[#0e1626] border border-slate-800 rounded text-xs text-white"
-                    />
-                  </div>
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setNewPresetModalOpen(false)}
-                      className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs"
-                    >
-                      Batal
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (newPresetNameInput.trim()) {
-                          if (onCreatePreset) {
-                            onCreatePreset({
-                              name: newPresetNameInput.trim(),
-                              category: canvasOrientation === '9:16' ? 'hp_screen' : canvasOrientation === '16:9' ? 'landscape' : 'portrait',
-                              canvasOrientation,
-                              elements: ensureUniqueElementIds([...elements]),
-                              isFavorite: false,
-                              description: newPresetDescInput.trim() || 'Preset kustom Studio',
-                              thumbnailColor: '#2563EB',
-                            });
-                          } else {
-                            onSaveAsPreset();
-                          }
-                          setNewPresetNameInput('');
-                          setNewPresetDescInput('');
-                          setNewPresetModalOpen(false);
-                        }
-                      }}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold"
-                    >
-                      Simpan
-                    </button>
-                  </div>
-                </div>
-              )}
+            <div className="max-h-[520px] overflow-y-auto pr-1">
+              <PresetLibrary
+                presets={presets || []}
+                activePresetId={activePresetId}
+                variant="panel"
+                onSelectPreset={onSelectPreset}
+                onCreatePreset={onCreatePreset}
+                onDuplicatePreset={onDuplicatePreset}
+                onDeletePreset={onDeletePreset}
+                onRenamePreset={onRenamePreset}
+                onToggleFavorite={onToggleFavoritePreset}
+                onCanImportPreset={async () => !isModeBMutationLocked}
+              />
             </div>
           )}
 
