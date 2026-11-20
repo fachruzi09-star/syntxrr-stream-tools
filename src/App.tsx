@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  ActiveNav,
   NavigationTab,
+  NavigationRequest,
+  LegacyCompatibilitySubview,
   AppSettings,
   Scene,
   SongRequest,
@@ -69,7 +70,6 @@ import {
 } from './services/tiktokAuthService';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
-import { NavigationDrawerModal } from './components/NavigationDrawerModal';
 import { AlertBannerOverlay } from './components/AlertBannerOverlay';
 import { ModeLauncherModal } from './components/ModeLauncherModal';
 import { DashboardView } from './components/DashboardView';
@@ -138,24 +138,30 @@ import { applyTheme, DEFAULT_APP_THEME } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
 import { InAppNoticeBanner } from './components/InAppNoticeBanner';
 import { showInAppNotice } from './services/uiNotice';
+import {
+  resolveBackNavigationStep,
+  resolveNavigationTarget,
+} from './services/navigationModel';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeNav, setActiveNav] = useState<NavigationTab>('dashboard');
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [legacySubview, setLegacySubview] = useState<LegacyCompatibilitySubview | null>(null);
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
 
   // App Settings
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
   /**
-   * Navigation wrapper: gives the haptic feedback toggle a real effect by applying it to
-   * primary navigation. Nothing vibrates while the setting is off or the device cannot vibrate.
+   * Centralized navigation handler for both the six primary menus and legacy compatibility routes.
+   * Navigating directly to a primary menu always clears any temporary legacy subview.
    */
   const handleNavigate = useCallback(
-    (nav: NavigationTab) => {
+    (route: NavigationRequest) => {
       triggerHaptic(settings, 'light');
-      setActiveNav(nav);
+      const target = resolveNavigationTarget(route);
+      setActiveNav(target.primaryTab);
+      setLegacySubview(target.legacySubview);
     },
     [settings]
   );
@@ -598,13 +604,9 @@ export default function App() {
   // Android Native Hardware Back Button Handling (Capacitor)
   useEffect(() => {
     const backListenerPromise = CapApp.addListener('backButton', () => {
-      // 1. If confirmation modal, drawer, or alert is open, dismiss it
+      // 1. If confirmation modal, mode modal, or alert is open, dismiss it
       if (pendingConfirmModal) {
         setPendingConfirmModal(null);
-        return;
-      }
-      if (isDrawerOpen) {
-        setIsDrawerOpen(false);
         return;
       }
       if (isModeModalOpen) {
@@ -615,9 +617,15 @@ export default function App() {
         setActiveFloatingAlert(null);
         return;
       }
-      // 2. If in secondary navigation, navigate back to dashboard
-      if (activeNav !== 'dashboard') {
+      // 2. Step back cleanly: legacy subview -> owner primary menu -> dashboard -> exit
+      const step = resolveBackNavigationStep({ activeNav, legacySubview });
+      if (step.action === 'clear_legacy_subview') {
+        setLegacySubview(null);
+        return;
+      }
+      if (step.action === 'navigate_dashboard') {
         setActiveNav('dashboard');
+        setLegacySubview(null);
         return;
       }
       // 3. If on dashboard, exit app
@@ -627,7 +635,7 @@ export default function App() {
     return () => {
       backListenerPromise.then((handle) => handle.remove()).catch(() => {});
     };
-  }, [pendingConfirmModal, isDrawerOpen, isModeModalOpen, activeFloatingAlert, activeNav]);
+  }, [pendingConfirmModal, isModeModalOpen, activeFloatingAlert, activeNav, legacySubview]);
 
   const activePreset = presets.find((p) => p.id === activePresetId) || presets[0] || null;
   const isModeBSelected = isModeBOperatingMode(settings.operatingMode);
@@ -2641,7 +2649,6 @@ export default function App() {
     );
   }
 
-  const pendingRequestsCount = combinedUnifiedQueue.filter((s) => s.status === 'pending' || s.status === 'approved').length;
   const modeAHonestStatus = buildModeAHonestStatus({
     account: tiktokAccount,
     connector: tiktokStatus,
@@ -2713,7 +2720,7 @@ export default function App() {
 
   return (
     <I18nProvider language={settings.language || 'id-ID'}>
-      <div className="min-h-screen bg-[#080c16] text-slate-100 flex flex-col font-sans">
+      <div className="min-h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col font-sans overflow-x-clip">
       {/* Top Header Bar */}
       <Header
         activeNav={activeNav}
@@ -2723,7 +2730,6 @@ export default function App() {
         honestStatusTone={headerStatusTone}
         onNavigate={handleNavigate}
         onOpenModeModal={() => setIsModeModalOpen(true)}
-        onOpenDrawer={() => setIsDrawerOpen(true)}
       />
 
       {/* In-app Confirmation Modal (Mode Switch, Confirm End Live & Reset Defaults) */}
@@ -2783,17 +2789,8 @@ export default function App() {
         onSelectMode={handleSelectMode}
       />
 
-      {/* Mobile Drawer Navigation Modal for All 9 Modules */}
-      <NavigationDrawerModal
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        activeNav={activeNav}
-        onNavigate={handleNavigate}
-        pendingMusicCount={pendingRequestsCount}
-      />
-
       {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3.5 pt-4 pb-24 sm:px-6 sm:pt-6 lg:px-8 xl:pb-8">
         {modeBNoticeBanner && (
           <div className="mb-4 p-3 rounded-xl bg-amber-950/50 border border-amber-600/60 text-xs text-amber-200 flex items-center justify-between gap-3">
             <span>{modeBNoticeBanner}</span>
@@ -2834,7 +2831,37 @@ export default function App() {
           />
         )}
 
-        {(activeNav === 'studio' || (activeNav as string) === 'overlay') && (
+        {activeNav === 'studio' && legacySubview === 'sources' && (
+          <SourcesLibraryView
+            onAddElementToStudio={handleAddSingleElementToStudio}
+            onNavigateToStudio={() => handleNavigate('studio')}
+          />
+        )}
+
+        {activeNav === 'studio' && legacySubview === 'presets' && (
+          <PresetManagerView
+            presets={presets}
+            activePresetId={activePresetId}
+            onSelectPreset={handleSelectPreset}
+            onCreatePreset={handleCreatePreset}
+            onCanImportPreset={guardModeBStructuralPresetAction}
+            onDuplicatePreset={handleDuplicatePreset}
+            onDeletePreset={handleDeletePreset}
+            onRenamePreset={handleRenamePreset}
+            onToggleFavorite={handleToggleFavoritePreset}
+            onNavigateToStudio={() => handleNavigate('studio')}
+          />
+        )}
+
+        {activeNav === 'studio' && legacySubview === 'marketplace' && (
+          <MarketplaceView
+            items={marketplaceItems}
+            onInstallElements={handleInstallMarketplaceElements}
+            onNavigateToStudio={() => handleNavigate('studio')}
+          />
+        )}
+
+        {activeNav === 'studio' && legacySubview === null && (
           <StudioView
             elements={studioElements}
             canvasOrientation={settings.canvasOrientation}
@@ -2862,41 +2889,7 @@ export default function App() {
           />
         )}
 
-        {activeNav === 'sources' && (
-          <SourcesLibraryView
-            onAddElementToStudio={handleAddSingleElementToStudio}
-            onNavigateToStudio={() => setActiveNav('studio')}
-          />
-        )}
-
-        {(activeNav === 'presets' || (activeNav as string) === 'scenes') && (
-          <PresetManagerView
-            presets={presets}
-            activePresetId={activePresetId}
-            onSelectPreset={handleSelectPreset}
-            onCreatePreset={handleCreatePreset}
-            onCanImportPreset={guardModeBStructuralPresetAction}
-            onDuplicatePreset={handleDuplicatePreset}
-            onDeletePreset={handleDeletePreset}
-            onRenamePreset={handleRenamePreset}
-            onToggleFavorite={handleToggleFavoritePreset}
-            onNavigateToStudio={() => setActiveNav('studio')}
-          />
-        )}
-
-        {(activeNav === 'live_center' || (activeNav as string) === 'alerts') && (
-        <LiveCenterView
-          ttsConfig={ttsConfig}
-          onUpdateTTSConfig={handleUpdateTTSConfig}
-          soundboardItems={soundboardItems}
-          onSoundboardItemsChange={async (items) => {
-            setSoundboardItems(items);
-            await StorageService.saveSoundboard(items);
-          }}
-        />
-        )}
-
-        {activeNav === 'music' && (
+        {activeNav === 'live_center' && legacySubview === 'music' && (
           <MusicCenterView
             // Stage 1 Backwards Compatible Props
             songRequests={songRequests}
@@ -2917,17 +2910,21 @@ export default function App() {
             onAddLocalFiles={handleAddLocalFiles}
             onRemoveLocalTrack={handleRemoveLocalTrack}
             settings={settings}
-            onNavigateToSettings={() => setActiveNav('settings')}
+            onNavigateToSettings={() => handleNavigate('settings')}
             onUpdateSpotifyToken={handleUpdateSpotifyToken}
             songRequestState={srState}
           />
         )}
 
-        {activeNav === 'marketplace' && (
-          <MarketplaceView
-            items={marketplaceItems}
-            onInstallElements={handleInstallMarketplaceElements}
-            onNavigateToStudio={() => setActiveNav('studio')}
+        {activeNav === 'live_center' && legacySubview === null && (
+          <LiveCenterView
+            ttsConfig={ttsConfig}
+            onUpdateTTSConfig={handleUpdateTTSConfig}
+            soundboardItems={soundboardItems}
+            onSoundboardItemsChange={async (items) => {
+              setSoundboardItems(items);
+              await StorageService.saveSoundboard(items);
+            }}
           />
         )}
 
@@ -2981,8 +2978,6 @@ export default function App() {
       <BottomNav
         activeNav={activeNav}
         onNavigate={handleNavigate}
-        onOpenDrawer={() => setIsDrawerOpen(true)}
-        pendingRequestsCount={pendingRequestsCount}
       />
 
       {/* Fallback web: overlay native hanya ada di Android. Di Android toolbar/panel

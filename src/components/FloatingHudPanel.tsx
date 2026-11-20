@@ -18,8 +18,8 @@
  *   soundboard, musik, atau mixer yang diduplikasi di sini.
  * - Tidak mengarang kemampuan native. Mode A tidak pernah menampilkan kontrol
  *   start/pause/stop TikTok LIVE karena siaran tetap dipegang aplikasi TikTok.
- * - Mode B tidak menampilkan kontrol encoder sebagai "berfungsi" selama pipeline
- *   RTMP belum ada.
+ * - Mode B menggunakan native RTMP encoder pada APK Android; panel fallback web
+ *   tidak dapat menjalankan kontrol encoder native tersebut.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -296,13 +296,14 @@ export const FloatingHudPanel: React.FC<FloatingHudPanelProps> = ({
                   {companionRunning ? 'Hentikan Companion' : 'Jalankan Companion'}
                 </button>
                 {!isNativeAndroid && (
-                  <p className="text-[10px] text-slate-500">Companion native hanya tersedia di APK Android.</p>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Mode A Companion memerlukan APK Android native. Tampilan web/preview tidak dapat menjalankan layanan overlay native.
+                  </p>
                 )}
               </>
             ) : (
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Mode B memerlukan encoder RTMP yang belum tersedia, jadi kontrol LIVE tidak
-                ditampilkan sebagai berfungsi. Tidak ada tombol start/stop palsu di sini.
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Mode B menggunakan native RTMP encoder pada APK Android. Tampilan web/preview tidak dapat menjalankan kontrol encoder native.
               </p>
             )}
           </div>

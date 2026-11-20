@@ -54,14 +54,27 @@ export type HudPosition = 'left' | 'right';
 export type NavigationTab =
   | 'dashboard'
   | 'studio'
+  | 'live_center'
+  | 'remote_deck'
+  | 'integrations'
+  | 'settings';
+
+export type LegacyNavigationRoute =
   | 'sources'
   | 'presets'
-  | 'live_center'
-  | 'music'
+  | 'scenes'
   | 'marketplace'
-  | 'integrations'
-  | 'settings'
-  | 'remote_deck';
+  | 'music'
+  | 'overlay'
+  | 'alerts';
+
+export type NavigationRequest = NavigationTab | LegacyNavigationRoute;
+
+export type LegacyCompatibilitySubview =
+  | 'sources'
+  | 'presets'
+  | 'marketplace'
+  | 'music';
 
 // Alias for backwards compatibility
 export type ActiveNav = NavigationTab;

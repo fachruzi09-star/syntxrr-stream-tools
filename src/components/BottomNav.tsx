@@ -13,37 +13,30 @@ import {
 interface BottomNavProps {
   activeNav: NavigationTab;
   onNavigate: (nav: NavigationTab) => void;
-  onOpenDrawer?: () => void;
-  pendingRequestsCount?: number;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({
-  activeNav,
-  onNavigate,
-  onOpenDrawer,
-  pendingRequestsCount = 0,
-}) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ activeNav, onNavigate }) => {
   const { t } = useTranslation();
+
   const primaryTabs: {
     id: NavigationTab;
     label: string;
     icon: React.ElementType;
-    badge?: number;
   }[] = [
-    { id: 'dashboard', label: t('nav.dashboard', 'Dashboard'), icon: LayoutDashboard },
-    { id: 'studio', label: t('nav.studio', 'Studio'), icon: Tv },
-    { id: 'live_center', label: t('nav.live_center', 'Live'), icon: Radio },
-    { id: 'remote_deck', label: t('nav.remote_deck', 'Deck'), icon: Smartphone },
-    { id: 'integrations', label: t('nav.integrations', 'Integrasi'), icon: Plug },
-    { id: 'settings', label: t('nav.settings', 'Settings'), icon: Settings },
+    { id: 'dashboard', label: t('nav.dock.home', 'Home'), icon: LayoutDashboard },
+    { id: 'studio', label: t('nav.dock.studio', 'Studio'), icon: Tv },
+    { id: 'live_center', label: t('nav.dock.live', 'Live'), icon: Radio },
+    { id: 'remote_deck', label: t('nav.dock.deck', 'Deck'), icon: Smartphone },
+    { id: 'integrations', label: t('nav.dock.connect', 'Connect'), icon: Plug },
+    { id: 'settings', label: t('nav.dock.config', 'Config'), icon: Settings },
   ];
 
   return (
     <nav
       aria-label="Navigasi bawah mobile"
-      className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080c16]/95 backdrop-blur-lg border-t border-slate-800/90 pb-safe"
+      className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--app-surface)]/95 backdrop-blur-lg border-t border-[var(--app-border)] pb-safe shadow-[0_-10px_28px_-14px_rgba(0,0,0,0.62)]"
     >
-      <div className="grid grid-cols-6 items-center h-14 px-1 max-w-lg mx-auto">
+      <div className="grid grid-cols-6 items-center h-14 px-1 max-w-xl mx-auto">
         {primaryTabs.map((item) => {
           const Icon = item.icon;
           const isActive = activeNav === item.id;
@@ -51,33 +44,39 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => onNavigate(item.id)}
-              className={`relative flex flex-col items-center justify-center min-h-[44px] py-1 transition-colors rounded-lg px-0.5 ${
-                isActive ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'
+              aria-current={isActive ? 'page' : undefined}
+              className={`relative flex flex-col items-center justify-center w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-[9px] transition-colors ${
+                isActive
+                  ? 'text-[var(--app-accent-text)]'
+                  : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
-              <div className="relative">
+              {isActive && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 w-6 h-[2.5px] rounded-full bg-[var(--app-accent)]"
+                />
+              )}
+              <div
+                className={`flex items-center justify-center w-8 h-6 rounded-md transition-colors ${
+                  isActive ? 'bg-[var(--app-accent-soft)]' : 'bg-transparent'
+                }`}
+              >
                 <Icon
-                  className={`w-4 h-4 sm:w-5 sm:h-5 transition-transform ${
-                    isActive ? 'scale-110 text-blue-400 stroke-[2.2]' : 'stroke-[1.8]'
+                  className={`w-[17px] h-[17px] transition-transform duration-150 ${
+                    isActive ? 'scale-105 text-[var(--app-accent-text)] stroke-[2.2]' : 'stroke-[1.8]'
                   }`}
                 />
-                {item.badge !== undefined && item.badge > 0 && (
-                  <span className="absolute -top-1 -right-2 px-1 text-[8px] font-bold bg-blue-600 text-white rounded-full leading-tight">
-                    {item.badge}
-                  </span>
-                )}
               </div>
               <span
-                className={`text-[8.5px] sm:text-[10px] tracking-tight mt-0.5 truncate max-w-full text-center ${
-                  isActive ? 'font-semibold text-blue-300' : 'font-medium'
+                className={`text-[10px] leading-tight tracking-tight mt-0.5 truncate max-w-full text-center ${
+                  isActive ? 'font-bold text-[var(--app-accent-text)]' : 'font-medium'
                 }`}
               >
                 {item.label}
               </span>
-              {isActive && (
-                <span className="absolute bottom-0 w-5 sm:w-6 h-0.5 bg-blue-500 rounded-full" />
-              )}
             </button>
           );
         })}
@@ -85,5 +84,3 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     </nav>
   );
 };
-
-
