@@ -1,301 +1,157 @@
-import {
-  OperatingMode,
-  AppSettings,
-  isModeAOperatingMode,
-  isModeBOperatingMode,
-} from '../types';
+import React from 'react';
+import { X } from 'lucide-react';
+import { AppSettings, OperatingMode, isModeAOperatingMode } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
-import {
-  X,
-  Layers,
-  Radio,
-  Check,
-  Video,
-  Mic,
-  Monitor,
-  Flame,
-  Battery,
-  Cpu,
-  Info,
-} from 'lucide-react';
+import { Icon } from './ui/Icon';
+import { Button } from './ui/Button';
+import { StatusDot } from './ui/StatusDot';
 
 interface ModeLauncherModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentMode: OperatingMode;
-  settings: AppSettings;
-  onSelectMode: (mode: OperatingMode) => void;
+  /** Retained for API compatibility — this sheet explains, it no longer switches. */
+  settings?: AppSettings;
+  onSelectMode?: (mode: OperatingMode) => void;
 }
 
+/**
+ * Informational sheet explaining the two operating modes.
+ *
+ * It is no longer a second mode selector: switching happens only through the
+ * Dashboard selector, so this sheet reports the current mode and closes.
+ */
 export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
   isOpen,
   onClose,
   currentMode,
-  settings,
-  onSelectMode,
 }) => {
-  const { t } = useTranslation();
+  const { isEnglish } = useTranslation();
   if (!isOpen) return null;
 
+  const isModeA = isModeAOperatingMode(currentMode);
+
+  const modes = [
+    {
+      id: 'a' as const,
+      name: 'Mode A',
+      title: isEnglish ? 'TikTok LIVE Companion' : 'Kompanion TikTok LIVE',
+      active: isModeA,
+      summary: isEnglish
+        ? 'You broadcast with the official TikTok app. SYNTXRR reads LIVE activity and runs companion tools on top of it.'
+        : 'Anda menyiarkan dengan aplikasi TikTok resmi. SYNTXRR membaca aktivitas LIVE dan menjalankan alat kompanion di atasnya.',
+      needs: isEnglish
+        ? ['TikTok target @username', 'Optional account link', 'Overlay permission for the HUD']
+        : ['Target @username TikTok', 'Penautan akun (opsional)', 'Izin overlay untuk HUD'],
+      doesNot: isEnglish
+        ? 'SYNTXRR cannot start, pause or stop the official TikTok LIVE broadcast.'
+        : 'SYNTXRR tidak dapat memulai, menjeda, atau menghentikan siaran LIVE TikTok resmi.',
+    },
+    {
+      id: 'b' as const,
+      name: 'Mode B',
+      title: isEnglish ? 'RTMP Streaming Encoder' : 'Encoder Streaming RTMP',
+      active: !isModeA,
+      summary: isEnglish
+        ? 'SYNTXRR captures the screen, encodes video and audio, and pushes RTMP to your own destination.'
+        : 'SYNTXRR menangkap layar, meng-encode video dan audio, lalu mengirim RTMP ke tujuan Anda sendiri.',
+      needs: isEnglish
+        ? ['RTMP server URL', 'Your own stream key', 'Screen capture consent', 'Notification permission for the foreground service']
+        : ['URL server RTMP', 'Stream key milik Anda', 'Persetujuan tangkap layar', 'Izin notifikasi untuk foreground service'],
+      doesNot: isEnglish
+        ? 'Encoded quality depends on your device. Unavailable or simulated metrics are never shown as live telemetry.'
+        : 'Kualitas encoding bergantung pada perangkat. Metrik yang tidak tersedia tidak pernah ditampilkan sebagai telemetri langsung.',
+    },
+  ];
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="mode-launcher-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-    >
-      <div className="relative w-full max-w-2xl bg-[#0e1626] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-800">
-          <div>
-            <h2 id="mode-launcher-title" className="text-base font-bold text-white flex items-center gap-2">
-              {t('mode.title', 'Arsitektur Jalur Operasi (Mode A vs Mode B)')}
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {t('mode.subtitle', 'Pilih dan uji dua jalur rendering terpisah: Floating HUD atau Direct RTMP Compositor')}
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mode-info-title"
+        className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-sx-lg border border-sx-border bg-sx-bg p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] shadow-sx-overlay sm:rounded-sx-lg sm:pb-4"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 id="mode-info-title" className="text-[15px] font-semibold tracking-tight text-sx-text">
+              {isEnglish ? 'How the two modes differ' : 'Perbedaan kedua mode'}
+            </h3>
+            <p className="mt-0.5 text-sx-caption text-sx-text-muted">
+              {isEnglish
+                ? 'Switch modes from the selector on the Dashboard.'
+                : 'Ganti mode lewat selektor di Dashboard.'}
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            aria-label={t('action.close', 'Tutup dialog')}
+            aria-label={isEnglish ? 'Close' : 'Tutup'}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
           >
-            <X className="w-5 h-5" />
+            <Icon icon={X} size="md" tone="inherit" />
           </button>
         </div>
 
-        {/* Content body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-6">
-          {/* Mode Selector Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Mode A */}
+        <div className="mt-3 space-y-2.5">
+          {modes.map((mode) => (
             <div
-              onClick={() => onSelectMode('MODE_A_TIKTOK_COMPANION')}
-              className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                isModeAOperatingMode(currentMode)
-                  ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-950/50 ring-1 ring-blue-500'
-                  : 'bg-[#131f36] border-slate-800 hover:border-slate-700'
-              }`}
+              key={mode.id}
+              className={
+                mode.active
+                  ? 'rounded-sx-lg border border-sx-accent/40 bg-sx-accent-soft p-3'
+                  : 'rounded-sx-lg border border-sx-border bg-sx-surface p-3'
+              }
             >
-              <div className="flex items-start justify-between">
-                <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
-                  <Layers className="w-5 h-5" />
-                </div>
-                {isModeAOperatingMode(currentMode) && (
-                  <span className="flex items-center gap-1 text-[11px] font-semibold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800">
-                    <Check className="w-3 h-3" /> {t('mode.activeBadge', 'Mode Aktif')}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={
+                      mode.active
+                        ? 'rounded-sx-sm bg-sx-accent px-1.5 py-0.5 text-[10px] font-bold text-sx-accent-fg'
+                        : 'rounded-sx-sm border border-sx-border bg-sx-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-sx-text-secondary'
+                    }
+                  >
+                    {mode.name}
                   </span>
-                )}
-              </div>
-              <h3 className="text-sm font-bold text-white mt-3">
-                {t('mode.modeA.name', 'Mode A: TikTok LIVE Companion')}
-              </h3>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                {t('mode.modeA.desc', 'Aplikasi TikTok resmi menyiarkan kamera Anda. SYNTXRR STREAM melayang di atasnya sebagai Floating HUD untuk memantau interaksi, audio, dan chat.')}
-              </p>
-
-              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-400">
-                <div className="flex items-center justify-between">
-                  <span>{t('mode.ramLoad', 'Beban RAM')}</span>
-                  <span className="font-mono text-emerald-400 font-semibold">{t('mode.modeA.ramVal', '~45 MB (Rendah)')}</span>
+                  <span className="text-sx-caption font-semibold text-sx-text">{mode.title}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>{t('mode.batteryImpact', 'Dampak Baterai')}</span>
-                  <span className="font-mono text-emerald-400 font-semibold">{t('mode.modeA.batteryVal', 'Minimal (<1.8%/jam)')}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>{t('mode.renderPipeline', 'Jalur Rendering')}</span>
-                  <span className="text-slate-300">{t('mode.modeA.pipelineVal', 'Android Window Service')}</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectMode('MODE_A_TIKTOK_COMPANION');
-                }}
-                className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  isModeAOperatingMode(currentMode)
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                {isModeAOperatingMode(currentMode)
-                  ? t('mode.modeA.selected', 'Mode A Terpilih')
-                  : t('mode.modeA.select', 'Pilih Mode A')}
-              </button>
-            </div>
-
-            {/* Mode B */}
-            <div
-              onClick={() => onSelectMode('MODE_B_STREAMING_ENCODER')}
-              className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                isModeBOperatingMode(currentMode)
-                  ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-950/50 ring-1 ring-blue-500'
-                  : 'bg-[#131f36] border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="w-10 h-10 rounded-lg bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
-                  <Radio className="w-5 h-5" />
-                </div>
-                {isModeBOperatingMode(currentMode) && (
-                  <span className="flex items-center gap-1 text-[11px] font-semibold text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-800">
-                    <Check className="w-3 h-3" /> {t('mode.activeBadge', 'Mode Aktif')}
+                {mode.active ? (
+                  <span className="flex items-center gap-1.5">
+                    <StatusDot tone="ready" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-sx-text-secondary">
+                      {isEnglish ? 'Selected' : 'Dipilih'}
+                    </span>
                   </span>
-                )}
-              </div>
-              <h3 className="text-sm font-bold text-white mt-3">
-                {t('mode.modeB.name', 'Mode B: Standalone RTMP Encoder')}
-              </h3>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                {t('mode.modeB.desc', 'SYNTXRR STREAM menyiarkan langsung audio/video ke server RTMP pilihan Anda (YouTube, Twitch, Kick) dengan kontrol encoder penuh.')}
-              </p>
-
-              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-400">
-                <div className="flex items-center justify-between">
-                  <span>{t('mode.ramLoad', 'Beban RAM')}</span>
-                  <span className="font-mono text-amber-400 font-semibold">{t('mode.modeB.ramVal', '~135 MB (Seimbang)')}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>{t('mode.encoderProfile', 'Profil Encoder')}</span>
-                  <span className="font-mono text-sky-400 font-semibold">{settings.targetResolution} @ {settings.frameRate} FPS</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>{t('mode.broadcastProtocol', 'Protokol Siaran')}</span>
-                  <span className="text-slate-300">{t('mode.modeB.protocolVal', 'RTMP / RTMPS Langsung')}</span>
-                </div>
+                ) : null}
               </div>
 
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectMode('MODE_B_STREAMING_ENCODER');
-                }}
-                className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                  isModeBOperatingMode(currentMode)
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                {isModeBOperatingMode(currentMode)
-                  ? t('mode.modeB.selected', 'Mode B Terpilih')
-                  : t('mode.modeB.select', 'Pilih Mode B')}
-              </button>
-            </div>
-          </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-sx-text-secondary">{mode.summary}</p>
 
-          {/* Runtime Mode Preview Simulation Box */}
-          <div className="bg-[#080c16] rounded-xl border border-slate-800 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Monitor className="w-4 h-4 text-blue-400" />
-                {isModeAOperatingMode(currentMode)
-                  ? t('mode.previewA', 'Pratinjau Mode A: Floating Overlay HUD')
-                  : t('mode.previewB', 'Pratinjau Mode B: Compositor Pipeline RTMP 1080p')}
-              </span>
-              <span className="text-[10px] font-bold text-sky-400 bg-sky-950/80 border border-sky-800 px-2 py-0.5 rounded">
-                {t('mode.simBadge', 'SIMULATION & FOUNDATION')}
-              </span>
-            </div>
-
-            {isModeAOperatingMode(currentMode) ? (
-              <div className="space-y-3">
-                <div className="p-3 rounded-lg bg-[#0e1626] border border-blue-900/40 text-xs text-slate-300 space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 border-b border-slate-800 pb-1.5">
-                    <span>{t('mode.permStatus', 'Status Izin Android SYSTEM_ALERT_WINDOW')}</span>
-                    <span className="text-emerald-400 font-bold">{t('mode.permSimulated', 'Tersimulasi Aktif')}</span>
-                  </div>
-                  <p className="leading-relaxed">
-                    {t('mode.previewADesc', 'Saat dijalankan di perangkat Android dengan service latar depan, SYNTXRR memunculkan jendela floating pill yang tetap melayang di atas game (MLBB, PUBG, Free Fire) atau aplikasi TikTok LIVE.')}
-                  </p>
-                  {/* Floating Pill Mockup */}
-                  <div className="my-2 p-2.5 rounded-lg bg-blue-950/90 border border-blue-500/80 flex items-center justify-between max-w-sm mx-auto shadow-lg">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse" />
-                      <span className="text-xs font-bold text-white">{t('mode.floatingHudTitle', 'SYNTXRR FLOATING HUD')}</span>
-                    </div>
-                    <div className="text-[11px] text-slate-300 font-mono">
-                      {t('mode.floatingHudQueue', 'Queue: 3 · TTS: Aktif')}
-                    </div>
-                  </div>
+              <div className="mt-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-sx-text-muted">
+                  {isEnglish ? 'Requires' : 'Membutuhkan'}
                 </div>
+                <ul className="mt-1 space-y-0.5">
+                  {mode.needs.map((need) => (
+                    <li key={need} className="flex gap-1.5 text-[11px] leading-relaxed text-sx-text-secondary">
+                      <span className="mt-[5px] h-1 w-1 shrink-0 rounded-sx-full bg-sx-accent" />
+                      <span>{need}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="p-2 rounded bg-[#0e1626] border border-slate-800">
-                    <Video className="w-4 h-4 text-blue-400 mx-auto mb-1" />
-                    <div className="font-semibold text-white">{t('mode.videoSource', 'Video Source')}</div>
-                    <div className="text-[10px] text-slate-400">{t('mode.videoSourceSub', 'Camera / Screen')}</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#0e1626] border border-slate-800">
-                    <Mic className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
-                    <div className="font-semibold text-white">{t('mode.audioSource', 'Audio Source')}</div>
-                    <div className="text-[10px] text-slate-400">{t('mode.audioSourceSub', 'Mic + Internal')}</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#0e1626] border border-slate-800">
-                    <Cpu className="w-4 h-4 text-purple-400 mx-auto mb-1" />
-                    <div className="font-semibold text-white">{t('mode.muxer', 'Hardware Muxer')}</div>
-                    <div className="text-[10px] text-slate-400">{t('mode.muxerSub', 'H.264 / AAC')}</div>
-                  </div>
-                </div>
 
-                <div className="p-2.5 rounded bg-[#0e1626] border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
-                  <span>{t('mode.rtmpTarget', 'RTMP Target:')}</span>
-                  <span className="font-mono text-slate-400 truncate max-w-[240px]">
-                    {settings.rtmpServer}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Disclaimer */}
-            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-950/30 border border-blue-900/50 text-xs text-blue-300/90">
-              <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-              <p className="leading-relaxed">
-                {t('mode.disclaimer', 'Prinsip Keterbukaan: Koneksi server broadcast aktual berstatus belum tersambung (NOT_CONNECTED). Pengaturan, simulasi render, dan parameter tersimpan persisten secara lokal di IndexedDB HP.')}
+              <p className="mt-2 border-t border-sx-border-subtle pt-2 text-[11px] leading-relaxed text-sx-text-muted">
+                {mode.doesNot}
               </p>
             </div>
-          </div>
-
-          {/* Device Profile Specs */}
-          <div className="grid grid-cols-3 gap-3 text-xs">
-            <div className="p-3 rounded-lg bg-[#131f36] border border-slate-800 flex items-center gap-2.5">
-              <Battery className="w-4 h-4 text-emerald-400 shrink-0" />
-              <div>
-                <div className="text-[11px] text-slate-400">{t('mode.batteryConsumption', 'Konsumsi Baterai')}</div>
-                <div className="font-bold text-white">{t('mode.batteryConsumptionVal', '~4.2%/jam Target')}</div>
-              </div>
-            </div>
-            <div className="p-3 rounded-lg bg-[#131f36] border border-slate-800 flex items-center gap-2.5">
-              <Flame className="w-4 h-4 text-amber-400 shrink-0" />
-              <div>
-                <div className="text-[11px] text-slate-400">{t('mode.deviceTemp', 'Suhu Perangkat')}</div>
-                <div className="font-bold text-white">{t('mode.deviceTempVal', '<38°C Seimbang')}</div>
-              </div>
-            </div>
-            <div className="p-3 rounded-lg bg-[#131f36] border border-slate-800 flex items-center gap-2.5">
-              <Cpu className="w-4 h-4 text-sky-400 shrink-0" />
-              <div>
-                <div className="text-[11px] text-slate-400">{t('mode.outputRes', 'Resolusi Output')}</div>
-                <div className="font-bold text-white">{settings.targetResolution}</div>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-[#080c16]">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
-          >
-            {t('mode.applyClose', 'Terapkan & Tutup')}
-          </button>
-        </div>
+        <Button variant="secondary" fullWidth className="mt-3" onClick={onClose}>
+          {isEnglish ? 'Close' : 'Tutup'}
+        </Button>
       </div>
     </div>
   );
