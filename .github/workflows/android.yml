@@ -56,6 +56,42 @@ jobs:
       - name: Sync Capacitor Android
         run: bunx cap sync android
 
+      - name: Run Android unit tests
+        id: unit-tests
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest
+
+      - name: Print failed unit test details
+        if: ${{ failure() && steps.unit-tests.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob, xml.etree.ElementTree as ET
+          for path in sorted(glob.glob("android/app/build/test-results/testDebugUnitTest/TEST-*.xml")):
+              root = ET.parse(path).getroot()
+              for tc in root.findall("testcase"):
+                  for tag in ("failure", "error"):
+                      elem = tc.find(tag)
+                      if elem is not None:
+                          print(f"FAILED: {tc.attrib.get('classname')}#{tc.attrib.get('name')}")
+                          print(elem.attrib.get("message", ""))
+                          if elem.text:
+                              print(elem.text)
+          EOF
+
+      - name: Upload Android unit test reports
+        if: ${{ !cancelled() && (steps.unit-tests.outcome == 'success' || steps.unit-tests.outcome == 'failure') }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: SYNTXRR-STREAM-Unit-Test-Reports
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Build APK
         working-directory: android
         run: |
