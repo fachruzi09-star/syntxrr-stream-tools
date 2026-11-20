@@ -66,6 +66,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               key={item.tab}
               type="button"
+              data-testid={`nav-tab-${item.tab}`}
               onClick={() => onNavigate(item.tab)}
               aria-current={isActive ? 'page' : undefined}
               className={cn(itemClass, isActive ? 'bg-sx-surface-2/70' : 'hover:bg-sx-surface-2/50')}
@@ -96,6 +97,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           type="button"
           onClick={onOpenDrawer}
+          data-testid="nav-more"
           aria-label={t('shell.moreModules', 'More modules')}
           className={cn(itemClass, isMoreActive ? 'bg-sx-surface-2/70' : 'hover:bg-sx-surface-2/50')}
         >

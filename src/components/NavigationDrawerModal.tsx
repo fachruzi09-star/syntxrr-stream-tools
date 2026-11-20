@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationTab } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -60,14 +60,74 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
 
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  // Escape closes the sheet; Tab stays inside it while it is open.
   useEffect(() => {
     if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+
+    const getFocusable = (): HTMLElement[] => {
+      const panel = panelRef.current;
+      if (!panel) return [];
+      return Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getAttribute('aria-hidden') !== 'true');
     };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusables = getFocusable();
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !panelRef.current?.contains(active)) {
+        event.preventDefault();
+        first.focus();
+        return;
+      }
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Move focus into the sheet on open, then hand it back to the opener on close.
+  useEffect(() => {
+    if (!isOpen) return;
+    restoreFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+
+    const focusTimer = window.setTimeout(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const target = panel.querySelector<HTMLElement>('[data-drawer-autofocus]') ?? panel;
+      target.focus({ preventScroll: true });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      const opener = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (opener && document.contains(opener) && typeof opener.focus === 'function') {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, [isOpen]);
 
   const groups: DrawerGroup[] = [
     {
@@ -179,11 +239,14 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
           />
 
           <motion.div
+            ref={panelRef}
+            tabIndex={-1}
+            data-testid="nav-drawer-panel"
             initial={{ x: prefersReducedMotion ? 0 : '-100%' }}
             animate={{ x: 0 }}
             exit={{ x: prefersReducedMotion ? 0 : '-100%' }}
             transition={{ duration: prefersReducedMotion ? 0 : 0.22, ease: 'easeOut' }}
-            className="absolute inset-y-0 left-0 flex w-[86%] max-w-[340px] flex-col border-r border-sx-border bg-sx-bg shadow-sx-overlay"
+            className="absolute inset-y-0 left-0 flex w-[86%] max-w-[340px] flex-col border-r border-sx-border bg-sx-bg shadow-sx-overlay outline-none"
           >
             <div className="border-b border-sx-border px-4 pb-3 pt-[calc(env(safe-area-inset-top)+14px)]">
               <div className="flex items-start gap-2.5">
@@ -200,6 +263,7 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
+                  data-drawer-autofocus
                   aria-label={t('shell.close')}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
                 >
@@ -221,6 +285,7 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
                         <button
                           key={item.tab}
                           type="button"
+                          data-testid={`nav-item-${item.tab}`}
                           onClick={() => {
                             onNavigate(item.tab);
                             onClose();

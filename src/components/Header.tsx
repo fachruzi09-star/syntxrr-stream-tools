@@ -101,6 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   key={item.tab}
                   type="button"
+                  data-testid={`header-nav-${item.tab}`}
                   onClick={() => onNavigate(item.tab)}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
