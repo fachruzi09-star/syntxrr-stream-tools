@@ -5,7 +5,7 @@ Status keseluruhan: **INCOMPLETE / BELUM LENGKAP.**
 Dokumen ini mencatat apa yang benar-benar diperiksa, apa yang belum tercakup, dan prasyarat untuk
 melengkapinya. Jangan pernah menyebut hasil ini sebagai "scan bersih" atau "dependency aman".
 
-Diperbarui pada branch `appjet` setelah Batch 7.1A — pemeriksaan ulang terakhir pada HEAD `5af5a46` (2026-11-20).
+Diperbarui pada branch `appjet`. Pemeriksaan npm terakhir: revisi 9 / Batch 7.2 pada HEAD `13f975f` (2026-11-20). Cakupan Gradle/Maven tetap belum terverifikasi dari workspace (lihat bagian 2 dan 5).
 
 ## 1. Yang sudah diperiksa (npm / JavaScript)
 
@@ -16,7 +16,7 @@ Diperbarui pada branch `appjet` setelah Batch 7.1A — pemeriksaan ulang terakhi
 | Paket diperiksa | 357 |
 | Temuan | 0 (0 blocking) |
 | Status | `incomplete` |
-| Job bukti terakhir | `dade552865068976d63b6487b933302c` (revisi 14, Batch 7.1A; status tetap `incomplete`) |
+| Job bukti terakhir | `385556136d4df5a199a8c168bdd3c7a9` (revisi 9, Batch 7.2; status tetap `incomplete`) |
 
 `package.json` dan `bun.lock` terakhir berubah pada commit `c7d0622` (nama paket menjadi
 `syntxrr-stream`, versi `1.0.0`; `bun.lock` ikut menyesuaikan satu baris), dan tidak berubah sampai
@@ -61,10 +61,24 @@ Kemampuan yang tidak tersedia di lingkungan ini, dinyatakan eksplisit:
 
 Keduanya prasyarat eksternal di luar repository, bukan cacat kode aplikasi.
 
-Diverifikasi ulang 2026-11-20 (Batch 7.1A): `ANDROID_HOME` dan `ANDROID_SDK_ROOT` tidak diset, tidak
-ada direktori Android SDK (`/opt/android*`, `/usr/lib/android*`, `/root/Android`), `gh auth status`
-melaporkan "not logged into any GitHub hosts", dan `GH_TOKEN` tidak diset. Jadi kedua prasyarat ini
-masih terbuka, bukan asumsi lama.
+Diverifikasi ulang 2026-11-20 (Batch 7.1A) dan diperiksa kembali pada Batch 7.2 (revisi 9, HEAD
+`13f975f`): `ANDROID_HOME` dan `ANDROID_SDK_ROOT` tidak diset, tidak ada direktori Android SDK
+(`/usr/lib/android-sdk`, `/opt/android-sdk`, `/root/Android/Sdk`), tidak ada resolved dependency file
+Gradle (`*.lockfile`) di `android/` walaupun `android/gradlew`, `settings.gradle`, `build.gradle`, dan
+`android/app/build.gradle` tersedia, `gh auth status` melaporkan "not logged into any GitHub hosts",
+dan `GH_TOKEN` tidak diset. Kedua prasyarat ini masih terbuka, bukan asumsi lama.
+
+Kapabilitas yang benar-benar tidak tersedia di workspace ini, dinyatakan sebagai kapabilitas alat —
+bukan cacat kode aplikasi:
+
+| Kapabilitas yang tidak tersedia | Konsekuensi |
+|---|---|
+| Resolusi dependency Gradle/Maven di sandbox (butuh Android SDK) | Advisory pada classpath plugin AGP, AndroidX, Capacitor, dan `androidTestUtil` tidak dapat diperiksa dari workspace |
+| Membaca GitHub Dependency Graph / Dependabot Maven (butuh sesi atau token GitHub) | Advisory Maven yang sudah tersedia di GitHub tidak dapat dikutip angkanya dari sini |
+
+Karena itu status pemindaian dependency untuk proyek ini akan **selalu** `incomplete` di workspace,
+dan setiap laporan harus menyebut celah tersebut secara eksplisit. Pemindaian npm tidak boleh diulang
+tanpa perubahan `package.json` atau `bun.lock`, karena hasil dan statusnya tidak akan berubah.
 
 ## 3. Audit classpath build (manual, sebelumnya)
 
@@ -138,6 +152,10 @@ tidak boleh mengutip angka advisory Maven seolah-olah baru diverifikasi.
    `bun run build` dan build APK di CI.
 4. Scanner sandbox **tidak akan pernah** melaporkan status lengkap untuk proyek ini selama Android
    SDK tidak tersedia. Itu batasan alat, bukan indikasi bahaya dan bukan bukti kebersihan.
+5. Selama kapabilitas pada bagian 2 masih hilang, laporan dari workspace harus menyebut cakupan
+   Gradle/Maven **belum terverifikasi**. Melengkapi cakupan ini memerlukan Android SDK di sandbox
+   atau sesi/token GitHub untuk membaca hasil Dependabot Maven — keduanya prasyarat eksternal yang
+   sudah di-waive pemilik untuk Batch 7.1A–7.2, dan bukan penghalang pekerjaan UI.
 5. Pin `android/build.gradle` sudah terbukti memilih versi patched pada classpath plugin
    (lihat 3.1). Yang masih belum dapat dibuktikan dari workspace ini: konfigurasi penuh proyek
    `:app` (butuh Android SDK) dan penutupan alert di GitHub (butuh akses Dependabot).
