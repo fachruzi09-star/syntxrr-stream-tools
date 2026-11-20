@@ -48,6 +48,15 @@ export const Header: React.FC<HeaderProps> = ({
   const statusLabel = honestStatusLabel || t('dash.statusNotConnected');
   const showPresetChip = Boolean(activePreset) && activeNav !== 'studio';
 
+  // The mobile bottom bar is hidden from lg up, so wide layouts get a real
+  // header navigation instead of a cramped phone bar.
+  const desktopItems: Array<{ tab: NavigationTab; label: string }> = [
+    { tab: 'dashboard', label: t('nav.dashboard', 'Dashboard') },
+    { tab: 'studio', label: t('nav.studio', 'Studio') },
+    { tab: 'live_center', label: t('nav.liveCenter', 'Live Center') },
+    { tab: 'remote_deck', label: t('nav.remoteDeck', 'Remote Deck') },
+  ];
+
   return (
     <header className="sticky top-0 z-40 border-b border-sx-border bg-sx-bg/95 backdrop-blur-md">
       <div className="pt-[env(safe-area-inset-top)]">
@@ -55,9 +64,9 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenDrawer}
-            aria-label={isEnglish ? 'Open navigation' : 'Buka navigasi'}
+            aria-label={t('shell.openNav', 'Open navigation')}
             className={cn(
-              '-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary',
+              '-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary lg:hidden',
               'transition-colors hover:bg-sx-surface-2 hover:text-sx-text active:bg-sx-surface-3',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg',
             )}
@@ -77,16 +86,48 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <div className="mt-1 truncate text-[10px] font-semibold uppercase leading-none tracking-[0.16em] text-sx-text-muted">
-                {isModeA
-                  ? isEnglish
-                    ? 'LIVE COMPANION'
-                    : 'KOMPANION LIVE'
-                  : isEnglish
-                    ? 'RTMP ENCODER'
-                    : 'ENCODER RTMP'}
+                {isModeA ? t('shell.ctxModeA', 'LIVE COMPANION') : t('shell.ctxModeB', 'RTMP ENCODER')}
               </div>
             </div>
           </div>
+
+          <nav
+            aria-label={t('shell.primaryNav', 'Primary navigation')}
+            className="ml-6 hidden items-center gap-0.5 lg:flex"
+          >
+            {desktopItems.map((item) => {
+              const isActive = activeNav === item.tab;
+              return (
+                <button
+                  key={item.tab}
+                  type="button"
+                  onClick={() => onNavigate(item.tab)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    'flex min-h-[36px] items-center rounded-sx-md px-3 text-[12px] font-semibold transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg',
+                    isActive
+                      ? 'bg-sx-accent-soft text-sx-text'
+                      : 'text-sx-text-secondary hover:bg-sx-surface-2 hover:text-sx-text',
+                  )}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={onOpenDrawer}
+              aria-label={t('shell.moreModules', 'More modules')}
+              className={cn(
+                'flex min-h-[36px] items-center gap-1.5 rounded-sx-md px-3 text-[12px] font-semibold text-sx-text-secondary',
+                'transition-colors hover:bg-sx-surface-2 hover:text-sx-text',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg',
+              )}
+            >
+              {t('shell.more', 'More')}
+            </button>
+          </nav>
 
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
             {showPresetChip && activePreset ? (

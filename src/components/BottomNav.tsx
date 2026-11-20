@@ -33,18 +33,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onOpenDrawer,
   pendingRequestsCount = 0,
 }) => {
-  const { t, isEnglish } = useTranslation();
+  const { t } = useTranslation();
 
   const primaryItems: PrimaryItem[] = [
     { tab: 'dashboard', label: t('nav.dashboard', 'Dashboard'), icon: LayoutDashboard },
     { tab: 'studio', label: t('nav.studio', 'Studio'), icon: Layers },
     {
       tab: 'live_center',
-      label: t('nav.live_center', 'Live Center'),
+      label: t('nav.liveCenter', 'Live Center'),
       icon: Radio,
       badge: pendingRequestsCount > 0 ? pendingRequestsCount : undefined,
     },
-    { tab: 'remote_deck', label: t('nav.remote_deck', 'Remote Deck'), icon: Gamepad2 },
+    { tab: 'remote_deck', label: t('nav.remoteDeck', 'Remote Deck'), icon: Gamepad2 },
   ];
 
   const isMoreActive = !primaryItems.some((item) => item.tab === activeNav);
@@ -56,8 +56,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
   return (
     <nav
-      aria-label={isEnglish ? 'Primary navigation' : 'Navigasi utama'}
-      className="sticky bottom-0 z-40 border-t border-sx-border bg-sx-surface/95 backdrop-blur-md"
+      aria-label={t('shell.primaryNav', 'Primary navigation')}
+      className="sticky bottom-0 z-40 border-t border-sx-border bg-sx-surface/95 backdrop-blur-md lg:hidden"
     >
       <div className="mx-auto flex w-full max-w-6xl items-stretch gap-0.5 px-1.5 pb-[env(safe-area-inset-bottom)]">
         {primaryItems.map((item) => {
@@ -96,7 +96,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           type="button"
           onClick={onOpenDrawer}
-          aria-label={isEnglish ? 'More modules' : 'Modul lainnya'}
+          aria-label={t('shell.moreModules', 'More modules')}
           className={cn(itemClass, isMoreActive ? 'bg-sx-surface-2/70' : 'hover:bg-sx-surface-2/50')}
         >
           {isMoreActive ? (
@@ -109,7 +109,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               isMoreActive ? 'font-semibold text-sx-text' : 'font-medium text-sx-text-muted',
             )}
           >
-            {isEnglish ? 'More' : 'Lainnya'}
+            {t('shell.more', 'More')}
           </span>
         </button>
       </div>
