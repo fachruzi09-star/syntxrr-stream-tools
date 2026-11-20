@@ -65,7 +65,7 @@ import {
   updateFloatingHud,
   hideFloatingHud,
 } from '../services/nativeCompanionBridge';
-import { applyTheme } from '../theme/themeEngine';
+import { applyTheme, getThemeMeta, resolveTheme, SELECTABLE_THEMES } from '../theme/themeEngine';
 import { useTranslation } from '../i18n/I18nContext';
 
 /* ============================================================================
@@ -993,18 +993,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           description={t('settings.theme.desc', 'Tema visual instan. Mengubah warna latar, panel, kartu, border, dan aksen di seluruh aplikasi.')}
           status="functional"
         >
-          <Segmented<AppTheme>
-            options={[
-              { value: 'navy_dark', label: 'Navy Dark', hint: isEnglish ? 'Default' : 'Bawaan' },
-              { value: 'obsidian_dark', label: 'Obsidian', hint: isEnglish ? 'Pure Black' : 'Gelap pekat' },
-              { value: 'cyber_slate', label: 'Cyber Slate', hint: isEnglish ? 'High Contrast' : 'Kontras tinggi' },
-            ]}
-            value={(settings.theme ?? 'navy_dark') as AppTheme}
-            onChange={(value) => {
-              applyTheme(value);
-              handleUpdate('theme', value);
-            }}
-          />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {SELECTABLE_THEMES.map((themeId) => {
+              const meta = getThemeMeta(themeId);
+              const isSelected = resolveTheme(settings.theme) === themeId;
+
+              return (
+                <button
+                  key={themeId}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    applyTheme(themeId);
+                    handleUpdate('theme', themeId);
+                  }}
+                  className={
+                    isSelected
+                      ? 'rounded-sx-lg border-2 border-sx-accent bg-sx-surface-2 p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg'
+                      : 'rounded-sx-lg border border-sx-border bg-sx-surface-2 p-2 text-left transition-colors hover:border-sx-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg'
+                  }
+                >
+                  {/* Preview uses the previewed theme's own colours on purpose. */}
+                  <span
+                    aria-hidden
+                    className="block rounded-sx-md border p-2"
+                    style={{ backgroundColor: meta.bg, borderColor: meta.border }}
+                  >
+                    <span
+                      className="block h-7 rounded-sx-sm"
+                      style={{ backgroundColor: meta.surface, border: `1px solid ${meta.border}` }}
+                    />
+                    <span className="mt-1.5 flex items-center gap-1.5">
+                      <span
+                        className="block h-2.5 w-9 rounded-sx-full"
+                        style={{ backgroundColor: meta.accent }}
+                      />
+                      <span
+                        className="block h-2.5 flex-1 rounded-sx-full"
+                        style={{ backgroundColor: meta.border }}
+                      />
+                    </span>
+                    <span className="mt-1.5 flex items-center gap-1.5">
+                      <span
+                        className="block h-1.5 w-12 rounded-sx-full"
+                        style={{ backgroundColor: meta.border }}
+                      />
+                      <span
+                        className="block h-1.5 w-6 rounded-sx-full"
+                        style={{ backgroundColor: meta.accentText }}
+                      />
+                    </span>
+                  </span>
+
+                  <span className="mt-2 flex items-center justify-between gap-2">
+                    <span className="truncate text-sx-caption font-semibold text-sx-text">
+                      {isEnglish ? meta.nameEn : meta.name}
+                    </span>
+                    {isSelected ? (
+                      <span className="shrink-0 rounded-sx-full bg-sx-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-sx-accent-fg">
+                        {isEnglish ? 'Selected' : 'Dipilih'}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-sx-text-muted">
+                    {isEnglish ? meta.descriptionEn : meta.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {resolveTheme(settings.theme) !== settings.theme ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-sx-text-muted">
+              {isEnglish
+                ? 'Your previously saved theme was a legacy value and is mapped to Adaptive Dark.'
+                : 'Tema lama yang tersimpan dipetakan otomatis ke Adaptive Dark.'}
+            </p>
+          ) : null}
         </FieldRow>
 
         <FieldRow
