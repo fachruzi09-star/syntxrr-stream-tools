@@ -44,6 +44,7 @@ import {
   ChevronUp,
   ArrowRight,
   PauseCircle,
+  Settings2,
 } from 'lucide-react';
 import {
   isNativeAndroid,
@@ -110,19 +111,45 @@ const DEFAULT_MODE_B_STATUS: ModeBStreamSnapshot = {
 };
 
 type CheckedPermissionState = 'unchecked' | 'granted' | 'denied' | 'web_only';
+type SemanticTone = 'ok' | 'warn' | 'error' | 'off' | 'neutral';
 
-const toneTextClass = (tone?: 'ok' | 'warn' | 'error' | 'off' | 'neutral') => {
+const getToneStyle = (tone?: SemanticTone) => {
   switch (tone) {
     case 'ok':
-      return 'text-emerald-400';
+      return {
+        color: 'var(--app-ok)',
+        backgroundColor: 'var(--app-ok-soft)',
+        borderColor: 'color-mix(in srgb, var(--app-ok) 36%, transparent)',
+        dotColor: 'var(--app-ok)',
+      };
     case 'warn':
-      return 'text-amber-300';
+      return {
+        color: 'var(--app-warn)',
+        backgroundColor: 'var(--app-warn-soft)',
+        borderColor: 'color-mix(in srgb, var(--app-warn) 42%, transparent)',
+        dotColor: 'var(--app-warn)',
+      };
     case 'error':
-      return 'text-rose-400';
+      return {
+        color: 'var(--app-error)',
+        backgroundColor: 'var(--app-error-soft)',
+        borderColor: 'color-mix(in srgb, var(--app-error) 45%, transparent)',
+        dotColor: 'var(--app-error)',
+      };
     case 'off':
-      return 'text-slate-400';
+      return {
+        color: 'var(--app-text-muted)',
+        backgroundColor: 'var(--app-surface-muted)',
+        borderColor: 'var(--app-border)',
+        dotColor: 'var(--app-text-muted)',
+      };
     default:
-      return 'text-slate-300';
+      return {
+        color: 'var(--app-text-secondary)',
+        backgroundColor: 'var(--app-surface-muted)',
+        borderColor: 'var(--app-border)',
+        dotColor: 'var(--app-text-muted)',
+      };
   }
 };
 
@@ -467,6 +494,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     ? 'warn'
     : 'neutral';
 
+  const heroTonePalette = getToneStyle(heroStatusTone);
+
   const heroStatusHeadline = isModeA
     ? isLiveTransportConnected
       ? `${honestStatus.modeASession.label} · ${honestStatus.eventTransport.label}`
@@ -497,7 +526,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     ? 'Encoder Standby'
     : 'Mode B Standby';
 
-  // Contextual Recovery Banner calculation (C): hidden when healthy/standby
+  // Contextual Recovery Banner calculation: hidden when healthy/standby
   const recoveryItem: {
     severity: 'error' | 'warn';
     title: string;
@@ -644,7 +673,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }> = [
     {
       id: 'overlay',
-      label: isEnglish ? 'Floating Overlay (Mode A)' : 'Floating Overlay (Mode A)',
+      label: 'Floating Overlay (Mode A)',
       value: !isNative
         ? isEnglish
           ? 'Android APK only'
@@ -742,8 +771,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     },
   ];
 
+  const isPortraitPreset =
+    (activePreset?.canvasOrientation || settings.canvasOrientation || '9:16') !== '16:9';
+
   return (
-    <div className="space-y-5 pb-20 md:pb-8">
+    <div className="space-y-4 sm:space-y-5 pb-2">
       {/* Dialog Mulai Sesi Mode A — Kondisi A (Target Username Belum Diatur) */}
       {startSessionDialog === 'unlinked' && (
         <div
@@ -752,15 +784,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           aria-labelledby="mode-a-unlinked-title"
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
         >
-          <div className="bg-[#0e1626] border border-slate-700 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
+          <div className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
+                  style={{
+                    backgroundColor: 'var(--app-warn-soft)',
+                    borderColor: 'color-mix(in srgb, var(--app-warn) 45%, transparent)',
+                    color: 'var(--app-warn)',
+                  }}
+                >
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <h3
                   id="mode-a-unlinked-title"
-                  className="text-base font-bold text-white font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
+                  className="font-display text-base font-bold text-[var(--app-text)] leading-snug"
                 >
                   Target username LIVE belum diatur
                 </h3>
@@ -768,16 +807,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => setStartSessionDialog(null)}
-                className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-elevated)] transition-colors shrink-0"
                 aria-label="Tutup dialog"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            <p className="text-xs sm:text-sm text-[var(--app-text-secondary)] leading-relaxed">
               Overlay dan Floating HUD tetap tampil, tetapi gift, chat, dan follow tidak akan masuk sebelum target{' '}
-              <span className="font-mono text-white">@username</span> LIVE TikTok diisi di Koneksi (tanpa perlu login OAuth).
+              <span className="font-mono-num text-[var(--app-text)] font-semibold">@username</span> LIVE TikTok diisi di Koneksi (tanpa perlu login OAuth).
             </p>
 
             <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
@@ -787,15 +826,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   setStartSessionDialog(null);
                   onOpenTikTokConnection?.();
                 }}
-                className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[#F2C230] hover:bg-[#f6cf58] text-[#111317] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
               >
-                <Link2 className="w-4 h-4" />
+                <Link2 className="w-4 h-4 shrink-0" />
                 <span>Atur Target di Koneksi</span>
               </button>
               <button
                 type="button"
                 onClick={() => void handleConfirmStartWithoutConnection()}
-                className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold transition-colors"
               >
                 Mulai tanpa koneksi
               </button>
@@ -812,23 +851,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           aria-labelledby="mode-a-linked-title"
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
         >
-          <div className="bg-[#0e1626] border border-slate-700 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
+          <div className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <h3
                   id="mode-a-linked-title"
-                  className="text-base font-bold text-white font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
+                  className="font-display text-base font-bold text-[var(--app-text)] leading-snug"
                 >
                   Siap memulai sesi Mode A?
                 </h3>
-                <div className="text-xs text-[#F2C230] mt-0.5 font-mono">
+                <div className="text-xs text-[var(--app-accent-text)] mt-1 font-mono-num truncate">
                   Target LIVE: @{targetUsername}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setStartSessionDialog(null)}
-                className="min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-elevated)] transition-colors shrink-0"
                 aria-label="Tutup dialog"
               >
                 <X className="w-5 h-5" />
@@ -839,13 +878,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => void handleConfirmConnectAndStart()}
-                className="w-full text-left p-3.5 rounded-xl bg-[#F2C230] hover:bg-[#f6cf58] text-[#111317] transition-colors space-y-1"
+                className="w-full min-h-[44px] text-left p-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] transition-colors space-y-1"
               >
                 <div className="text-xs font-bold flex items-center gap-1.5">
-                  <Play className="w-3.5 h-3.5" />
+                  <Play className="w-3.5 h-3.5 shrink-0" />
                   <span>Sambungkan &amp; mulai</span>
                 </div>
-                <p className="text-[11px] text-[#111317]/80 leading-relaxed font-medium">
+                <p className="text-[11px] opacity-85 leading-relaxed font-medium">
                   Hubungkan SYNTXRR ke room LIVE publik @{targetUsername}. Kalau belum LIVE di aplikasi TikTok, konektor menunggu sampai LIVE dimulai.
                 </p>
               </button>
@@ -853,10 +892,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => void handleConfirmStartWithoutConnection()}
-                className="w-full text-left p-3.5 rounded-xl bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-slate-200 transition-colors space-y-1"
+                className="w-full min-h-[44px] text-left p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] transition-colors space-y-1"
               >
                 <div className="text-xs font-bold">Mulai tanpa koneksi</div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
+                <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
                   Companion dan Floating HUD tetap aktif tanpa menghubungkan event LIVE.
                 </p>
               </button>
@@ -865,37 +904,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* A. Header Ringkas & Satu Selector Mode A / Mode B */}
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-baseline justify-between gap-3 min-w-0">
+      {/* C.1 Command Header — Page identity without duplicating global SYNTXRR header */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-1 border-b border-[var(--app-border)]/70">
+        <div className="flex items-start sm:items-center justify-between gap-3 min-w-0">
           <div className="min-w-0">
-            <div className="text-[11px] font-medium text-slate-400 tracking-wide">
-              <span>{isEnglish ? 'Broadcast Control Center' : 'Pusat Kendali Siaran'}</span>
-              <span aria-hidden="true"> · </span>
-              <span className="font-mono tabular-nums text-slate-300">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-[var(--app-text-muted)] tracking-wide">
+              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
+                {isEnglish ? 'Broadcast Command Center' : 'Pusat Kendali Siaran'}
+              </span>
+              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
+                /
+              </span>
+              <span className="font-mono-num text-[var(--app-text-secondary)]">
                 {settings.targetResolution} · {settings.frameRate} FPS
               </span>
             </div>
-            <h1
-              className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5 truncate font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
-            >
-              SYNTXRR STREAM
+            <h1 className="font-display text-2xl sm:text-[28px] font-bold text-[var(--app-text)] tracking-tight mt-0.5 truncate">
+              {t('nav.dashboard', 'Dashboard')}
             </h1>
           </div>
 
           <button
             type="button"
             onClick={onOpenModeModal}
-            className="sm:hidden shrink-0 text-xs font-medium text-slate-300 hover:text-[#F2C230] inline-flex items-center gap-1 min-h-[36px]"
+            className="md:hidden shrink-0 min-h-[44px] px-3 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-accent-text)] inline-flex items-center gap-1.5 transition-colors"
           >
             <span>{t('dash.modeArchitecture')}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
           </button>
         </div>
 
-        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+        <div className="flex items-center justify-between md:justify-end gap-2.5 shrink-0 pb-2 md:pb-0">
           <div
-            className="grid grid-cols-2 sm:inline-flex flex-1 sm:flex-initial p-1 rounded-xl bg-[#080c16] border border-slate-800"
+            className="grid grid-cols-2 md:inline-flex flex-1 md:flex-initial p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]"
             role="tablist"
             aria-label="Pilih mode operasi"
           >
@@ -905,14 +946,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               aria-selected={isModeA}
               aria-controls="mode-a-details"
               onClick={() => onSelectMode('MODE_A_TIKTOK_COMPANION')}
-              className={`min-h-[42px] px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+              className={`relative min-h-[44px] px-3.5 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-colors min-w-0 flex items-center justify-center gap-1.5 ${
                 isModeA
-                  ? 'bg-[#0e1626] text-white border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  ? 'bg-[var(--app-surface-elevated)] text-[var(--app-text)] border border-[var(--app-accent-border)] shadow-sm'
+                  : 'text-[var(--app-text-muted)] hover:text-[var(--app-text-secondary)] border border-transparent'
               }`}
             >
-              <span className={isModeA ? 'text-[#F2C230]' : ''}>Mode A</span>
-              <span className="hidden sm:inline text-slate-400 font-normal"> · Companion</span>
+              <span className={isModeA ? 'text-[var(--app-accent-text)] font-bold' : ''}>
+                Mode A
+              </span>
+              <span className="hidden sm:inline text-[var(--app-text-muted)] font-normal">
+                · Companion
+              </span>
             </button>
             <button
               type="button"
@@ -920,91 +965,134 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               aria-selected={!isModeA}
               aria-controls="mode-b-details"
               onClick={() => onSelectMode('MODE_B_STREAMING_ENCODER')}
-              className={`min-h-[42px] px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+              className={`relative min-h-[44px] px-3.5 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-colors min-w-0 flex items-center justify-center gap-1.5 ${
                 !isModeA
-                  ? 'bg-[#0e1626] text-white border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  ? 'bg-[var(--app-surface-elevated)] text-[var(--app-text)] border border-[var(--app-accent-border)] shadow-sm'
+                  : 'text-[var(--app-text-muted)] hover:text-[var(--app-text-secondary)] border border-transparent'
               }`}
             >
-              <span className={!isModeA ? 'text-[#F2C230]' : ''}>Mode B</span>
-              <span className="hidden sm:inline text-slate-400 font-normal"> · Encoder RTMP</span>
+              <span className={!isModeA ? 'text-[var(--app-accent-text)] font-bold' : ''}>
+                Mode B
+              </span>
+              <span className="hidden sm:inline text-[var(--app-text-muted)] font-normal">
+                · Encoder RTMP
+              </span>
             </button>
           </div>
 
           <button
             type="button"
             onClick={onOpenModeModal}
-            className="hidden sm:inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-[#F2C230] transition-colors whitespace-nowrap min-h-[36px]"
+            className="hidden md:inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-accent-text)] transition-colors whitespace-nowrap"
           >
             <span>{t('dash.modeArchitecture')}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
           </button>
         </div>
       </header>
 
-      {/* C. Contextual Recovery (Hanya tampil saat benar-benar ada masalah atau tindakan diperlukan) */}
-      {recoveryItem && (
-        <section
-          role="alert"
-          className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-            recoveryItem.severity === 'error'
-              ? 'bg-rose-950/35 border-rose-700/70'
-              : 'bg-amber-950/30 border-amber-600/60'
-          }`}
-        >
-          <div className="flex items-start gap-2.5 min-w-0">
-            <AlertTriangle
-              className={`w-4 h-4 shrink-0 mt-0.5 ${
-                recoveryItem.severity === 'error' ? 'text-rose-400' : 'text-amber-300'
-              }`}
-            />
-            <div className="min-w-0 space-y-0.5">
-              <div
-                className={`text-xs font-bold ${
-                  recoveryItem.severity === 'error' ? 'text-rose-200' : 'text-amber-200'
-                }`}
-              >
-                {recoveryItem.title}
+      {/* Contextual Recovery Banner (only rendered when action/warning applies) */}
+      {recoveryItem && (() => {
+        const alertPalette = getToneStyle(recoveryItem.severity);
+        return (
+          <section
+            role="alert"
+            className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            style={{
+              backgroundColor: alertPalette.backgroundColor,
+              borderColor: alertPalette.borderColor,
+            }}
+          >
+            <div className="flex items-start gap-3 min-w-0">
+              <AlertTriangle
+                className="w-4 h-4 shrink-0 mt-0.5"
+                style={{ color: alertPalette.color }}
+              />
+              <div className="min-w-0 space-y-0.5">
+                <div
+                  className="text-xs font-bold leading-snug"
+                  style={{ color: alertPalette.color }}
+                >
+                  {recoveryItem.title}
+                </div>
+                <p className="text-xs text-[var(--app-text-secondary)] leading-relaxed">
+                  {recoveryItem.detail}
+                </p>
               </div>
-              <p className="text-xs text-slate-200 leading-relaxed">{recoveryItem.detail}</p>
             </div>
-          </div>
 
-          {recoveryItem.actionLabel && recoveryItem.onAction && (
-            <button
-              type="button"
-              onClick={recoveryItem.onAction}
-              className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F2C230] hover:bg-[#f6cf58] text-[#111317] text-xs font-bold whitespace-nowrap shrink-0 self-start sm:self-center transition-colors"
-            >
-              {recoveryItem.actionLabel}
-            </button>
-          )}
-        </section>
-      )}
+            {recoveryItem.actionLabel && recoveryItem.onAction && (
+              <button
+                type="button"
+                onClick={recoveryItem.onAction}
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold whitespace-nowrap shrink-0 self-stretch sm:self-center inline-flex items-center justify-center transition-colors"
+              >
+                {recoveryItem.actionLabel}
+              </button>
+            )}
+          </section>
+        );
+      })()}
 
       {/* Adaptive 8 / 4 Desktop Layout & Priority Single-Column Android Flow */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Main Operational Column (8 cols) */}
-        <div className="lg:col-span-8 space-y-5">
-          {/* B. Hero Control Deck */}
-          <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 sm:p-6 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-              <div className="space-y-1.5 min-w-0">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-slate-400">
-                  <span className="text-[#F2C230] font-semibold">
-                    {isModeA
-                      ? 'Mode A · TikTok LIVE Companion'
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-start">
+        {/* Main Operational Column (8 cols Desktop) */}
+        <div className="lg:col-span-8 space-y-4 sm:space-y-5 min-w-0">
+          {/* C.2 Broadcast Status Command — Flagship Command Centerpiece */}
+          <section
+            className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden"
+            style={{ boxShadow: 'var(--app-shadow)' }}
+          >
+            {/* Top Status Telemetry Bar */}
+            <div className="px-4 sm:px-6 py-3 bg-[var(--app-surface-muted)] border-b border-[var(--app-border)] flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold"
+                  style={{
+                    color: heroTonePalette.color,
+                    backgroundColor: heroTonePalette.backgroundColor,
+                    borderColor: heroTonePalette.borderColor,
+                  }}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: heroTonePalette.dotColor }}
+                  />
+                  <span className="truncate">{heroStatusHeadline}</span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 text-[11px] font-mono-num text-[var(--app-text-muted)]">
+                <span className="text-[var(--app-accent-text)] font-semibold">
+                  {isModeA ? 'MODE A' : 'MODE B'}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {isModeA
+                    ? hasValidTargetUsername
+                      ? `@${targetUsername}`
                       : isEnglish
-                      ? 'Mode B · Native RTMP Encoder'
-                      : 'Mode B · Encoder RTMP Mandiri'}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className={toneTextClass(heroStatusTone)}>{heroStatusHeadline}</span>
+                      ? 'No target'
+                      : 'Tanpa target'
+                    : modeBBitrateDisplay !== '—'
+                    ? modeBBitrateDisplay
+                    : `Target ${settings.videoBitrateKbps} kbps`}
+                </span>
+              </div>
+            </div>
+
+            {/* Command Body */}
+            <div className="p-4 sm:p-6 space-y-5">
+              <div className="space-y-1.5 min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--app-text-muted)]">
+                  {isModeA
+                    ? 'Mode A · TikTok LIVE Companion'
+                    : isEnglish
+                    ? 'Mode B · Native RTMP Encoder'
+                    : 'Mode B · Encoder RTMP Mandiri'}
                 </div>
 
-                <h2
-                  className="text-2xl sm:text-[26px] font-bold text-white tracking-tight font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
-                >
+                <h2 className="font-display text-2xl sm:text-[28px] font-bold text-[var(--app-text)] tracking-tight leading-tight break-words">
                   {isModeA
                     ? hasValidTargetUsername
                       ? `@${targetUsername}`
@@ -1020,7 +1108,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     : 'Output Siaran RTMP'}
                 </h2>
 
-                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                <p className="text-xs sm:text-[13px] text-[var(--app-text-secondary)] leading-relaxed max-w-2xl">
                   {isModeA
                     ? isEnglish
                       ? 'Runs alongside the official TikTok app to manage your Floating HUD, comment TTS, and live room event feed without replacing TikTok Go Live.'
@@ -1030,146 +1118,253 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     : 'Encoder native Android (MediaProjection + H.264/AAC) yang mengirim komposisi Studio langsung ke endpoint RTMP.'}
                 </p>
               </div>
-            </div>
 
-            {/* Primary Operational Action Row */}
-            {isModeA ? (
-              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 pt-1">
-                {!isModeASessionActive ? (
-                  <button
-                    type="button"
-                    disabled={isSessionActionPending}
-                    onClick={handlePressStartSession}
-                    className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#F2C230] hover:bg-[#f6cf58] text-[#111317] text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
-                  >
-                    {isSessionActionPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Play className="w-4 h-4" />
-                    )}
-                    <span>{isEnglish ? 'Start Companion Session' : 'Mulai Sesi Companion'}</span>
-                  </button>
+              {/* Compact Hairline State Summary Strip */}
+              <div className="pt-3.5 border-t border-[var(--app-border)] grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                {isModeA ? (
+                  <>
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-[var(--app-text-muted)]">
+                        {isEnglish ? 'Companion Session' : 'Sesi Companion'}
+                      </div>
+                      <div
+                        className="font-semibold mt-0.5 truncate"
+                        style={{ color: getToneStyle(honestStatus.modeASession.tone).color }}
+                      >
+                        {honestStatus.modeASession.label}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-[var(--app-text-muted)]">
+                        Event Transport
+                      </div>
+                      <div
+                        className="font-semibold mt-0.5 truncate"
+                        style={{ color: getToneStyle(honestStatus.eventTransport.tone).color }}
+                      >
+                        {honestStatus.eventTransport.label}
+                      </div>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1 min-w-0">
+                      <div className="text-[11px] text-[var(--app-text-muted)]">Floating HUD</div>
+                      <div
+                        className="font-semibold mt-0.5 truncate"
+                        style={{
+                          color: isHudVisible ? 'var(--app-ok)' : 'var(--app-text-secondary)',
+                        }}
+                      >
+                        {isHudVisible ? t('dash.hudActive') : t('dash.hudInactive')}
+                      </div>
+                    </div>
+                  </>
                 ) : (
-                  <button
-                    type="button"
-                    disabled={isSessionActionPending}
-                    onClick={() => void handleStopSession()}
-                    className="min-h-[44px] px-5 py-2.5 rounded-xl bg-rose-950/70 hover:bg-rose-900/80 border border-rose-600/80 text-rose-100 text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
-                  >
-                    {isSessionActionPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Square className="w-3.5 h-3.5" />
-                    )}
-                    <span>{isEnglish ? 'Stop Companion Session' : 'Hentikan Sesi'}</span>
-                  </button>
+                  <>
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-[var(--app-text-muted)]">
+                        {isEnglish ? 'Encoder Status' : 'Status Encoder'}
+                      </div>
+                      <div
+                        className="font-semibold mt-0.5 truncate"
+                        style={{ color: heroTonePalette.color }}
+                      >
+                        {heroStatusHeadline}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-[var(--app-text-muted)]">
+                        {isEnglish ? 'Live Bitrate' : 'Bitrate Aktual'}
+                      </div>
+                      <div className="font-mono-num font-semibold text-[var(--app-text)] mt-0.5 truncate">
+                        {modeBBitrateDisplay}
+                      </div>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1 min-w-0">
+                      <div className="text-[11px] text-[var(--app-text-muted)]">
+                        {isEnglish ? 'RTMP Ingest' : 'Ingest RTMP'}
+                      </div>
+                      <div
+                        className="font-semibold mt-0.5 truncate"
+                        style={{
+                          color: modeBRtmpCheck.valid ? 'var(--app-ok)' : 'var(--app-warn)',
+                        }}
+                      >
+                        {modeBRtmpCheck.valid
+                          ? isEnglish
+                            ? 'Ready'
+                            : 'Siap'
+                          : isEnglish
+                          ? 'Incomplete'
+                          : 'Belum Lengkap'}
+                      </div>
+                    </div>
+                  </>
                 )}
-
-                <button
-                  type="button"
-                  onClick={() => onOpenTikTokConnection?.()}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Link2 className="w-3.5 h-3.5 text-[#F2C230]" />
-                  <span>{isEnglish ? 'Configure TikTok' : 'Atur TikTok'}</span>
-                </button>
               </div>
-            ) : (
-              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 pt-1">
-                <button
-                  type="button"
-                  disabled={
-                    isModeBActionPending ||
-                    modeBStatus.status === 'live' ||
-                    modeBStatus.status === 'host_wait' ||
-                    ['starting', 'connecting', 'stopping', 'resharing'].includes(modeBStatus.status)
-                  }
-                  onClick={() => {
-                    if (
-                      modeBStatus.status === 'reshare_waiting' ||
-                      (modeBStatus.status === 'capture_lost' && modeBStatus.isStreaming)
-                    ) {
-                      void onRequestModeBReshare?.();
-                    } else {
-                      void onStartModeBStream?.();
-                    }
-                  }}
-                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#F2C230] hover:bg-[#f6cf58] text-[#111317] text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-45 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isModeBActionPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+
+              {/* Primary Operational Action Row (all >= 44px touch target) */}
+              {isModeA ? (
+                <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 pt-1">
+                  {!isModeASessionActive ? (
+                    <button
+                      type="button"
+                      disabled={isSessionActionPending}
+                      onClick={handlePressStartSession}
+                      className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                    >
+                      {isSessionActionPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      ) : (
+                        <Play className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>
+                        {isEnglish ? 'Start Companion Session' : 'Mulai Sesi Companion'}
+                      </span>
+                    </button>
                   ) : (
-                    <Radio className="w-4 h-4" />
+                    <button
+                      type="button"
+                      disabled={isSessionActionPending}
+                      onClick={() => void handleStopSession()}
+                      className="min-h-[44px] px-5 py-2.5 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                      style={{
+                        backgroundColor: 'var(--app-error-soft)',
+                        borderColor: 'color-mix(in srgb, var(--app-error) 55%, transparent)',
+                        color: 'var(--app-error)',
+                      }}
+                    >
+                      {isSessionActionPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                      <span>{isEnglish ? 'Stop Companion Session' : 'Hentikan Sesi'}</span>
+                    </button>
                   )}
-                  <span>
-                    {isModeBActionPending
-                      ? 'Memproses…'
-                      : modeBStatus.status === 'live'
-                      ? 'Siaran LIVE Aktif'
-                      : modeBStatus.status === 'reshare_waiting'
-                      ? 'Bagikan Layar Lagi'
-                      : modeBStatus.status === 'resharing'
-                      ? 'Menyambungkan Layar…'
-                      : modeBStatus.status === 'capture_lost'
-                      ? 'Bagikan Layar Lagi & Mulai Ulang'
-                      : 'Mulai Siaran RTMP (Go Live)'}
-                  </span>
-                </button>
 
-                <button
-                  type="button"
-                  disabled={isModeBActionPending || !isModeBStoppableStatus(modeBStatus.status)}
-                  onClick={() => void onStopModeBStream?.()}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/80 text-rose-100 text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <Square className="w-3.5 h-3.5" />
-                  <span>{isEnglish ? 'Stop Broadcast' : 'Hentikan'}</span>
-                </button>
-
-                {['live', 'host_wait'].includes(modeBStatus.status) && (
                   <button
                     type="button"
-                    disabled={isModeBActionPending}
-                    onClick={() => void onToggleModeBHostWait?.()}
-                    className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-40 transition-colors ${
-                      modeBStatus.status === 'host_wait'
-                        ? 'bg-amber-950/50 border-amber-500/70 text-amber-200 hover:bg-amber-900/60'
-                        : 'bg-[#080c16] border-slate-700 text-slate-200 hover:border-slate-600'
-                    }`}
+                    onClick={() => onOpenTikTokConnection?.()}
+                    className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors"
                   >
-                    <PauseCircle className="w-3.5 h-3.5" />
+                    <Link2 className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
+                    <span>{isEnglish ? 'Configure TikTok' : 'Atur TikTok'}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={
+                      isModeBActionPending ||
+                      modeBStatus.status === 'live' ||
+                      modeBStatus.status === 'host_wait' ||
+                      ['starting', 'connecting', 'stopping', 'resharing'].includes(
+                        modeBStatus.status
+                      )
+                    }
+                    onClick={() => {
+                      if (
+                        modeBStatus.status === 'reshare_waiting' ||
+                        (modeBStatus.status === 'capture_lost' && modeBStatus.isStreaming)
+                      ) {
+                        void onRequestModeBReshare?.();
+                      } else {
+                        void onStartModeBStream?.();
+                      }
+                    }}
+                    className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-45 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isModeBActionPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    ) : (
+                      <Radio className="w-4 h-4 shrink-0" />
+                    )}
                     <span>
-                      {modeBStatus.status === 'host_wait'
-                        ? 'Lanjutkan Tampilan LIVE'
-                        : 'Layar Tunggu Host'}
+                      {isModeBActionPending
+                        ? 'Memproses…'
+                        : modeBStatus.status === 'live'
+                        ? 'Siaran LIVE Aktif'
+                        : modeBStatus.status === 'reshare_waiting'
+                        ? 'Bagikan Layar Lagi'
+                        : modeBStatus.status === 'resharing'
+                        ? 'Menyambungkan Layar…'
+                        : modeBStatus.status === 'capture_lost'
+                        ? 'Bagikan Layar Lagi & Mulai Ulang'
+                        : 'Mulai Siaran RTMP (Go Live)'}
                     </span>
                   </button>
-                )}
 
-                <button
-                  type="button"
-                  onClick={() => onNavigate('settings')}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
-                >
-                  RTMP Settings
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    disabled={isModeBActionPending || !isModeBStoppableStatus(modeBStatus.status)}
+                    onClick={() => void onStopModeBStream?.()}
+                    className="min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    style={{
+                      backgroundColor: 'var(--app-error-soft)',
+                      borderColor: 'color-mix(in srgb, var(--app-error) 50%, transparent)',
+                      color: 'var(--app-error)',
+                    }}
+                  >
+                    <Square className="w-3.5 h-3.5 shrink-0" />
+                    <span>{isEnglish ? 'Stop Broadcast' : 'Hentikan'}</span>
+                  </button>
+
+                  {['live', 'host_wait'].includes(modeBStatus.status) && (
+                    <button
+                      type="button"
+                      disabled={isModeBActionPending}
+                      onClick={() => void onToggleModeBHostWait?.()}
+                      className="min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-40 transition-colors"
+                      style={
+                        modeBStatus.status === 'host_wait'
+                          ? {
+                              backgroundColor: 'var(--app-warn-soft)',
+                              borderColor:
+                                'color-mix(in srgb, var(--app-warn) 55%, transparent)',
+                              color: 'var(--app-warn)',
+                            }
+                          : {
+                              backgroundColor: 'var(--app-surface-elevated)',
+                              borderColor: 'var(--app-border-strong)',
+                              color: 'var(--app-text)',
+                            }
+                      }
+                    >
+                      <PauseCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        {modeBStatus.status === 'host_wait'
+                          ? 'Lanjutkan Tampilan LIVE'
+                          : 'Layar Tunggu Host'}
+                      </span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('settings')}
+                    className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Settings2 className="w-3.5 h-3.5 text-[var(--app-text-muted)] shrink-0" />
+                    <span>RTMP Settings</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </section>
 
-          {/* D. Panel Operasional — Strictly Isolated to Selected Mode */}
+          {/* C.3 Mode-Specific Control Area (Strictly Isolated Tabpanel) */}
           {isModeA ? (
-            <div id="mode-a-details" role="tabpanel" className="space-y-5">
-              {/* 4 Status Jujur & Metrik LIVE */}
-              <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 space-y-4">
+            <div id="mode-a-details" role="tabpanel" className="space-y-4 sm:space-y-5">
+              {/* 4 Honest Status Readouts & Live Room Metrics */}
+              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-white font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]">
+                  <div className="min-w-0">
+                    <h3 className="font-display text-sm font-bold text-[var(--app-text)]">
                       {isEnglish
                         ? 'Companion Session & TikTok LIVE Status'
                         : 'Status Sesi Companion & Koneksi TikTok LIVE'}
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-relaxed">
                       {isEnglish
                         ? 'Companion service, public target, LIVE room state, and event transport are tracked separately.'
                         : 'Sesi companion, target LIVE, status room, dan transport event dilaporkan terpisah secara jujur.'}
@@ -1178,88 +1373,85 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">Target LIVE</div>
-                    <div className="font-bold text-white mt-1 font-mono truncate">
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">Target LIVE</div>
+                    <div className="font-bold text-[var(--app-text)] mt-1 font-mono-num truncate">
                       {hasValidTargetUsername ? `@${targetUsername}` : 'Belum diatur'}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">
                       {tiktokAccount.isLinked
                         ? `OAuth: ${honestStatus.accountLinked.label}`
                         : 'OAuth opsional'}
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">Sesi Mode A</div>
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">Sesi Mode A</div>
                     <div
-                      className={`font-bold mt-1 truncate ${toneTextClass(
-                        honestStatus.modeASession.tone
-                      )}`}
+                      className="font-bold mt-1 truncate"
+                      style={{ color: getToneStyle(honestStatus.modeASession.tone).color }}
                     >
                       {honestStatus.modeASession.label}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">
                       {honestStatus.modeASession.detail}
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">Room Status</div>
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">Room Status</div>
                     <div
-                      className={`font-bold mt-1 truncate ${toneTextClass(
-                        honestStatus.roomStatus.tone
-                      )}`}
+                      className="font-bold mt-1 truncate"
+                      style={{ color: getToneStyle(honestStatus.roomStatus.tone).color }}
                     >
                       {honestStatus.roomStatus.label}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">
                       {tiktokAccount.connectionMethod === 'euler'
                         ? 'Via EulerStream'
                         : 'Direct TikTok WS'}
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">Event Transport</div>
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">Event Transport</div>
                     <div
-                      className={`font-bold mt-1 truncate ${toneTextClass(
-                        honestStatus.eventTransport.tone
-                      )}`}
+                      className="font-bold mt-1 truncate"
+                      style={{ color: getToneStyle(honestStatus.eventTransport.tone).color }}
                     >
                       {honestStatus.eventTransport.label}
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">
                       {honestStatus.eventTransport.detail}
                     </div>
                   </div>
                 </div>
 
                 {/* Live Room Readout Hairline Row */}
-                <div className="pt-3 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
-                  <div>
-                    <div className="text-[11px] text-slate-400">
+                <div className="pt-3.5 border-t border-[var(--app-border)] grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">
                       {isEnglish ? 'LIVE Viewers' : 'Penonton LIVE'}
                     </div>
-                    <div className="text-base font-bold font-mono tabular-nums text-white mt-0.5">
+                    <div className="text-base font-bold font-mono-num text-[var(--app-text)] mt-0.5">
                       {hasLiveRoomNumbers
                         ? tiktokStatus.viewerCount.toLocaleString('en-US')
                         : '—'}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-[11px] text-slate-400">
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">
                       {isEnglish ? 'Total Likes' : 'Total Like'}
                     </div>
-                    <div className="text-base font-bold font-mono tabular-nums text-white mt-0.5">
+                    <div className="text-base font-bold font-mono-num text-[var(--app-text)] mt-0.5">
                       {hasLiveRoomNumbers
                         ? tiktokStatus.totalLikeCount.toLocaleString('en-US')
                         : '—'}
                     </div>
                   </div>
-                  <div className="col-span-2 sm:col-span-1">
-                    <div className="text-[11px] text-slate-400">Room ID</div>
-                    <div className="text-xs font-mono tabular-nums text-slate-300 mt-1 truncate">
+                  <div className="col-span-2 sm:col-span-1 min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">Room ID</div>
+                    <div className="text-xs font-mono-num text-[var(--app-text-secondary)] mt-1 truncate">
                       {hasLiveRoomNumbers && tiktokStatus.roomId
                         ? tiktokStatus.roomId
                         : isEnglish
@@ -1271,23 +1463,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </section>
 
               {/* Kontrol Native Floating HUD */}
-              <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 space-y-4">
+              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h3
-                      className="text-sm font-bold text-white flex items-center gap-2 font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
-                    >
-                      <Layers className="w-4 h-4 text-[#F2C230]" />
-                      <span>{t('dash.hudTitle')}</span>
+                  <div className="min-w-0">
+                    <h3 className="font-display text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                      <span className="truncate">{t('dash.hudTitle')}</span>
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">{t('dash.hudSubtitle')}</p>
+                    <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-relaxed">
+                      {t('dash.hudSubtitle')}
+                    </p>
                   </div>
                   <span
-                    className={`text-xs font-semibold shrink-0 ${
-                      isHudVisible ? 'text-emerald-400' : 'text-slate-400'
-                    }`}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold shrink-0 self-start sm:self-center"
+                    style={
+                      isHudVisible
+                        ? {
+                            color: 'var(--app-ok)',
+                            backgroundColor: 'var(--app-ok-soft)',
+                            borderColor: 'color-mix(in srgb, var(--app-ok) 36%, transparent)',
+                          }
+                        : {
+                            color: 'var(--app-text-muted)',
+                            backgroundColor: 'var(--app-surface-muted)',
+                            borderColor: 'var(--app-border)',
+                          }
+                    }
                   >
-                    {isHudVisible ? t('dash.hudActive') : t('dash.hudInactive')}
+                    <span
+                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: isHudVisible
+                          ? 'var(--app-ok)'
+                          : 'var(--app-text-muted)',
+                      }}
+                    />
+                    <span>{isHudVisible ? t('dash.hudActive') : t('dash.hudInactive')}</span>
                   </span>
                 </div>
 
@@ -1298,14 +1509,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     disabled={isHudActionPending || isHudVisible}
                     className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors ${
                       isHudVisible
-                        ? 'bg-[#080c16] border border-slate-800 text-slate-500 cursor-not-allowed'
-                        : 'bg-[#F2C230] hover:bg-[#f6cf58] text-[#111317]'
+                        ? 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-muted)] cursor-not-allowed'
+                        : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
                     }`}
                   >
                     {isHudActionPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                     ) : (
-                      <Eye className="w-4 h-4" />
+                      <Eye className="w-4 h-4 shrink-0" />
                     )}
                     <span>{t('dash.showHud')}</span>
                   </button>
@@ -1314,16 +1525,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     type="button"
                     onClick={() => void handleHideHud()}
                     disabled={isHudActionPending || !isHudVisible}
-                    className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors ${
+                    className="min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors disabled:cursor-not-allowed"
+                    style={
                       !isHudVisible
-                        ? 'bg-[#080c16] border border-slate-800 text-slate-500 cursor-not-allowed'
-                        : 'bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/80 text-rose-200'
-                    }`}
+                        ? {
+                            backgroundColor: 'var(--app-surface-muted)',
+                            borderColor: 'var(--app-border)',
+                            color: 'var(--app-text-muted)',
+                          }
+                        : {
+                            backgroundColor: 'var(--app-error-soft)',
+                            borderColor:
+                              'color-mix(in srgb, var(--app-error) 50%, transparent)',
+                            color: 'var(--app-error)',
+                          }
+                    }
                   >
                     {isHudActionPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                     ) : (
-                      <EyeOff className="w-4 h-4" />
+                      <EyeOff className="w-4 h-4 shrink-0" />
                     )}
                     <span>{t('dash.hideHud')}</span>
                   </button>
@@ -1332,63 +1553,73 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     type="button"
                     onClick={() => void refreshHudStatus()}
                     disabled={isHudActionPending}
-                    className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 inline-flex items-center justify-center gap-2 transition-colors"
+                    className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center justify-center gap-2 transition-colors"
                   >
-                    <CheckCircle2 className="w-4 h-4 text-slate-400" />
+                    <CheckCircle2 className="w-4 h-4 text-[var(--app-text-muted)] shrink-0" />
                     <span>{t('dash.checkNativeStatus')}</span>
                   </button>
                 </div>
 
                 {!isOverlayGranted && isNative && (
                   <div className="pt-1 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="text-amber-300">
+                    <span style={{ color: 'var(--app-warn)' }}>
                       Izin SYSTEM_ALERT_WINDOW belum aktif untuk overlay di atas TikTok.
                     </span>
                     <button
                       type="button"
                       onClick={() => void handleRequestOverlay()}
-                      className="text-xs font-semibold text-[#F2C230] hover:underline inline-flex items-center gap-1"
+                      className="min-h-[44px] px-2 text-xs font-semibold text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1"
                     >
                       <span>{t('dash.openOverlayPerm')}</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                     </button>
                   </div>
                 )}
 
-                {hudFeedback && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
-                      hudFeedback.type === 'success'
-                        ? 'bg-emerald-950/45 border-emerald-700/70 text-emerald-200'
-                        : hudFeedback.type === 'error'
-                        ? 'bg-rose-950/45 border-rose-700/70 text-rose-200'
-                        : 'bg-[#080c16] border-slate-700 text-slate-200'
-                    }`}
-                  >
-                    {hudFeedback.type === 'success' ? (
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                    ) : hudFeedback.type === 'error' ? (
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                    ) : (
-                      <Smartphone className="w-4 h-4 shrink-0 text-[#F2C230]" />
-                    )}
-                    <span className="flex-1">{hudFeedback.message}</span>
-                  </div>
-                )}
+                {hudFeedback && (() => {
+                  const fbStyle =
+                    hudFeedback.type === 'success'
+                      ? getToneStyle('ok')
+                      : hudFeedback.type === 'error'
+                      ? getToneStyle('error')
+                      : getToneStyle('neutral');
+                  return (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="p-3 rounded-xl border text-xs flex items-center gap-2"
+                      style={{
+                        backgroundColor: fbStyle.backgroundColor,
+                        borderColor: fbStyle.borderColor,
+                        color:
+                          hudFeedback.type === 'info'
+                            ? 'var(--app-text-secondary)'
+                            : fbStyle.color,
+                      }}
+                    >
+                      {hudFeedback.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      ) : hudFeedback.type === 'error' ? (
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                      ) : (
+                        <Smartphone className="w-4 h-4 shrink-0 text-[var(--app-accent-text)]" />
+                      )}
+                      <span className="flex-1 min-w-0 break-words">{hudFeedback.message}</span>
+                    </div>
+                  );
+                })()}
 
-                <div className="pt-2.5 border-t border-slate-800 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-slate-400">
-                  <div className="flex items-center gap-2">
-                    <Smartphone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>
+                <div className="pt-2.5 border-t border-[var(--app-border)] text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-[var(--app-text-muted)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Smartphone className="w-3.5 h-3.5 text-[var(--app-text-muted)] shrink-0" />
+                    <span className="min-w-0 break-words">
                       {lastHudClickTime
                         ? `Sentuhan bubble terdeteksi pada HP (${lastHudClickTime})`
                         : 'Ketuk bubble floating di HP untuk menguji respons klik bridge'}
                     </span>
                   </div>
                   {!isNative && (
-                    <span className="text-slate-500 text-[10px]">
+                    <span className="text-[10px] text-[var(--app-text-muted)]">
                       Browser preview: jalankan di APK untuk overlay native di atas TikTok
                     </span>
                   )}
@@ -1396,16 +1627,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </section>
             </div>
           ) : (
-            <div id="mode-b-details" role="tabpanel" className="space-y-5">
+            <div id="mode-b-details" role="tabpanel" className="space-y-4 sm:space-y-5">
               {/* Encoder Telemetry & Status Native */}
-              <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 space-y-4">
+              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-white font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]">
+                  <div className="min-w-0">
+                    <h3 className="font-display text-sm font-bold text-[var(--app-text)]">
                       {isEnglish ? 'Native Encoder Status' : 'Status Encoder Native RTMP'}
                     </h3>
                     <p
-                      className="text-xs text-slate-300 mt-0.5 leading-relaxed"
+                      className="text-xs text-[var(--app-text-secondary)] mt-0.5 leading-relaxed"
                       role="status"
                       aria-live="polite"
                     >
@@ -1424,26 +1655,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">
                       {isEnglish ? 'Live Bitrate' : 'Bitrate Aktual'}
                     </div>
-                    <div className="text-base font-bold font-mono tabular-nums text-white mt-1">
+                    <div className="text-base font-bold font-mono-num text-[var(--app-text)] mt-1 truncate">
                       {modeBBitrateDisplay}
                     </div>
-                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] font-mono-num mt-0.5 truncate">
                       Target: {settings.videoBitrateKbps} kbps
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">
                       {isEnglish ? 'RTMP Ingest' : 'Konfigurasi RTMP'}
                     </div>
                     <div
-                      className={`font-bold mt-1 truncate ${
-                        modeBRtmpCheck.valid ? 'text-emerald-400' : 'text-amber-300'
-                      }`}
+                      className="font-bold mt-1 truncate"
+                      style={{
+                        color: modeBRtmpCheck.valid ? 'var(--app-ok)' : 'var(--app-warn)',
+                      }}
                     >
                       {modeBRtmpCheck.valid
                         ? isEnglish
@@ -1453,36 +1685,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         ? 'Incomplete'
                         : 'Belum Lengkap'}
                     </div>
-                    <div className="text-[11px] text-slate-400 font-mono truncate mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] font-mono-num truncate mt-0.5">
                       {settings.rtmpServer?.trim() || 'Belum diisi'}
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-[#080c16] border border-slate-800">
-                    <div className="text-[11px] text-slate-400">
+                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                    <div className="text-[11px] text-[var(--app-text-muted)]">
                       {isEnglish ? 'Output Profile' : 'Profil Output'}
                     </div>
-                    <div className="font-bold font-mono tabular-nums text-white mt-1">
+                    <div className="font-bold font-mono-num text-[var(--app-text)] mt-1 truncate">
                       {settings.targetResolution} · {settings.frameRate} FPS
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">H.264 HW · AAC</div>
+                    <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5 truncate">
+                      H.264 HW · AAC
+                    </div>
                   </div>
                 </div>
               </section>
 
               {/* Pemilihan Sumber Audio Mode B */}
-              <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 space-y-3.5">
+              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-3.5">
                 <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h3
-                      className="text-sm font-bold text-white flex items-center gap-2 font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
-                    >
-                      <Sliders className="w-4 h-4 text-[#F2C230]" />
-                      <span>
+                  <div className="min-w-0">
+                    <h3 className="font-display text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
+                      <Sliders className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                      <span className="truncate">
                         {isEnglish ? 'Broadcast Audio Source' : 'Sumber Audio Siaran Mode B'}
                       </span>
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-relaxed">
                       {isEnglish
                         ? 'Internal audio requires Android 10+ and RECORD_AUDIO permission. Mixed captures both device playback and microphone where supported.'
                         : 'Audio internal memerlukan Android 10+ dan izin RECORD_AUDIO. Campuran menangkap audio sistem dan mikrofon bila didukung perangkat.'}
@@ -1491,7 +1723,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 
                 <div
-                  className="grid grid-cols-3 gap-2"
+                  className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-2"
                   role="group"
                   aria-label={
                     isEnglish ? 'Select Mode B audio source' : 'Pilih sumber audio Mode B'
@@ -1527,20 +1759,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             modeBAudioSource: option.value,
                           })
                         }
-                        className={`min-h-[48px] rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                        className={`min-h-[52px] min-w-0 rounded-xl border px-2.5 sm:px-3 py-2 text-left transition-colors disabled:opacity-50 ${
                           selected
-                            ? 'bg-[#080c16] border-[#F2C230] text-white'
-                            : 'bg-[#080c16] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                            ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
+                            : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text-secondary)] hover:border-[var(--app-border-strong)]'
                         }`}
                       >
                         <span
-                          className={`block text-xs font-bold ${
-                            selected ? 'text-[#F2C230]' : ''
+                          className={`flex items-center justify-between gap-1 text-xs font-bold truncate ${
+                            selected ? 'text-[var(--app-accent-text)]' : ''
                           }`}
                         >
-                          {option.label}
+                          <span className="truncate">{option.label}</span>
+                          {selected && (
+                            <span
+                              aria-hidden="true"
+                              className="w-1.5 h-1.5 rounded-full bg-[var(--app-accent)] shrink-0"
+                            />
+                          )}
                         </span>
-                        <span className="block text-[11px] text-slate-400 mt-0.5">
+                        <span className="block text-[11px] text-[var(--app-text-muted)] mt-0.5 truncate">
                           {option.detail}
                         </span>
                       </button>
@@ -1550,7 +1788,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {activePreset?.backgroundUri && (
                   <p
-                    className="pt-2 border-t border-slate-800 text-[11px] leading-relaxed text-slate-300"
+                    className="pt-2.5 border-t border-[var(--app-border)] text-[11px] leading-relaxed text-[var(--app-text-secondary)]"
                     role="note"
                   >
                     Mode B menampilkan background lokal di bawah layer Tangkapan Layar. Pastikan
@@ -1563,52 +1801,61 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </div>
 
-        {/* E. Panel Konteks & Kesiapan Perangkat (4 cols Desktop / Stacked Mobile) */}
-        <aside className="lg:col-span-4 space-y-5">
-          {/* Active Studio Preset Card */}
-          <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 space-y-3.5">
+        {/* C.4 & C.5 Context & Device Readiness Sidebar (4 cols Desktop / Stacked Mobile) */}
+        <aside className="lg:col-span-4 space-y-4 sm:space-y-5 min-w-0">
+          {/* C.4 Active Studio Preset Summary */}
+          <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-medium text-slate-400">{t('dash.activePreset')}</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
+                {t('dash.activePreset')}
+              </div>
               <button
                 type="button"
                 onClick={() => onNavigate('studio')}
-                className="text-xs font-semibold text-[#F2C230] hover:underline inline-flex items-center gap-1"
+                className="min-h-[44px] px-2.5 -mr-2 rounded-lg text-xs font-semibold text-[var(--app-accent-text)] hover:bg-[var(--app-accent-soft)] inline-flex items-center gap-1 transition-colors shrink-0"
               >
                 <span>{t('dash.openStudioBtn')}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
               </button>
             </div>
 
             <button
               type="button"
               onClick={() => onNavigate('studio')}
-              className="w-full text-left p-3.5 rounded-xl bg-[#080c16] border border-slate-800 hover:border-slate-700 transition-colors space-y-1"
+              className="w-full min-h-[44px] text-left p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-hover)] transition-colors flex items-center justify-between gap-3"
             >
-              <div
-                className="text-base font-bold text-white truncate font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]"
-              >
-                {activePreset ? activePreset.name : 'Mobile Gaming (9:16)'}
+              <div className="min-w-0 space-y-1">
+                <div className="font-display text-base font-bold text-[var(--app-text)] truncate">
+                  {activePreset ? activePreset.name : 'Mobile Gaming (9:16)'}
+                </div>
+                <div className="text-xs font-mono-num text-[var(--app-text-muted)] truncate">
+                  {activePreset?.canvasOrientation || settings.canvasOrientation || '9:16'} ·{' '}
+                  {visibleElementsCount} {isEnglish ? 'active elements' : 'elemen aktif'}
+                </div>
               </div>
-              <div className="text-xs font-mono tabular-nums text-slate-400">
-                {activePreset?.canvasOrientation || settings.canvasOrientation || '9:16'} ·{' '}
-                {visibleElementsCount} {isEnglish ? 'active elements' : 'elemen aktif'}
-              </div>
+              <span
+                aria-hidden="true"
+                className={`shrink-0 rounded-[4px] border border-[var(--app-accent-border)] bg-[var(--app-accent-soft)] ${
+                  isPortraitPreset ? 'w-4 h-6' : 'w-6 h-4'
+                }`}
+              />
             </button>
           </section>
 
-          {/* Real Device & Android Permission Readiness */}
-          <section className="rounded-2xl bg-[#0e1626] border border-slate-800 p-5 space-y-3.5">
+          {/* C.5 Real Device & Android Permission Readiness */}
+          <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setMobileReadinessOpen((v) => !v)}
-                className="lg:cursor-default text-left flex items-center gap-1.5 min-w-0"
+                aria-expanded={mobileReadinessOpen}
+                className="lg:cursor-default min-h-[44px] text-left flex items-center gap-2 min-w-0 flex-1 pr-1 rounded-lg"
               >
-                <ShieldAlert className="w-4 h-4 text-[#F2C230] shrink-0" />
-                <span className="text-sm font-bold text-white truncate font-['Bricolage_Grotesque','Plus_Jakarta_Sans',sans-serif]">
+                <ShieldAlert className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                <span className="font-display text-sm font-bold text-[var(--app-text)] truncate">
                   {t('dash.hardwareStatus')}
                 </span>
-                <span className="lg:hidden text-slate-400">
+                <span className="lg:hidden text-[var(--app-text-muted)] shrink-0">
                   {mobileReadinessOpen ? (
                     <ChevronUp className="w-4 h-4" />
                   ) : (
@@ -1621,10 +1868,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 type="button"
                 disabled={isReadinessChecking}
                 onClick={() => void handleRunReadinessCheck()}
-                className="px-2.5 py-1.5 rounded-lg bg-[#080c16] hover:bg-slate-800 border border-slate-700 text-[11px] font-semibold text-slate-200 inline-flex items-center gap-1.5 shrink-0 disabled:opacity-50 transition-colors"
+                className="min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 shrink-0 disabled:opacity-50 transition-colors"
               >
                 <RefreshCw
-                  className={`w-3 h-3 ${isReadinessChecking ? 'animate-spin' : ''}`}
+                  className={`w-3.5 h-3.5 shrink-0 ${isReadinessChecking ? 'animate-spin' : ''}`}
                 />
                 <span>{isEnglish ? 'Check' : 'Periksa'}</span>
               </button>
@@ -1632,10 +1879,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {/* Mobile collapsed summary */}
             {!mobileReadinessOpen && (
-              <div className="lg:hidden text-xs text-slate-400">
+              <div className="lg:hidden text-xs text-[var(--app-text-muted)] leading-relaxed">
                 {!isNative
                   ? isEnglish
-                    ? 'Android permission checks run inside installed APK. Tap to view details.'
+                    ? 'Android permission checks run inside installed APK. Tap title to view details.'
                     : 'Pemeriksaan izin native berjalan di APK Android. Ketuk judul untuk detail.'
                   : overlayChecked && notifPermission !== 'unchecked' && micPermission !== 'unchecked'
                   ? isEnglish
@@ -1652,17 +1899,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 mobileReadinessOpen ? 'block' : 'hidden lg:block'
               } space-y-3`}
             >
-              <div className="divide-y divide-slate-800 text-xs">
+              <div className="divide-y divide-[var(--app-border)] text-xs">
                 {readinessRows.map((row) => (
                   <div
                     key={row.id}
-                    className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-2"
+                    className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-2 min-w-0"
                   >
-                    <span className="text-slate-300 truncate">{row.label}</span>
+                    <span className="text-[var(--app-text-secondary)] truncate">{row.label}</span>
                     <span
-                      className={`font-mono text-[11px] font-medium shrink-0 ${toneTextClass(
-                        row.tone
-                      )}`}
+                      className="font-mono-num text-[11px] font-semibold shrink-0"
+                      style={{ color: getToneStyle(row.tone).color }}
                     >
                       {row.value}
                     </span>
@@ -1670,8 +1916,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 ))}
               </div>
 
-              <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-slate-400 leading-snug">
+              <div className="pt-2.5 border-t border-[var(--app-border)] flex items-center justify-between gap-2">
+                <span className="text-[11px] text-[var(--app-text-muted)] leading-snug min-w-0">
                   {isEnglish
                     ? 'No unverified device metrics are displayed.'
                     : 'Hanya menampilkan status izin & konfigurasi aktual.'}
@@ -1679,7 +1925,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onNavigate('settings')}
-                  className="text-xs font-semibold text-[#F2C230] hover:underline shrink-0"
+                  className="min-h-[44px] px-2.5 -mr-2 rounded-lg text-xs font-semibold text-[var(--app-accent-text)] hover:bg-[var(--app-accent-soft)] inline-flex items-center shrink-0 transition-colors"
                 >
                   {t('dash.managePerm')}
                 </button>
