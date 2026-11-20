@@ -21,7 +21,7 @@ import java.util.zip.GZIPInputStream;
  * TikTokWebcastDecoder
  *
  * Dekoder biner Protobuf wire-format dan GZIP murni Java (tanpa dependensi eksternal)
- * untuk frame Webcast TikTok LIVE dan respons EulerStream /webcast/fetch.
+ * untuk frame Webcast TikTok LIVE dan frame WebSocket EulerStream ketika mode raw protobuf aktif.
  *
  * Catatan protokol:
  * - Mendukung outer PushFrame (seqId, logId, headers, payloadEncoding, payloadType, payload).
@@ -175,6 +175,7 @@ public final class TikTokWebcastDecoder {
     }
 
     @NonNull
+    /** Legacy raw-body decoder retained for compatibility with archived captures. */
     public static DecodedResponse decodeEulerFetchBody(@Nullable byte[] rawBytes) {
         if (rawBytes == null || rawBytes.length == 0) {
             return emptyResponse(0L, "fetch");
@@ -362,12 +363,67 @@ public final class TikTokWebcastDecoder {
         return out.toByteArray();
     }
 
+    /**
+     * Build the client-to-server room-entry message. Opening a WebSocket is not enough:
+     * TikTok expects an im_enter_room PushFrame carrying WebcastImEnterRoomMessage.
+     */
     @NonNull
-    public static byte[] encodePushFrameHeartbeat() {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        writeStringField(out, 6, "pb");
-        writeStringField(out, 7, "hb");
-        return out.toByteArray();
+    public static byte[] encodePushFrameEnterRoom(@NonNull String rawRoomId, long enterUniqueId) {
+        final long roomId;
+        try {
+            roomId = Long.parseLong(rawRoomId.trim());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("TikTok room_id bukan angka yang valid.", e);
+        }
+        if (roomId <= 0L || enterUniqueId <= 0L) {
+            throw new IllegalArgumentException("room_id dan enterUniqueId harus lebih besar dari nol.");
+        }
+
+        ByteArrayOutputStream enterPayload = new ByteArrayOutputStream();
+        writeTag(enterPayload, 1, 0); // room_id
+        writeVarint(enterPayload, roomId);
+        writeTag(enterPayload, 4, 0); // live_id = 12 (TikTok LIVE audience)
+        writeVarint(enterPayload, 12L);
+        writeStringField(enterPayload, 5, "audience"); // identity
+        writeTag(enterPayload, 8, 0); // enter_unique_id
+        writeVarint(enterPayload, enterUniqueId);
+        writeStringField(enterPayload, 9, "0"); // filter_welcome_msg
+
+        ByteArrayOutputStream pushFrame = new ByteArrayOutputStream();
+        writeStringField(pushFrame, 6, "pb");
+        writeStringField(pushFrame, 7, "im_enter_room");
+        writeBytesField(pushFrame, 8, enterPayload.toByteArray());
+        return pushFrame.toByteArray();
+    }
+
+    /**
+     * Build the application-level TikTok Webcast heartbeat. The heartbeat payload
+     * is a HeartBeatMessage containing the active room_id and a monotonically
+     * increasing send_packet_seq_id; an empty `hb` PushFrame is not sufficient.
+     */
+    @NonNull
+    public static byte[] encodePushFrameHeartbeat(@NonNull String rawRoomId, long sequenceId) {
+        final long roomId;
+        try {
+            roomId = Long.parseLong(rawRoomId.trim());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("TikTok heartbeat room_id bukan angka yang valid.", e);
+        }
+        if (roomId <= 0L || sequenceId <= 0L) {
+            throw new IllegalArgumentException("room_id dan heartbeat sequenceId harus lebih besar dari nol.");
+        }
+
+        ByteArrayOutputStream heartbeatPayload = new ByteArrayOutputStream();
+        writeTag(heartbeatPayload, 1, 0); // room_id
+        writeVarint(heartbeatPayload, roomId);
+        writeTag(heartbeatPayload, 2, 0); // send_packet_seq_id
+        writeVarint(heartbeatPayload, sequenceId);
+
+        ByteArrayOutputStream pushFrame = new ByteArrayOutputStream();
+        writeStringField(pushFrame, 6, "pb");
+        writeStringField(pushFrame, 7, "hb");
+        writeBytesField(pushFrame, 8, heartbeatPayload.toByteArray());
+        return pushFrame.toByteArray();
     }
 
     // =========================================================================

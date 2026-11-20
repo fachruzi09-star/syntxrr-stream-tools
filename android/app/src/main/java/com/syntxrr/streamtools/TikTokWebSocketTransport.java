@@ -53,6 +53,8 @@ public final class TikTokWebSocketTransport {
 
     public static final String DIRECT_WS_BASE_URL =
             "wss://webcast-ws.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/";
+    public static final String DIRECT_WS_FALLBACK_BASE_URL =
+            "wss://webcast-ws.us.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/";
 
     private static final String WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private static final int CONNECT_TIMEOUT_MS = 12_000;
@@ -74,6 +76,9 @@ public final class TikTokWebSocketTransport {
     private final AtomicBoolean mOpen = new AtomicBoolean(false);
     private final AtomicLong mLastPingSentMs = new AtomicLong(0L);
     private final AtomicLong mLastRttMs = new AtomicLong(0L);
+    private final AtomicLong mTikTokHeartbeatSequence = new AtomicLong(1L);
+    @Nullable
+    private volatile String mTikTokRoomId;
     private final Object mWriteLock = new Object();
 
     @Nullable
@@ -198,7 +203,36 @@ public final class TikTokWebSocketTransport {
             long heartbeatDurationMs,
             @NonNull Listener listener
     ) {
+        connect(wsUrl, sessionCookies, heartbeatDurationMs,
+                "https://www.tiktok.com", true, null, listener);
+    }
+
+    /** Backward-compatible provider-specific connection overload. */
+    public void connect(
+            @NonNull String wsUrl,
+            @Nullable Map<String, String> sessionCookies,
+            long heartbeatDurationMs,
+            @NonNull String origin,
+            boolean sendTikTokHeartbeat,
+            @NonNull Listener listener
+    ) {
+        connect(wsUrl, sessionCookies, heartbeatDurationMs,
+                origin, sendTikTokHeartbeat, null, listener);
+    }
+
+    /** Connect with an explicit room id for protocol-correct TikTok application heartbeats. */
+    public void connect(
+            @NonNull String wsUrl,
+            @Nullable Map<String, String> sessionCookies,
+            long heartbeatDurationMs,
+            @NonNull String origin,
+            boolean sendTikTokHeartbeat,
+            @Nullable String tikTokRoomId,
+            @NonNull Listener listener
+    ) {
         if (mClosed.get()) return;
+        mTikTokRoomId = tikTokRoomId != null ? tikTokRoomId.trim() : null;
+        mTikTokHeartbeatSequence.set(1L);
 
         Thread connectThread = new Thread(() -> {
             SSLSocket socket = null;
@@ -260,7 +294,7 @@ public final class TikTokWebSocketTransport {
                 req.append("Connection: Upgrade\r\n");
                 req.append("Sec-WebSocket-Key: ").append(secWebSocketKey).append("\r\n");
                 req.append("Sec-WebSocket-Version: 13\r\n");
-                req.append("Origin: https://www.tiktok.com\r\n");
+                req.append("Origin: ").append(origin).append("\r\n");
                 req.append("Accept-Language: en-US,en;q=0.9,id;q=0.8\r\n");
                 req.append("User-Agent: ").append(TikTokRoomResolver.MOBILE_USER_AGENT).append("\r\n");
                 String cookieHeader = TikTokRoomResolver.formatCookieHeader(sessionCookies);
@@ -307,8 +341,14 @@ public final class TikTokWebSocketTransport {
                     mOutput = out;
                 }
                 mOpen.set(true);
-                startHeartbeat(heartbeatDurationMs);
+                // Let the provider send its first application frame before starting keepalive.
+                // For Direct TikTok this is im_enter_room; its heartbeat must follow room entry.
                 listener.onConnected(hs.statusCode);
+                if (isOpen()) {
+                    // Keep every WebSocket alive with RFC 6455 Ping. Direct TikTok also
+                    // requires its application-level protobuf heartbeat; Euler does not.
+                    startHeartbeat(heartbeatDurationMs, sendTikTokHeartbeat);
+                }
 
                 readFrameLoop(in, listener);
             } catch (Exception e) {
@@ -356,7 +396,7 @@ public final class TikTokWebSocketTransport {
         }
     }
 
-    private void startHeartbeat(long heartbeatDurationMs) {
+    private void startHeartbeat(long heartbeatDurationMs, boolean sendTikTokHeartbeat) {
         long intervalMs = Math.max(8_000L, Math.min(30_000L, heartbeatDurationMs > 0 ? heartbeatDurationMs : 10_000L));
         ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "TikTokWsHeartbeat");
@@ -369,7 +409,14 @@ public final class TikTokWebSocketTransport {
             try {
                 mLastPingSentMs.set(System.currentTimeMillis());
                 writeFrame(0x9, new byte[0]); // RFC 6455 Ping
-                writeFrame(0x2, TikTokWebcastDecoder.encodePushFrameHeartbeat());
+                if (sendTikTokHeartbeat) {
+                    String roomId = mTikTokRoomId;
+                    if (roomId != null && !roomId.isEmpty()) {
+                        long sequenceId = mTikTokHeartbeatSequence.getAndIncrement();
+                        writeFrame(0x2,
+                                TikTokWebcastDecoder.encodePushFrameHeartbeat(roomId, sequenceId));
+                    }
+                }
             } catch (Exception ignored) {
             }
         }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
@@ -386,7 +433,9 @@ public final class TikTokWebSocketTransport {
     private boolean writeFrame(int opcode, @NonNull byte[] payload) {
         synchronized (mWriteLock) {
             OutputStream out = mOutput;
-            if (out == null || mClosed.get()) return false;
+            // close() marks the transport closed before emitting the RFC 6455 close
+            // frame; allow only that control frame through during shutdown.
+            if (out == null || (mClosed.get() && opcode != 0x8)) return false;
             try {
                 ByteArrayOutputStream frame = new ByteArrayOutputStream(payload.length + 14);
                 frame.write(0x80 | (opcode & 0x0F)); // FIN=1
