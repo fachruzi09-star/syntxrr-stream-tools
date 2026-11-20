@@ -3,14 +3,17 @@ import { AlertTriangle, Mic, MonitorPlay, Radio, Settings2, Wifi } from 'lucide-
 import type { AppSettings, ModeBAudioSource } from '../../types';
 import type { ModeBStreamSnapshot } from '../../services/nativeStreamingBridge';
 import { isModeBStoppableStatus } from '../../services/modeBController';
+import { useTranslation } from '../../i18n/I18nContext';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { StatusDot } from '../ui/StatusDot';
+import type { StatusTone } from '../ui/StatusDot';
 import { InfoBanner, MetricTile, StatusRow } from './parts';
 import type { PanelTone } from './parts';
 
 interface ModeBPanelProps {
-  isEnglish: boolean;
+  /** Retained for API compatibility — copy now resolves through the i18n dictionary. */
+  isEnglish?: boolean;
   settings: AppSettings;
   modeBStatus: ModeBStreamSnapshot;
   isModeBActionPending: boolean;
@@ -26,15 +29,22 @@ interface ModeBPanelProps {
 
 const BUSY_STATUSES = ['starting', 'connecting', 'stopping', 'resharing'];
 
+/** One derived view per lifecycle state so chip dot, chip text and row agree. */
+interface StatusView {
+  dot: StatusTone;
+  tone: PanelTone;
+  label: string;
+}
+
 /**
  * Mode B operational panel — independent RTMP encoder.
  *
  * Every metric here is labelled either as configured (a target the user set)
  * or as measured (only when the encoder actually reports it). No estimated
- * hardware telemetry is invented.
+ * hardware telemetry is invented, and no state claims success without the
+ * controller confirming that the encoder is really streaming.
  */
 export function ModeBPanel({
-  isEnglish,
   settings,
   modeBStatus,
   isModeBActionPending,
@@ -47,6 +57,7 @@ export function ModeBPanel({
   onToggleHostWait,
   onUpdateSettings,
 }: ModeBPanelProps) {
+  const { t } = useTranslation();
   const isLiveVerified = modeBStatus.status === 'live' && modeBStatus.isStreaming;
   const isBusy = BUSY_STATUSES.includes(modeBStatus.status);
   const isHostWait = modeBStatus.status === 'host_wait';
@@ -55,60 +66,50 @@ export function ModeBPanel({
   // re-share means the previous screen is gone — not attached.
   const isCaptureLost = modeBStatus.status === 'capture_lost';
   const isAwaitingScreen = modeBStatus.status === 'reshare_waiting';
+  const isResharing = modeBStatus.status === 'resharing';
 
-  const statusTone: PanelTone = isLiveVerified
-    ? 'success'
-    : modeBStatus.status === 'error' || modeBStatus.status === 'capture_lost'
-      ? 'danger'
-      : isBusy || isHostWait || modeBStatus.status === 'reshare_waiting'
-        ? 'warning'
-        : modeBStatus.status === 'disconnected'
-          ? 'warning'
-          : 'neutral';
+  const statusView: StatusView = (() => {
+    if (isLiveVerified) {
+      return { dot: 'connected', tone: 'success', label: t('dash.modeB.status.live') };
+    }
+    switch (modeBStatus.status) {
+      case 'live':
+        // The controller reports live but has not confirmed streaming: never
+        // render this as a success state.
+        return { dot: 'connecting', tone: 'warning', label: t('dash.modeB.status.awaitConfirm') };
+      case 'host_wait':
+        return { dot: 'connecting', tone: 'warning', label: t('dash.modeB.status.hostWait') };
+      case 'reshare_waiting':
+        return { dot: 'connecting', tone: 'warning', label: t('dash.modeB.status.reshareWait') };
+      case 'resharing':
+        return { dot: 'connecting', tone: 'warning', label: t('dash.modeB.status.resharing') };
+      case 'starting':
+      case 'connecting':
+        return { dot: 'connecting', tone: 'warning', label: t('dash.modeB.status.starting') };
+      case 'stopping':
+        return { dot: 'connecting', tone: 'warning', label: t('dash.modeB.status.stopping') };
+      case 'capture_lost':
+        return { dot: 'disconnected', tone: 'danger', label: t('dash.modeB.status.captureLost') };
+      case 'error':
+        return { dot: 'disconnected', tone: 'danger', label: t('dash.modeB.status.error') };
+      case 'disconnected':
+        return { dot: 'disconnected', tone: 'danger', label: t('dash.modeB.status.disconnected') };
+      case 'stopped':
+        return { dot: 'idle', tone: 'neutral', label: t('dash.modeB.status.stopped') };
+      default:
+        return { dot: 'idle', tone: 'neutral', label: t('dash.modeB.status.standby') };
+    }
+  })();
 
-  const statusLabel = isLiveVerified
-    ? isEnglish
-      ? 'Encoding'
-      : 'Meng-encode'
-    : modeBStatus.status === 'host_wait'
-      ? isEnglish
-        ? 'Waiting screen'
-        : 'Layar tunggu'
-      : modeBStatus.status === 'reshare_waiting'
-        ? isEnglish
-          ? 'Waiting for screen'
-          : 'Menunggu layar'
-        : modeBStatus.status === 'resharing'
-          ? isEnglish
-            ? 'Reconnecting screen'
-            : 'Menyambung layar'
-          : modeBStatus.status === 'starting' || modeBStatus.status === 'connecting'
-            ? isEnglish
-              ? 'Starting encoder'
-              : 'Memulai encoder'
-            : modeBStatus.status === 'stopping'
-              ? isEnglish
-                ? 'Stopping'
-                : 'Menghentikan'
-              : modeBStatus.status === 'capture_lost'
-                ? isEnglish
-                  ? 'Capture lost'
-                  : 'Capture terputus'
-                : modeBStatus.status === 'error'
-                  ? isEnglish
-                    ? 'Encoder error'
-                    : 'Error encoder'
-                  : modeBStatus.status === 'disconnected'
-                    ? isEnglish
-                      ? 'RTMP disconnected'
-                      : 'RTMP terputus'
-                    : modeBStatus.status === 'stopped'
-                      ? isEnglish
-                        ? 'Stopped'
-                        : 'Berhenti'
-                      : isEnglish
-                        ? 'Standby'
-                        : 'Siaga';
+  const captureView: { tone: PanelTone; label: string } = isCaptureLost
+    ? { tone: 'danger', label: t('dash.modeB.value.lost') }
+    : isAwaitingScreen
+      ? { tone: 'warning', label: t('dash.modeB.value.waitingScreen') }
+      : isResharing
+        ? { tone: 'warning', label: t('dash.modeB.value.reAttaching') }
+        : isLiveVerified || isHostWait
+          ? { tone: 'success', label: t('dash.modeB.value.attached') }
+          : { tone: 'neutral', label: t('dash.modeB.value.idle') };
 
   const audioSource: ModeBAudioSource =
     settings.modeBAudioSource === 'internal' || settings.modeBAudioSource === 'microphone'
@@ -117,29 +118,17 @@ export function ModeBPanel({
 
   const audioSourceLabel =
     audioSource === 'internal'
-      ? isEnglish
-        ? 'Internal audio'
-        : 'Audio internal'
+      ? t('dash.modeB.audio.internal')
       : audioSource === 'microphone'
-        ? isEnglish
-          ? 'Microphone only'
-          : 'Mikrofon saja'
-        : isEnglish
-          ? 'Mix (mic + internal)'
-          : 'Campur (mik + internal)';
+        ? t('dash.modeB.audio.microphone')
+        : t('dash.modeB.audio.mix');
 
   const startLabel =
     modeBStatus.status === 'reshare_waiting' || (modeBStatus.status === 'capture_lost' && modeBStatus.isStreaming)
-      ? isEnglish
-        ? 'Share Screen Again'
-        : 'Bagikan Layar Lagi'
+      ? t('dash.modeB.action.reshare')
       : isLiveVerified || isHostWait
-        ? isEnglish
-          ? 'Stop Encoder'
-          : 'Hentikan Encoder'
-        : isEnglish
-          ? 'Start Encoder'
-          : 'Mulai Encoder';
+        ? t('dash.modeB.action.stopEncoder')
+        : t('dash.modeB.action.startEncoder');
 
   const handlePrimaryAction = () => {
     if (modeBStatus.status === 'reshare_waiting' || (modeBStatus.status === 'capture_lost' && modeBStatus.isStreaming)) {
@@ -170,28 +159,16 @@ export function ModeBPanel({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 id="mode-b-heading" className="text-[15px] font-semibold tracking-tight text-sx-text">
-              {isEnglish ? 'RTMP Streaming Encoder' : 'Encoder Streaming RTMP'}
+              {t('dash.modeB.title')}
             </h2>
             <p className="mt-0.5 text-sx-caption leading-relaxed text-sx-text-muted">
-              {isEnglish
-                ? 'SYNTXRR captures, encodes and pushes the stream itself. No TikTok app involved.'
-                : 'SYNTXRR menangkap, meng-encode, dan mengirim siaran sendiri. Tanpa aplikasi TikTok.'}
+              {t('dash.modeB.desc')}
             </p>
           </div>
           <span className="flex shrink-0 items-center gap-1.5 rounded-sx-full border border-sx-border bg-sx-surface-2 px-2 py-1">
-            <StatusDot
-              tone={
-                isLiveVerified
-                  ? 'connected'
-                  : isCaptureLost || modeBStatus.status === 'error'
-                    ? 'disconnected'
-                    : isBusy || isHostWait || isAwaitingScreen
-                      ? 'connecting'
-                      : 'idle'
-              }
-            />
+            <StatusDot tone={statusView.dot} />
             <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-sx-text-secondary">
-              {statusLabel}
+              {statusView.label}
             </span>
           </span>
         </div>
@@ -199,19 +176,19 @@ export function ModeBPanel({
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <MetricTile
             icon={MonitorPlay}
-            label={isEnglish ? 'Resolution' : 'Resolusi'}
+            label={t('dash.modeB.metric.resolution')}
             value={settings.targetResolution || '—'}
-            hint={isEnglish ? 'Configured' : 'Dikonfigurasi'}
+            hint={t('dash.modeB.hint.configured')}
           />
           <MetricTile
             icon={Radio}
-            label="FPS"
+            label={t('dash.modeB.metric.fps')}
             value={settings.frameRate ? String(settings.frameRate) : '—'}
-            hint={isEnglish ? 'Configured' : 'Dikonfigurasi'}
+            hint={t('dash.modeB.hint.configured')}
           />
           <MetricTile
             icon={Wifi}
-            label={isEnglish ? 'Bitrate' : 'Bitrate'}
+            label={t('dash.modeB.metric.bitrate')}
             value={
               isLiveVerified && modeBStatus.bitrateKbps > 0
                 ? `${modeBStatus.bitrateKbps} kbps`
@@ -219,23 +196,27 @@ export function ModeBPanel({
                   ? `${settings.videoBitrateKbps} kbps`
                   : '—'
             }
-            hint={isLiveVerified && modeBStatus.bitrateKbps > 0 ? (isEnglish ? 'Measured' : 'Terukur') : isEnglish ? 'Target' : 'Target'}
+            hint={
+              isLiveVerified && modeBStatus.bitrateKbps > 0
+                ? t('dash.modeB.hint.measured')
+                : t('dash.modeB.hint.target')
+            }
             tone={isLiveVerified ? 'success' : 'neutral'}
           />
           <MetricTile
             icon={Mic}
-            label={isEnglish ? 'Audio' : 'Audio'}
+            label={t('dash.modeB.metric.audio')}
             value={audioSourceLabel}
-            hint={isEnglish ? 'Configured' : 'Dikonfigurasi'}
+            hint={t('dash.modeB.hint.configured')}
           />
         </div>
 
         <div className="mt-3 divide-y divide-sx-border-subtle rounded-sx-md border border-sx-border-subtle bg-sx-surface-2 px-2.5 py-1">
           <StatusRow
-            label={isEnglish ? 'Encoder state' : 'Status encoder'}
-            value={statusLabel}
+            label={t('dash.modeB.row.state')}
+            value={statusView.label}
             detail={modeBStatus.message || undefined}
-            tone={statusTone}
+            tone={statusView.tone}
           />
           <StatusRow
             label="RTMP"
@@ -243,47 +224,31 @@ export function ModeBPanel({
             tone={rtmpIssue ? 'warning' : settings.rtmpServer ? 'success' : 'neutral'}
           />
           <StatusRow
-            label={isEnglish ? 'Stream key' : 'Stream key'}
-            value={hasStreamKey ? (isEnglish ? 'Configured' : 'Tersimpan') : isEnglish ? 'Not set' : 'Belum diatur'}
+            label={t('dash.modeB.row.streamKey')}
+            value={hasStreamKey ? t('dash.modeB.value.saved') : t('dash.modeB.value.notSet')}
             tone={hasStreamKey ? 'success' : 'warning'}
           />
           <StatusRow
-            label={isEnglish ? 'Screen capture' : 'Tangkap layar'}
-            value={
-              isCaptureLost
-                ? isEnglish
-                  ? 'Lost'
-                  : 'Terputus'
-                : isAwaitingScreen
-                  ? isEnglish
-                    ? 'Waiting for screen'
-                    : 'Menunggu layar'
-                  : isLiveVerified || isHostWait
-                    ? isEnglish
-                      ? 'Attached'
-                      : 'Terpasang'
-                    : isEnglish
-                      ? 'Idle'
-                      : 'Siaga'
-            }
-            tone={isCaptureLost ? 'danger' : isAwaitingScreen ? 'warning' : isLiveVerified ? 'success' : 'neutral'}
+            label={t('dash.modeB.row.capture')}
+            value={captureView.label}
+            tone={captureView.tone}
           />
         </div>
 
         {rtmpIssue ? (
-          <InfoBanner tone="warning" title={isEnglish ? 'RTMP configuration incomplete' : 'Konfigurasi RTMP belum lengkap'} className="mt-3">
+          <InfoBanner tone="warning" title={t('dash.modeB.banner.rtmpIncomplete')} className="mt-3">
             {rtmpIssue}
           </InfoBanner>
         ) : null}
 
         {modeBNotificationWarning ? (
-          <InfoBanner tone="warning" title={isEnglish ? 'Background limit' : 'Batasan latar belakang'} className="mt-3">
+          <InfoBanner tone="warning" title={t('dash.modeB.banner.background')} className="mt-3">
             {modeBNotificationWarning}
           </InfoBanner>
         ) : null}
 
         {modeBStatus.status === 'error' && modeBStatus.message ? (
-          <InfoBanner tone="danger" title={isEnglish ? 'Encoder reported an error' : 'Encoder melaporkan error'} className="mt-3">
+          <InfoBanner tone="danger" title={t('dash.modeB.banner.error')} className="mt-3">
             {modeBStatus.message}
           </InfoBanner>
         ) : null}
@@ -306,7 +271,7 @@ export function ModeBPanel({
               onClick={() => void onStopStream?.()}
               disabled={isModeBActionPending || !canStop}
             >
-              {isEnglish ? 'Stop' : 'Hentikan'}
+              {t('dash.modeB.action.stop')}
             </Button>
             <Button
               variant="outline"
@@ -314,20 +279,14 @@ export function ModeBPanel({
               onClick={() => void onToggleHostWait?.()}
               disabled={isModeBActionPending || !(isLiveVerified || isHostWait)}
             >
-              {isHostWait
-                ? isEnglish
-                  ? 'Exit host wait'
-                  : 'Keluar layar tunggu'
-                : isEnglish
-                  ? 'Host wait'
-                  : 'Layar tunggu'}
+              {isHostWait ? t('dash.modeB.action.exitHostWait') : t('dash.modeB.action.hostWait')}
             </Button>
           </div>
 
           <label className="mt-1 block">
             <span className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-sx-text-muted">
               <Icon icon={Settings2} size="xs" tone="muted" />
-              {isEnglish ? 'Audio source' : 'Sumber audio'}
+              {t('dash.modeB.audioSource')}
             </span>
             <select
               value={audioSource}
@@ -337,9 +296,9 @@ export function ModeBPanel({
               }}
               className="min-h-[44px] w-full rounded-sx-md border border-sx-border bg-sx-input px-2.5 text-sx-caption font-semibold text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
             >
-              <option value="mix">{isEnglish ? 'Mix (mic + internal)' : 'Campur (mik + internal)'}</option>
-              <option value="microphone">{isEnglish ? 'Microphone only' : 'Mikrofon saja'}</option>
-              <option value="internal">{isEnglish ? 'Internal audio' : 'Audio internal'}</option>
+              <option value="mix">{t('dash.modeB.audio.mix')}</option>
+              <option value="microphone">{t('dash.modeB.audio.microphone')}</option>
+              <option value="internal">{t('dash.modeB.audio.internal')}</option>
             </select>
           </label>
         </div>
@@ -349,13 +308,11 @@ export function ModeBPanel({
         <div className="flex items-center gap-1.5">
           <Icon icon={AlertTriangle} size="xs" tone="muted" />
           <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-sx-text-muted">
-            {isEnglish ? 'Configured vs measured' : 'Konfigurasi vs terukur'}
+            {t('dash.modeB.honesty.title')}
           </span>
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-sx-text-secondary">
-          {isEnglish
-            ? 'Resolution, FPS and bitrate above are targets you configured. A live bitrate is shown only when the encoder reports it. Thermal and encoder benchmarks are not available yet.'
-            : 'Resolusi, FPS, dan bitrate di atas adalah target yang Anda konfigurasi. Bitrate langsung hanya ditampilkan bila encoder melaporkannya. Benchmark termal dan encoder belum tersedia.'}
+          {t('dash.modeB.honesty.body')}
         </p>
       </div>
     </section>

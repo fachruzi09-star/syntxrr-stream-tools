@@ -26,7 +26,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
   onClose,
   currentMode,
 }) => {
-  const { isEnglish } = useTranslation();
+  const { t } = useTranslation();
   if (!isOpen) return null;
 
   const isModeA = isModeAOperatingMode(currentMode);
@@ -35,32 +35,29 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
     {
       id: 'a' as const,
       name: 'Mode A',
-      title: isEnglish ? 'TikTok LIVE Companion' : 'Kompanion TikTok LIVE',
+      title: t('modeInfo.modeA.title'),
       active: isModeA,
-      summary: isEnglish
-        ? 'You broadcast with the official TikTok app. SYNTXRR reads LIVE activity and runs companion tools on top of it.'
-        : 'Anda menyiarkan dengan aplikasi TikTok resmi. SYNTXRR membaca aktivitas LIVE dan menjalankan alat kompanion di atasnya.',
-      needs: isEnglish
-        ? ['TikTok target @username', 'Optional account link', 'Overlay permission for the HUD']
-        : ['Target @username TikTok', 'Penautan akun (opsional)', 'Izin overlay untuk HUD'],
-      doesNot: isEnglish
-        ? 'SYNTXRR cannot start, pause or stop the official TikTok LIVE broadcast.'
-        : 'SYNTXRR tidak dapat memulai, menjeda, atau menghentikan siaran LIVE TikTok resmi.',
+      summary: t('modeInfo.modeA.summary'),
+      needs: [
+        t('modeInfo.modeA.need1'),
+        t('modeInfo.modeA.need2'),
+        t('modeInfo.modeA.need3'),
+      ],
+      doesNot: t('modeInfo.modeA.doesNot'),
     },
     {
       id: 'b' as const,
       name: 'Mode B',
-      title: isEnglish ? 'RTMP Streaming Encoder' : 'Encoder Streaming RTMP',
+      title: t('modeInfo.modeB.title'),
       active: !isModeA,
-      summary: isEnglish
-        ? 'SYNTXRR captures the screen, encodes video and audio, and pushes RTMP to your own destination.'
-        : 'SYNTXRR menangkap layar, meng-encode video dan audio, lalu mengirim RTMP ke tujuan Anda sendiri.',
-      needs: isEnglish
-        ? ['RTMP server URL', 'Your own stream key', 'Screen capture consent', 'Notification permission for the foreground service']
-        : ['URL server RTMP', 'Stream key milik Anda', 'Persetujuan tangkap layar', 'Izin notifikasi untuk foreground service'],
-      doesNot: isEnglish
-        ? 'Encoded quality depends on your device. Unavailable or simulated metrics are never shown as live telemetry.'
-        : 'Kualitas encoding bergantung pada perangkat. Metrik yang tidak tersedia tidak pernah ditampilkan sebagai telemetri langsung.',
+      summary: t('modeInfo.modeB.summary'),
+      needs: [
+        t('modeInfo.modeB.need1'),
+        t('modeInfo.modeB.need2'),
+        t('modeInfo.modeB.need3'),
+        t('modeInfo.modeB.need4'),
+      ],
+      doesNot: t('modeInfo.modeB.doesNot'),
     },
   ];
 
@@ -75,18 +72,14 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 id="mode-info-title" className="text-[15px] font-semibold tracking-tight text-sx-text">
-              {isEnglish ? 'How the two modes differ' : 'Perbedaan kedua mode'}
+              {t('modeInfo.title')}
             </h3>
-            <p className="mt-0.5 text-sx-caption text-sx-text-muted">
-              {isEnglish
-                ? 'Switch modes from the selector on the Dashboard.'
-                : 'Ganti mode lewat selektor di Dashboard.'}
-            </p>
+            <p className="mt-0.5 text-sx-caption text-sx-text-muted">{t('modeInfo.subtitle')}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label={isEnglish ? 'Close' : 'Tutup'}
+            aria-label={t('modeInfo.close')}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
           >
             <Icon icon={X} size="md" tone="inherit" />
@@ -120,7 +113,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
                   <span className="flex items-center gap-1.5">
                     <StatusDot tone="ready" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-sx-text-secondary">
-                      {isEnglish ? 'Selected' : 'Dipilih'}
+                      {t('modeInfo.selected')}
                     </span>
                   </span>
                 ) : null}
@@ -130,7 +123,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
 
               <div className="mt-2">
                 <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-sx-text-muted">
-                  {isEnglish ? 'Requires' : 'Membutuhkan'}
+                  {t('modeInfo.requires')}
                 </div>
                 <ul className="mt-1 space-y-0.5">
                   {mode.needs.map((need) => (
@@ -150,7 +143,7 @@ export const ModeLauncherModal: React.FC<ModeLauncherModalProps> = ({
         </div>
 
         <Button variant="secondary" fullWidth className="mt-3" onClick={onClose}>
-          {isEnglish ? 'Close' : 'Tutup'}
+          {t('modeInfo.close')}
         </Button>
       </div>
     </div>
