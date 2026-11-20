@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { streamEventBus } from '../services/eventBus';
 import { soundSynth } from '../services/audioSimulator';
+import { showInAppNotice } from '../services/uiNotice';
 import { audioEngine } from '../services/localAudioEngine';
 import {
   songRequestEngine,
@@ -921,11 +922,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
             videoRefs.current[elemId]!.play().catch(() => {});
           }
         } else {
-          alert('Webcam mediaDevices tidak didukung oleh browser ini.');
+          showInAppNotice({
+            tone: 'warn',
+            title: 'Kamera Tidak Didukung',
+            message: 'Webcam mediaDevices tidak didukung oleh browser ini.',
+          });
         }
       } catch (err: any) {
         console.warn('Camera error for element', elemId, err);
-        alert('Gagal mengakses kamera: ' + (err.message || 'Izin kamera ditolak'));
+        showInAppNotice({
+          tone: 'error',
+          title: 'Gagal Mengakses Kamera',
+          message: err?.message || 'Izin kamera ditolak.',
+        });
       }
     }
   };
@@ -967,7 +976,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
             };
           }
         } else {
-          alert('Screen capture getDisplayMedia tidak didukung di perangkat/browser ini.');
+          showInAppNotice({
+            tone: 'warn',
+            title: 'Screen Capture Tidak Didukung',
+            message: 'Screen capture getDisplayMedia tidak didukung di perangkat/browser ini.',
+          });
         }
       } catch (err: any) {
         console.warn('Screen capture error:', err);
@@ -985,7 +998,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const isAudio = file.type.startsWith('audio/') || validExts.some((ext) => lowerName.endsWith(ext));
 
     if (!isAudio) {
-      alert('Format file audio tidak didukung. Harap pilih file audio MP3, WAV, OGG, M4A, atau AAC.');
+      showInAppNotice({
+        tone: 'warn',
+        title: 'Format Audio Tidak Didukung',
+        message: 'Harap pilih file audio MP3, WAV, OGG, M4A, atau AAC.',
+      });
       e.target.value = '';
       return;
     }

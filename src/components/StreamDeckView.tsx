@@ -16,6 +16,7 @@ import {
   DEFAULT_DECK_PAGES,
   DEFAULT_DECK_BUTTONS,
 } from '../services/streamDeckService';
+import { showInAppNotice } from '../services/uiNotice';
 import {
   Smartphone,
   Tv,
@@ -303,9 +304,31 @@ export const StreamDeckView: React.FC<StreamDeckViewProps> = ({
   };
 
   const handleCopyPairingToken = () => {
-    if (pairingData?.pairingToken) {
-      navigator.clipboard.writeText(pairingData.pairingToken);
-      alert('Token pairing disalin ke clipboard!');
+    const token = pairingData?.pairingToken;
+    if (!token) return;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(token)
+        .then(() => {
+          showInAppNotice({
+            tone: 'success',
+            title: 'Token Disalin',
+            message: 'Token pairing berhasil disalin ke clipboard.',
+          });
+        })
+        .catch(() => {
+          showInAppNotice({
+            tone: 'warn',
+            title: 'Gagal Menyalin',
+            message: 'Browser menolak akses clipboard. Salin token secara manual.',
+          });
+        });
+    } else {
+      showInAppNotice({
+        tone: 'warn',
+        title: 'Clipboard Tidak Tersedia',
+        message: 'Salin token pairing secara manual dari layar.',
+      });
     }
   };
 

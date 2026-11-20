@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LocalAudioTrackMeta } from '../../types';
 import { audioEngine, AudioEngineState } from '../../services/localAudioEngine';
+import { showInAppNotice } from '../../services/uiNotice';
 import {
   FileAudio,
   Play,
@@ -60,9 +61,11 @@ export const LocalAudioPlayer: React.FC<LocalAudioPlayerProps> = ({
   const handlePlayLocalTrack = async (trackMeta: LocalAudioTrackMeta) => {
     const file = localFilesMap.get(trackMeta.id);
     if (!file) {
-      alert(
-        `File "${trackMeta.filename}" requires re-selection. Browser security prohibits automatic access to local device paths across sessions.`
-      );
+      showInAppNotice({
+        tone: 'warn',
+        title: 'Berkas Perlu Dipilih Ulang',
+        message: `File "${trackMeta.filename}" perlu dipilih ulang karena browser membatasi akses otomatis path lokal antar sesi.`,
+      });
       return;
     }
     await audioEngine.loadAndPlayFile(trackMeta.id, trackMeta.title, trackMeta.artist, file);

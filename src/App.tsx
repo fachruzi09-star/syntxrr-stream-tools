@@ -134,8 +134,10 @@ import {
   hudEventSourceStatus,
 } from './services/hudController';
 import type { HudChatEntry } from './services/hudController';
-import { applyTheme } from './theme/themeEngine';
+import { applyTheme, DEFAULT_APP_THEME } from './theme/themeEngine';
 import { I18nProvider } from './i18n/I18nContext';
+import { InAppNoticeBanner } from './components/InAppNoticeBanner';
+import { showInAppNotice } from './services/uiNotice';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -399,7 +401,7 @@ export default function App() {
         soundboardEngine.setVolume(normalizeUnitVolume(savedSettings.soundboardVolume, 0.85));
 
         // Apply saved theme immediately on startup
-        applyTheme(savedSettings.theme || 'navy_dark');
+        applyTheme(savedSettings.theme || DEFAULT_APP_THEME);
       } catch (err) {
         console.error('Error loading data from IndexedDB:', err);
       } finally {
@@ -410,9 +412,15 @@ export default function App() {
     loadInitialData();
   }, []);
 
-  // Synchronize theme changes in real time across the entire application
+  // Synchronize theme tokens & native Capacitor StatusBar in real time across the application
   useEffect(() => {
-    applyTheme(settings.theme || 'navy_dark');
+    const appliedMeta = applyTheme(settings.theme || DEFAULT_APP_THEME);
+    if (Capacitor.isNativePlatform()) {
+      StatusBar.setStyle({
+        style: appliedMeta.appearance === 'light' ? Style.Light : Style.Dark,
+      }).catch(() => {});
+      StatusBar.setBackgroundColor({ color: appliedMeta.bg }).catch(() => {});
+    }
   }, [settings.theme]);
 
   useEffect(() => {
@@ -587,15 +595,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleQuickSlotKeyDown);
   }, [settings.soundboardVolume, soundboardItems]);
 
-  // Android Native Hardware Back Button & Status Bar Handling (Capacitor)
+  // Android Native Hardware Back Button Handling (Capacitor)
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      StatusBar.setBackgroundColor({ color: '#080C16' }).catch(() => {});
-    }
-
     const backListenerPromise = CapApp.addListener('backButton', () => {
-      // 1. If drawer or modal is open, dismiss it
+      // 1. If confirmation modal, drawer, or alert is open, dismiss it
+      if (pendingConfirmModal) {
+        setPendingConfirmModal(null);
+        return;
+      }
       if (isDrawerOpen) {
         setIsDrawerOpen(false);
         return;
@@ -620,7 +627,7 @@ export default function App() {
     return () => {
       backListenerPromise.then((handle) => handle.remove()).catch(() => {});
     };
-  }, [isDrawerOpen, isModeModalOpen, activeFloatingAlert, activeNav]);
+  }, [pendingConfirmModal, isDrawerOpen, isModeModalOpen, activeFloatingAlert, activeNav]);
 
   const activePreset = presets.find((p) => p.id === activePresetId) || presets[0] || null;
   const isModeBSelected = isModeBOperatingMode(settings.operatingMode);
@@ -2241,30 +2248,42 @@ export default function App() {
   };
 
   const handleResetDefaults = async () => {
-    if (window.confirm('Apakah Anda yakin ingin mengembalikan seluruh pengaturan ke default?')) {
-      // Selesaikan tulisan tertunda agar data lama tidak dibangkitkan setelah reset.
-      await flushPendingSettings();
-      await flushStudioPersistence();
-      soundboardItems.forEach((item) => {
-        soundboardEngine.removeCustomFile(item.id);
-        if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
-      });
-      previousSoundboardUrls.current.clear();
-      await tiktokLiveConnector.disconnect();
-      await StorageService.resetToDefaults();
-      setSettings(DEFAULT_SETTINGS);
-      setTiktokAccount(DEFAULT_TIKTOK_ACCOUNT_STATE);
-      setModeASessionMode('inactive');
-      setPresets(DEFAULT_PRESETS);
-      setActivePresetId(DEFAULT_PRESETS[0].id);
-      setStudioElements(DEFAULT_STUDIO_ELEMENTS);
-      setSoundboardItems(DEFAULT_SOUNDBOARD);
-      setMarketplaceItems(DEFAULT_MARKETPLACE_ITEMS);
-      setIntegrations(DEFAULT_INTEGRATIONS);
-      setTTSConfig(DEFAULT_TTS_CONFIG);
-      setUnifiedQueue([]);
-      setLocalTracksMeta([]);
-    }
+    setPendingConfirmModal({
+      title: 'Atur Ulang ke Pengaturan Bawaan?',
+      message:
+        'Semua pengaturan tampilan, preset studio, soundboard kustom, dan daftar integrasi akan dikembalikan ke bawaan awal aplikasi.',
+      confirmLabel: 'Ya, Atur Ulang',
+      tone: 'danger',
+      onConfirm: async () => {
+        // Selesaikan tulisan tertunda agar data lama tidak dibangkitkan setelah reset.
+        await flushPendingSettings();
+        await flushStudioPersistence();
+        soundboardItems.forEach((item) => {
+          soundboardEngine.removeCustomFile(item.id);
+          if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
+        });
+        previousSoundboardUrls.current.clear();
+        await tiktokLiveConnector.disconnect();
+        await StorageService.resetToDefaults();
+        setSettings(DEFAULT_SETTINGS);
+        setTiktokAccount(DEFAULT_TIKTOK_ACCOUNT_STATE);
+        setModeASessionMode('inactive');
+        setPresets(DEFAULT_PRESETS);
+        setActivePresetId(DEFAULT_PRESETS[0].id);
+        setStudioElements(DEFAULT_STUDIO_ELEMENTS);
+        setSoundboardItems(DEFAULT_SOUNDBOARD);
+        setMarketplaceItems(DEFAULT_MARKETPLACE_ITEMS);
+        setIntegrations(DEFAULT_INTEGRATIONS);
+        setTTSConfig(DEFAULT_TTS_CONFIG);
+        setUnifiedQueue([]);
+        setLocalTracksMeta([]);
+        showInAppNotice({
+          tone: 'success',
+          title: 'Pengaturan Direset',
+          message: 'Seluruh pengaturan berhasil dikembalikan ke nilai bawaan.',
+        });
+      },
+    });
   };
 
   const handleSimulateEventFromDeck = (type: string, detail: string, amount?: number) => {
@@ -2707,23 +2726,25 @@ export default function App() {
         onOpenDrawer={() => setIsDrawerOpen(true)}
       />
 
-      {/* In-app Confirmation Modal (Mode Switch & Confirm End Live) */}
+      {/* In-app Confirmation Modal (Mode Switch, Confirm End Live & Reset Defaults) */}
       {pendingConfirmModal && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
         >
-          <div className="bg-[#0e172a] border border-slate-700 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-white">{pendingConfirmModal.title}</h3>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+          <div className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-[var(--app-shadow)] space-y-4">
+            <h3 className="text-base font-bold text-[var(--app-text)] font-display">
+              {pendingConfirmModal.title}
+            </h3>
+            <p className="text-xs sm:text-sm text-[var(--app-text-secondary)] leading-relaxed">
               {pendingConfirmModal.message}
             </p>
             <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={() => setPendingConfirmModal(null)}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold"
+                className="flex-1 min-h-[44px] py-2.5 px-4 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold transition-colors"
               >
                 Batal
               </button>
@@ -2734,10 +2755,10 @@ export default function App() {
                   setPendingConfirmModal(null);
                   void action();
                 }}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-white text-xs font-bold ${
+                className={`flex-1 min-h-[44px] py-2.5 px-4 rounded-xl text-xs font-bold transition-colors ${
                   pendingConfirmModal.tone === 'danger'
-                    ? 'bg-rose-600 hover:bg-rose-500'
-                    : 'bg-blue-600 hover:bg-blue-500'
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                    : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
                 }`}
               >
                 {pendingConfirmModal.confirmLabel}
@@ -2996,6 +3017,7 @@ export default function App() {
       />
       )}
       </div>
+      <InAppNoticeBanner />
     </I18nProvider>
   );
 }

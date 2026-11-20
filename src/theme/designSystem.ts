@@ -1,6 +1,6 @@
 /**
- * Design System Terpusat — SYNTXRR STREAM
- * Berdasarkan pedoman desain: Deep Navy, Electric Blue Accent, Status Jujur, Touch Targets >= 44px
+ * Design System Terpusat — SYNTXRR STREAM (D+ Signature Hybrid Flagship Edition)
+ * Token warna semantik, status jujur, dan target sentuh >= 44px
  */
 
 export type FeatureStatus = 'ACTIVE' | 'SIMULATION' | 'FOUNDATION' | 'NOT_CONNECTED' | 'NOT_SUPPORTED';
@@ -19,8 +19,8 @@ export const STATUS_DEFINITIONS: Record<FeatureStatus, StatusMeta> = {
     code: 'ACTIVE',
     label: 'Aktif',
     badgeClass: 'bg-emerald-950/80 text-emerald-400 border border-emerald-800',
-    dotColor: '#10B981',
-    color: '#10B981',
+    dotColor: '#34C77B',
+    color: '#34C77B',
     description: 'Fitur benar-benar berfungsi dan berjalan di perangkat.',
   },
   SIMULATION: {
@@ -43,8 +43,8 @@ export const STATUS_DEFINITIONS: Record<FeatureStatus, StatusMeta> = {
     code: 'NOT_CONNECTED',
     label: 'Belum Terhubung',
     badgeClass: 'bg-amber-950/80 text-amber-400 border border-amber-800',
-    dotColor: '#F59E0B',
-    color: '#F59E0B',
+    dotColor: '#EFA93A',
+    color: '#EFA93A',
     description: 'Menunggu kredensial atau otorisasi layanan pihak ketiga.',
   },
   NOT_SUPPORTED: {
@@ -58,15 +58,18 @@ export const STATUS_DEFINITIONS: Record<FeatureStatus, StatusMeta> = {
 };
 
 export const THEME_COLORS = {
-  canvas: '#080C16',
-  surface: '#0E1626',
-  card: '#131F36',
-  cardHover: '#182744',
-  border: '#1E293B',
-  borderLight: '#334155',
+  canvas: 'var(--app-bg, #0A0C10)',
+  surface: 'var(--app-surface, #11141B)',
+  surfaceElevated: 'var(--app-surface-elevated, #171B24)',
+  surfaceMuted: 'var(--app-surface-muted, #0E1117)',
+  card: 'var(--app-card, #171B24)',
+  cardHover: 'var(--app-surface-hover, #1D2330)',
+  border: 'var(--app-border, #202634)',
+  borderLight: 'var(--app-border-strong, #30394D)',
+  accentGold: '#F2C230',
   accentBlue: '#2563EB',
-  accentElectric: '#38BDF8',
-  textMuted: '#94A3B8',
-  textSecondary: '#CBD5E1',
-  textPrimary: '#F8FAFC',
+  accentElectric: 'var(--app-accent-text, #F2C230)',
+  textMuted: 'var(--app-text-muted, #8690A2)',
+  textSecondary: 'var(--app-text-secondary, #C8CFDC)',
+  textPrimary: 'var(--app-text, #F5F7FA)',
 };

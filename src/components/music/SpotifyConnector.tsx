@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SpotifySearchResult } from '../../types';
 import { SpotifyService } from '../../services/spotifyService';
+import { showInAppNotice } from '../../services/uiNotice';
 import {
   Search,
   ExternalLink,
@@ -71,7 +72,13 @@ export const SpotifyConnector: React.FC<SpotifyConnectorProps> = ({
     // Open official Spotify OAuth authorization window
     const popup = window.open(authUrl, 'spotify_oauth_popup', 'width=600,height=700');
     if (!popup) {
-      alert('Popup blocker prevented opening the Spotify login window. Please allow popups.');
+      const msg = 'Popup blocker mencegah pembukaan jendela login Spotify. Izinkan popup untuk melanjutkan.';
+      setErrorMessage(msg);
+      showInAppNotice({
+        tone: 'warn',
+        title: 'Popup Diblokir',
+        message: msg,
+      });
     }
   };
 

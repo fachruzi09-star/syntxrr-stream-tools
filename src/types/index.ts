@@ -42,7 +42,9 @@ export type FrameRate = 30 | 60;
 
 export type PerformanceProfile = 'battery_saver' | 'balanced' | 'performance';
 
-export type AppTheme = 'navy_dark' | 'obsidian_dark' | 'cyber_slate';
+export type ThemeAppearance = 'dark' | 'light';
+
+export type AppTheme = 'd_plus_dark' | 'd_plus_light' | 'navy_dark' | 'obsidian_dark' | 'cyber_slate';
 
 // SETTINGS FOUNDATION
 export type AppLanguage = 'id-ID' | 'en-US';

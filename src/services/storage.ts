@@ -20,6 +20,7 @@ import {
 } from '../types';
 import { DEFAULT_TTS_CONFIG } from './ttsService';
 import { normalizeStudioPreset } from './presetModel';
+import { DEFAULT_APP_THEME, normalizeStoredAppTheme } from '../theme/themeEngine';
 
 const DB_NAME = 'syntxrr_stream_tools_db';
 const DB_VERSION = 3; // Incremented for SYNTXRR STREAM Master Architecture
@@ -61,7 +62,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   targetResolution: '1080p',
   frameRate: 60,
   performanceProfile: 'balanced',
-  theme: 'navy_dark',
+  theme: DEFAULT_APP_THEME,
   canvasOrientation: '9:16',
   rtmpServer: 'rtmp://live.twitch.tv/app',
   streamKey: '',
@@ -760,6 +761,10 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
   if ('operatingMode' in merged) {
     merged.operatingMode = normalizeOperatingMode(merged.operatingMode as string | undefined);
   }
+  merged.theme = normalizeStoredAppTheme(
+    merged.theme,
+    normalizeStoredAppTheme(current.theme, DEFAULT_APP_THEME),
+  );
   merged.modeBAudioSource = normalizeModeBAudioSource(
     merged.modeBAudioSource,
     normalizeModeBAudioSource(current.modeBAudioSource, 'mix'),
@@ -782,6 +787,7 @@ function normalizeSettingsFields(settings: AppSettings): AppSettings {
   return {
     ...settings,
     operatingMode: normalizeOperatingMode(settings.operatingMode),
+    theme: normalizeStoredAppTheme(settings.theme, DEFAULT_APP_THEME),
     modeBAudioSource: normalizeModeBAudioSource(settings.modeBAudioSource, 'mix'),
     streamKey: typeof settings.streamKey === 'string' ? settings.streamKey : '',
     rtmpServer: typeof settings.rtmpServer === 'string' ? settings.rtmpServer : DEFAULT_SETTINGS.rtmpServer,

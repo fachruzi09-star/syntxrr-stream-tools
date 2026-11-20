@@ -994,12 +994,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           status="functional"
         >
           <Segmented<AppTheme>
+            columns="grid-cols-2"
             options={[
-              { value: 'navy_dark', label: 'Navy Dark', hint: isEnglish ? 'Default' : 'Bawaan' },
+              { value: 'd_plus_dark', label: 'Flagship Dark', hint: '#F2C230' },
+              { value: 'navy_dark', label: 'Navy Dark', hint: isEnglish ? 'Classic' : 'Klasik' },
               { value: 'obsidian_dark', label: 'Obsidian', hint: isEnglish ? 'Pure Black' : 'Gelap pekat' },
               { value: 'cyber_slate', label: 'Cyber Slate', hint: isEnglish ? 'High Contrast' : 'Kontras tinggi' },
             ]}
-            value={(settings.theme ?? 'navy_dark') as AppTheme}
+            value={(settings.theme === 'd_plus_light' ? 'd_plus_dark' : (settings.theme ?? 'd_plus_dark')) as AppTheme}
             onChange={(value) => {
               applyTheme(value);
               handleUpdate('theme', value);
