@@ -1,13 +1,12 @@
+import React from 'react';
 import { NavigationTab, OperatingMode, isModeAOperatingMode, StudioPreset } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
-import {
-  Radio,
-  Monitor,
-  ShieldAlert,
-  Layers,
-  Sparkles,
-  Zap,
-} from 'lucide-react';
+import { Layers, Menu } from 'lucide-react';
+import { Icon } from './ui/Icon';
+import { StatusDot } from './ui/StatusDot';
+import type { StatusTone } from './ui/StatusDot';
+import { cn } from './ui/cn';
+import { BrandMark } from './shell/BrandMark';
 
 interface HeaderProps {
   activeNav: NavigationTab;
@@ -16,10 +15,25 @@ interface HeaderProps {
   honestStatusLabel?: string;
   honestStatusTone?: 'ok' | 'warn' | 'error' | 'off';
   onNavigate: (nav: NavigationTab) => void;
-  onOpenModeModal: () => void;
-  onOpenDrawer?: () => void;
+  /** Retained for API compatibility. Mode switching now lives on the Dashboard. */
+  onOpenModeModal?: () => void;
+  onOpenDrawer: () => void;
 }
 
+const TONE_TO_DOT: Record<'ok' | 'warn' | 'error' | 'off', StatusTone> = {
+  ok: 'ready',
+  warn: 'connecting',
+  error: 'disconnected',
+  off: 'idle',
+};
+
+/**
+ * Compact premium application header.
+ *
+ * Identity + honest operational status + drawer access. It deliberately does
+ * NOT offer Mode A/B switching: the Dashboard owns the single authoritative
+ * selector, so this header only reports the current context as read-only text.
+ */
 export const Header: React.FC<HeaderProps> = ({
   activeNav,
   operatingMode,
@@ -27,115 +41,81 @@ export const Header: React.FC<HeaderProps> = ({
   honestStatusLabel,
   honestStatusTone = 'off',
   onNavigate,
-  onOpenModeModal,
+  onOpenDrawer,
 }) => {
-  const { t } = useTranslation();
+  const { t, isEnglish } = useTranslation();
   const isModeA = isModeAOperatingMode(operatingMode);
+  const statusLabel = honestStatusLabel || t('dash.statusNotConnected');
+  const showPresetChip = Boolean(activePreset) && activeNav !== 'studio';
 
   return (
-    <header className="pt-safe sticky top-0 z-30 bg-[#080c16]/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3">
-      {/* Zone 1: Single element brand wordmark */}
-      <div className="flex items-center gap-2.5 shrink-0">
-        <button
-          onClick={() => onNavigate('dashboard')}
-          className="flex items-center gap-2 text-left group"
-          title={t('header.toDashboard', 'Ke Dashboard')}
-        >
-          <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 group-hover:bg-blue-600/30 transition-colors">
-            <Radio className="w-4 h-4 text-blue-400" />
+    <header className="sticky top-0 z-40 border-b border-sx-border bg-sx-bg/95 backdrop-blur-md">
+      <div className="pt-[env(safe-area-inset-top)]">
+        <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 px-3 sm:px-5">
+          <button
+            type="button"
+            onClick={onOpenDrawer}
+            aria-label={isEnglish ? 'Open navigation' : 'Buka navigasi'}
+            className={cn(
+              '-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary',
+              'transition-colors hover:bg-sx-surface-2 hover:text-sx-text active:bg-sx-surface-3',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg',
+            )}
+          >
+            <Icon icon={Menu} size="lg" tone="inherit" />
+          </button>
+
+          <div className="flex min-w-0 items-center gap-2.5">
+            <BrandMark size={30} />
+            <div className="min-w-0">
+              <div className="flex items-baseline gap-1.5 leading-none">
+                <span className="truncate text-[15px] font-bold tracking-[0.14em] text-sx-text">
+                  SYNTXRR
+                </span>
+                <span className="truncate text-[15px] font-bold tracking-[0.14em] text-sx-accent">
+                  STREAM
+                </span>
+              </div>
+              <div className="mt-1 truncate text-[10px] font-semibold uppercase leading-none tracking-[0.16em] text-sx-text-muted">
+                {isModeA
+                  ? isEnglish
+                    ? 'LIVE COMPANION'
+                    : 'KOMPANION LIVE'
+                  : isEnglish
+                    ? 'RTMP ENCODER'
+                    : 'ENCODER RTMP'}
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="text-sm font-extrabold tracking-wider text-white flex items-center gap-1.5 leading-none">
-              SYNTXRR STREAM
-              <span className="text-[9px] text-blue-400 font-bold tracking-normal px-1 py-0.5 rounded bg-blue-950/80 border border-blue-800/60 uppercase">
-                {t('app.badge', 'STUDIO')}
+
+          <div className="ml-auto flex min-w-0 items-center gap-1.5">
+            {showPresetChip && activePreset ? (
+              <button
+                type="button"
+                onClick={() => onNavigate('studio')}
+                title={activePreset.name}
+                className={cn(
+                  'hidden min-h-[36px] max-w-[150px] items-center gap-1.5 rounded-sx-full border border-sx-border bg-sx-surface px-2.5',
+                  'text-[11px] font-semibold text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus sm:flex',
+                )}
+              >
+                <Icon icon={Layers} size="xs" tone="muted" />
+                <span className="truncate">{activePreset.name}</span>
+              </button>
+            ) : null}
+
+            <div
+              title={statusLabel}
+              className="flex min-h-[32px] min-w-0 items-center gap-1.5 rounded-sx-full border border-sx-border bg-sx-surface px-2.5 py-1"
+            >
+              <StatusDot tone={TONE_TO_DOT[honestStatusTone]} />
+              <span className="max-w-[132px] truncate text-[11px] font-semibold leading-none text-sx-text-secondary">
+                {statusLabel}
               </span>
             </div>
-            <div className="text-[10px] text-slate-400 font-medium tracking-tight mt-0.5">
-              {t('app.subtitle', 'Mobile Streaming Studio')}
-            </div>
           </div>
-        </button>
-      </div>
-
-      {/* Zone 2: Desktop / Tablet navigation links */}
-      <div className="hidden xl:flex items-center gap-4 text-xs font-semibold text-slate-300">
-        {[
-          { id: 'dashboard' as NavigationTab, label: t('nav.dashboard', 'Dashboard') },
-          { id: 'studio' as NavigationTab, label: t('nav.studio', 'Studio') },
-          { id: 'live_center' as NavigationTab, label: t('nav.live_center', 'Live') },
-          { id: 'remote_deck' as NavigationTab, label: t('nav.remote_deck', 'Remote Deck') },
-          { id: 'integrations' as NavigationTab, label: t('nav.integrations', 'Integrasi') },
-          { id: 'settings' as NavigationTab, label: t('nav.settings', 'Pengaturan') },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onNavigate(item.id)}
-            className={`transition-colors whitespace-nowrap px-2.5 py-1 rounded-md ${
-              activeNav === item.id
-                ? 'text-blue-400 font-bold bg-blue-950/50 border border-blue-800/40'
-                : 'hover:text-blue-400'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Zone 3: Connection status, Active Preset, Mode Switcher */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div
-          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border text-[11px] ${
-            honestStatusTone === 'ok'
-              ? 'border-emerald-700/60'
-              : honestStatusTone === 'error'
-              ? 'border-rose-800/60'
-              : 'border-amber-900/60'
-          }`}
-        >
-          <div
-            className={`w-2 h-2 rounded-full ${
-              honestStatusTone === 'ok'
-                ? 'bg-emerald-400'
-                : honestStatusTone === 'error'
-                ? 'bg-rose-400'
-                : 'bg-amber-400'
-            }`}
-          />
-          <span
-            className={`font-semibold ${
-              honestStatusTone === 'ok'
-                ? 'text-emerald-300'
-                : honestStatusTone === 'error'
-                ? 'text-rose-300'
-                : 'text-amber-300'
-            }`}
-          >
-            {honestStatusLabel || t('header.idle', 'Belum Siaran')}
-          </span>
         </div>
-
-        {activePreset && (
-          <button
-            onClick={() => onNavigate('studio')}
-            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1626] border border-blue-900/40 text-[11px] text-blue-300 hover:border-blue-700/60 transition-colors"
-            title={t('header.activePreset', 'Kelola Preset di Studio')}
-          >
-            <Layers className="w-3.5 h-3.5 text-blue-400" />
-            <span className="truncate max-w-[100px]">{activePreset.name}</span>
-          </button>
-        )}
-
-        <button
-          onClick={onOpenModeModal}
-          className="min-h-[38px] px-2.5 sm:px-3 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/50 text-blue-300 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
-          title={t('header.changeMode', 'Ubah Mode Operasi Studio')}
-        >
-          <Monitor className="w-3.5 h-3.5 text-blue-400" />
-          <span className="whitespace-nowrap">
-            {isModeA ? t('header.modeA', 'Mode A: TikTok') : t('header.modeB', 'Mode B: Encoder')}
-          </span>
-        </button>
       </div>
     </header>
   );
