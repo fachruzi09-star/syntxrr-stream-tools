@@ -2857,16 +2857,30 @@ export default function App() {
 
         {(activeNav === 'presets' || (activeNav as string) === 'scenes') && (
           <PresetManagerView
+            elements={studioElements}
+            canvasOrientation={settings.canvasOrientation}
+            onChangeOrientation={handleOrientationChange}
+            onUpdateElements={handleUpdateStudioElements}
+            onSaveAsPreset={handleSaveCanvasAsPreset}
             presets={presets}
             activePresetId={activePresetId}
+            activePreset={activePreset}
+            onUpdateActivePreset={handleUpdateActivePresetMetadata}
             onSelectPreset={handleSelectPreset}
             onCreatePreset={handleCreatePreset}
-            onCanImportPreset={guardModeBStructuralPresetAction}
             onDuplicatePreset={handleDuplicatePreset}
             onDeletePreset={handleDeletePreset}
+            onToggleFavoritePreset={handleToggleFavoritePreset}
             onRenamePreset={handleRenamePreset}
-            onToggleFavorite={handleToggleFavoritePreset}
-            onNavigateToStudio={() => setActiveNav('studio')}
+            marketplaceItems={marketplaceItems}
+            onInstallMarketplaceElements={handleInstallMarketplaceElements}
+            isModeBSelected={isModeBSelected}
+            modeBStatus={modeBStatus}
+            isModeBMutationLocked={isModeBMutationLocked}
+            isModeBActionPending={isModeBActionPending}
+            onApplyLiveSceneToModeB={handleApplyLiveSceneToModeB}
+            onUpdatePresetModeBSettings={handleUpdatePresetModeBSettings}
+            initialSidePanel="presets"
           />
         )}
 
