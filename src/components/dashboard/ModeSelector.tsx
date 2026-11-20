@@ -1,4 +1,5 @@
 import { Info } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { OperatingMode } from '../../types';
 import { useTranslation } from '../../i18n/I18nContext';
 import { Icon } from '../ui/Icon';
@@ -12,7 +13,7 @@ interface ModeSelectorProps {
 }
 
 const SEGMENT_BASE =
-  'flex min-h-[46px] flex-1 flex-col items-start justify-center gap-0.5 rounded-sx-md px-3 py-1.5 text-left ' +
+  'relative flex min-h-[46px] flex-1 flex-col items-start justify-center gap-0.5 overflow-hidden rounded-sx-md px-3 py-1.5 text-left ' +
   'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus ' +
   'focus-visible:ring-offset-2 focus-visible:ring-offset-sx-bg';
 
@@ -21,15 +22,21 @@ const SEGMENT_BASE =
  *
  * This is the only primary selector in the app: the header shows the current
  * context as read-only status and the explanation sheet no longer switches.
+ * The active segment is a shared-layout element so the highlight slides
+ * between the two options instead of blinking.
  */
 export function ModeSelector({ isModeA, onSelect, onOpenInfo }: ModeSelectorProps) {
-  const { isEnglish } = useTranslation();
+  const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
+  const indicatorTransition = prefersReducedMotion
+    ? { duration: 0 }
+    : { type: 'spring' as const, stiffness: 420, damping: 38 };
 
   return (
     <div className="flex items-center gap-2">
       <div
         role="tablist"
-        aria-label={isEnglish ? 'Select operating mode' : 'Pilih mode operasi'}
+        aria-label={t('mode.selector.aria')}
         className="flex flex-1 gap-1 rounded-sx-lg border border-sx-border bg-sx-surface-2 p-1"
       >
         <button
@@ -43,18 +50,26 @@ export function ModeSelector({ isModeA, onSelect, onOpenInfo }: ModeSelectorProp
           className={cn(
             SEGMENT_BASE,
             isModeA
-              ? 'bg-sx-accent text-sx-accent-fg shadow-sx-raised'
+              ? 'text-sx-accent-fg'
               : 'text-sx-text-secondary hover:bg-sx-surface-3 hover:text-sx-text',
           )}
         >
-          <span className="text-sx-caption font-bold leading-none">Mode A</span>
+          {isModeA ? (
+            <motion.span
+              layoutId="sx-mode-segment"
+              aria-hidden="true"
+              transition={indicatorTransition}
+              className="absolute inset-0 rounded-sx-md bg-sx-accent shadow-sx-raised"
+            />
+          ) : null}
+          <span className="relative z-10 text-sx-caption font-bold leading-none">Mode A</span>
           <span
             className={cn(
-              'text-[10px] font-semibold leading-none',
+              'relative z-10 text-[10px] font-semibold leading-none',
               isModeA ? 'text-sx-accent-fg/75' : 'text-sx-text-muted',
             )}
           >
-            {isEnglish ? 'TikTok Companion' : 'Kompanion TikTok'}
+            {t('mode.selector.modeA')}
           </span>
         </button>
 
@@ -69,18 +84,26 @@ export function ModeSelector({ isModeA, onSelect, onOpenInfo }: ModeSelectorProp
           className={cn(
             SEGMENT_BASE,
             !isModeA
-              ? 'bg-sx-accent text-sx-accent-fg shadow-sx-raised'
+              ? 'text-sx-accent-fg'
               : 'text-sx-text-secondary hover:bg-sx-surface-3 hover:text-sx-text',
           )}
         >
-          <span className="text-sx-caption font-bold leading-none">Mode B</span>
+          {!isModeA ? (
+            <motion.span
+              layoutId="sx-mode-segment"
+              aria-hidden="true"
+              transition={indicatorTransition}
+              className="absolute inset-0 rounded-sx-md bg-sx-accent shadow-sx-raised"
+            />
+          ) : null}
+          <span className="relative z-10 text-sx-caption font-bold leading-none">Mode B</span>
           <span
             className={cn(
-              'text-[10px] font-semibold leading-none',
+              'relative z-10 text-[10px] font-semibold leading-none',
               !isModeA ? 'text-sx-accent-fg/75' : 'text-sx-text-muted',
             )}
           >
-            {isEnglish ? 'RTMP Encoder' : 'Encoder RTMP'}
+            {t('mode.selector.modeB')}
           </span>
         </button>
       </div>
@@ -88,8 +111,8 @@ export function ModeSelector({ isModeA, onSelect, onOpenInfo }: ModeSelectorProp
       <button
         type="button"
         onClick={onOpenInfo}
-        aria-label={isEnglish ? 'How the two modes differ' : 'Perbedaan kedua mode'}
-        title={isEnglish ? 'How the two modes differ' : 'Perbedaan kedua mode'}
+        aria-label={t('mode.selector.info')}
+        title={t('mode.selector.info')}
         className={cn(
           'flex h-11 w-11 shrink-0 items-center justify-center rounded-sx-md border border-sx-border bg-sx-surface-2',
           'text-sx-text-secondary transition-colors hover:bg-sx-surface-3 hover:text-sx-text',

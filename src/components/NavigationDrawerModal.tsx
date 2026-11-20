@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { NavigationTab } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   ChevronRight,
   FolderOpen,
@@ -44,6 +45,10 @@ interface DrawerGroup {
 /**
  * Full module drawer. Reaches every one of the ten NavigationTab routes,
  * including Presets and Music which the compact bottom bar cannot hold.
+ *
+ * Enter/exit motion is handled with AnimatePresence so the sheet slides out
+ * instead of disappearing, and it collapses to an instant swap when the user
+ * prefers reduced motion.
  */
 export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   isOpen,
@@ -52,7 +57,8 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   onNavigate,
   pendingMusicCount = 0,
 }) => {
-  const { isEnglish } = useTranslation();
+  const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -63,91 +69,89 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
   const groups: DrawerGroup[] = [
     {
-      title: isEnglish ? 'Control' : 'Kontrol',
+      title: t('drawer.group.control'),
       items: [
         {
           tab: 'dashboard',
-          label: 'Dashboard',
-          hint: isEnglish ? 'Mode, status and next actions' : 'Mode, status, dan langkah berikutnya',
+          label: t('nav.dashboard', 'Dashboard'),
+          hint: t('drawer.item.dashboard.hint'),
           icon: LayoutDashboard,
         },
       ],
     },
     {
-      title: 'Studio',
+      title: t('drawer.group.studio'),
       items: [
         {
           tab: 'studio',
-          label: 'Studio',
-          hint: isEnglish ? 'Canvas, elements and presets' : 'Canvas, elemen, dan preset',
+          label: t('nav.studio', 'Studio'),
+          hint: t('drawer.item.studio.hint'),
           icon: Layers,
         },
         {
           tab: 'sources',
-          label: isEnglish ? 'Sources' : 'Sumber',
-          hint: isEnglish ? 'Camera, microphone, media' : 'Kamera, mikrofon, media',
+          label: t('drawer.item.sources.label'),
+          hint: t('drawer.item.sources.hint'),
           icon: FolderOpen,
         },
         {
           tab: 'presets',
-          label: isEnglish ? 'Presets' : 'Preset',
-          hint: isEnglish ? 'Saved layouts and triggers' : 'Layout dan trigger tersimpan',
+          label: t('drawer.item.presets.label'),
+          hint: t('drawer.item.presets.hint'),
           icon: LayoutTemplate,
         },
         {
           tab: 'marketplace',
-          label: isEnglish ? 'Marketplace' : 'Marketplace',
-          hint: isEnglish ? 'Preset and asset library' : 'Pustaka preset dan aset',
+          label: t('nav.marketplace', 'Marketplace'),
+          hint: t('drawer.item.marketplace.hint'),
           icon: Store,
         },
       ],
     },
     {
-      title: isEnglish ? 'Live & Audio' : 'Live & Audio',
+      title: t('drawer.group.live'),
       items: [
         {
           tab: 'live_center',
-          label: isEnglish ? 'Live Center' : 'Pusat Live',
-          hint: isEnglish ? 'Chat, gifts, TTS and events' : 'Chat, gift, TTS, dan event',
+          label: t('drawer.item.live.label'),
+          hint: t('drawer.item.live.hint'),
           icon: Radio,
         },
         {
           tab: 'music',
-          label: isEnglish ? 'Music' : 'Musik',
-          hint: isEnglish ? 'Queue, requests and history' : 'Antrean, request, dan riwayat',
+          label: t('drawer.item.music.label'),
+          hint: t('drawer.item.music.hint'),
           icon: Music,
           badge: pendingMusicCount > 0 ? pendingMusicCount : undefined,
         },
         {
           tab: 'remote_deck',
-          label: 'Remote Deck',
-          hint: isEnglish ? 'Hardware deck control' : 'Kontrol deck perangkat',
+          label: t('nav.remoteDeck', 'Remote Deck'),
+          hint: t('drawer.item.deck.hint'),
           icon: Gamepad2,
         },
       ],
     },
     {
-      title: isEnglish ? 'Connections' : 'Koneksi',
+      title: t('drawer.group.connections'),
       items: [
         {
           tab: 'integrations',
-          label: isEnglish ? 'Integrations' : 'Integrasi',
-          hint: isEnglish ? 'TikTok, YouTube, Spotify' : 'TikTok, YouTube, Spotify',
+          label: t('drawer.item.integrations.label'),
+          hint: t('drawer.item.integrations.hint'),
           icon: Plug,
         },
       ],
     },
     {
-      title: isEnglish ? 'Preferences' : 'Preferensi',
+      title: t('drawer.group.preferences'),
       items: [
         {
           tab: 'settings',
-          label: isEnglish ? 'Settings' : 'Pengaturan',
-          hint: isEnglish ? 'App, audio, HUD, performance' : 'Aplikasi, audio, HUD, performa',
+          label: t('drawer.item.settings.label'),
+          hint: t('drawer.item.settings.hint'),
           icon: SettingsIcon,
         },
       ],
@@ -155,103 +159,124 @@ export const NavigationDrawerModal: React.FC<NavigationDrawerModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={isEnglish ? 'All modules' : 'Semua modul'}>
-      <button
-        type="button"
-        aria-label={isEnglish ? 'Close navigation' : 'Tutup navigasi'}
-        onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default bg-black/60 motion-safe:animate-[sx-fade-in_160ms_ease-out]"
-      />
+    <AnimatePresence>
+      {isOpen ? (
+        <div
+          className="fixed inset-0 z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('shell.allModules')}
+        >
+          <motion.button
+            type="button"
+            aria-label={t('shell.closeNav')}
+            onClick={onClose}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.16, ease: 'easeOut' }}
+            className="absolute inset-0 h-full w-full cursor-default bg-black/60"
+          />
 
-      <div className="absolute inset-y-0 left-0 flex w-[86%] max-w-[340px] flex-col border-r border-sx-border bg-sx-bg shadow-sx-overlay motion-safe:animate-[sx-slide-in_220ms_cubic-bezier(0.22,1,0.36,1)]">
-        <div className="border-b border-sx-border px-4 pb-3 pt-[calc(env(safe-area-inset-top)+14px)]">
-          <div className="flex items-start gap-2.5">
-            <BrandMark size={36} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-1.5 leading-none">
-                <span className="text-[15px] font-bold tracking-[0.14em] text-sx-text">SYNTXRR</span>
-                <span className="text-[15px] font-bold tracking-[0.14em] text-sx-accent">STREAM</span>
+          <motion.div
+            initial={{ x: prefersReducedMotion ? 0 : '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: prefersReducedMotion ? 0 : '-100%' }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.22, ease: 'easeOut' }}
+            className="absolute inset-y-0 left-0 flex w-[86%] max-w-[340px] flex-col border-r border-sx-border bg-sx-bg shadow-sx-overlay"
+          >
+            <div className="border-b border-sx-border px-4 pb-3 pt-[calc(env(safe-area-inset-top)+14px)]">
+              <div className="flex items-start gap-2.5">
+                <BrandMark size={36} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-1.5 leading-none">
+                    <span className="text-[15px] font-bold tracking-[0.14em] text-sx-text">SYNTXRR</span>
+                    <span className="text-[15px] font-bold tracking-[0.14em] text-sx-accent">STREAM</span>
+                  </div>
+                  <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-sx-text-muted">
+                    {t('shell.allModules')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={t('shell.close')}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
+                >
+                  <Icon icon={X} size="md" tone="inherit" />
+                </button>
               </div>
-              <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-sx-text-muted">
-                {isEnglish ? 'All modules' : 'Semua modul'}
-              </p>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={isEnglish ? 'Close' : 'Tutup'}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sx-md text-sx-text-secondary transition-colors hover:bg-sx-surface-2 hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
-            >
-              <Icon icon={X} size="md" tone="inherit" />
-            </button>
-          </div>
-        </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-3">
-          {groups.map((group) => (
-            <div key={group.title} className="mb-3 last:mb-0">
-              <div className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-sx-text-muted">
-                {group.title}
-              </div>
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const isActive = activeNav === item.tab;
-                  return (
-                    <button
-                      key={item.tab}
-                      type="button"
-                      onClick={() => {
-                        onNavigate(item.tab);
-                        onClose();
-                      }}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={cn(
-                        'flex min-h-[52px] w-full items-center gap-2.5 rounded-sx-md border px-2.5 py-2 text-left transition-colors',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus',
-                        isActive
-                          ? 'border-sx-accent/40 bg-sx-accent-soft'
-                          : 'border-transparent hover:bg-sx-surface-2',
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'flex h-8 w-8 shrink-0 items-center justify-center rounded-sx-sm border',
-                          isActive
-                            ? 'border-sx-accent/40 bg-sx-accent text-sx-accent-fg'
-                            : 'border-sx-border bg-sx-surface-2',
-                        )}
-                      >
-                        <Icon
-                          icon={item.icon}
-                          size="sm"
-                          tone={isActive ? 'inherit' : 'secondary'}
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-3">
+              {groups.map((group) => (
+                <div key={group.title} className="mb-3 last:mb-0">
+                  <div className="px-2 pb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-sx-text-muted">
+                    {group.title}
+                  </div>
+                  <div className="space-y-0.5">
+                    {group.items.map((item) => {
+                      const isActive = activeNav === item.tab;
+                      return (
+                        <button
+                          key={item.tab}
+                          type="button"
+                          onClick={() => {
+                            onNavigate(item.tab);
+                            onClose();
+                          }}
+                          aria-current={isActive ? 'page' : undefined}
                           className={cn(
-                            'block truncate text-sx-caption',
-                            isActive ? 'font-bold text-sx-text' : 'font-semibold text-sx-text',
+                            'flex min-h-[52px] w-full items-center gap-2.5 rounded-sx-md border px-2.5 py-2 text-left transition-colors',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus',
+                            isActive
+                              ? 'border-sx-accent/40 bg-sx-accent-soft'
+                              : 'border-transparent hover:bg-sx-surface-2',
                           )}
                         >
-                          {item.label}
-                        </span>
-                        <span className="block truncate text-[10px] text-sx-text-muted">{item.hint}</span>
-                      </span>
-                      {item.badge ? (
-                        <span className="flex h-4 min-w-[16px] items-center justify-center rounded-sx-full bg-sx-accent px-1 text-[9px] font-bold leading-none text-sx-accent-fg">
-                          {item.badge > 99 ? '99+' : item.badge}
-                        </span>
-                      ) : null}
-                      <Icon icon={ChevronRight} size="xs" tone="muted" />
-                    </button>
-                  );
-                })}
-              </div>
+                          <span
+                            className={cn(
+                              'flex h-8 w-8 shrink-0 items-center justify-center rounded-sx-sm border',
+                              isActive
+                                ? 'border-sx-accent/40 bg-sx-accent text-sx-accent-fg'
+                                : 'border-sx-border bg-sx-surface-2',
+                            )}
+                          >
+                            <Icon
+                              icon={item.icon}
+                              size="sm"
+                              tone={isActive ? 'inherit' : 'secondary'}
+                            />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span
+                              className={cn(
+                                'block truncate text-sx-caption',
+                                isActive ? 'font-bold text-sx-text' : 'font-semibold text-sx-text',
+                              )}
+                            >
+                              {item.label}
+                            </span>
+                            <span className="block truncate text-[10px] text-sx-text-muted">
+                              {item.hint}
+                            </span>
+                          </span>
+                          {item.badge ? (
+                            <span className="flex h-4 min-w-[16px] items-center justify-center rounded-sx-full bg-sx-accent px-1 text-[9px] font-bold leading-none text-sx-accent-fg">
+                              {item.badge > 99 ? '99+' : item.badge}
+                            </span>
+                          ) : null}
+                          <Icon icon={ChevronRight} size="xs" tone="muted" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          </motion.div>
         </div>
-      </div>
-    </div>
+      ) : null}
+    </AnimatePresence>
   );
 };
