@@ -1408,6 +1408,8 @@ export default function App() {
     fallbackEnabled: boolean;
     eulerApiKey?: string;
     clearEulerApiKey?: boolean;
+    eulerJwtKey?: string;
+    clearEulerJwtKey?: boolean;
   }) => {
     const savedAccount = await StorageService.saveTikTokAccount({
       ...tiktokAccountRef.current,
@@ -1416,35 +1418,68 @@ export default function App() {
     });
     setTiktokAccount(savedAccount);
 
+    const credentialUpdates: Partial<AppSettings> = {};
+    if (prefs.clearEulerApiKey) {
+      credentialUpdates.eulerStreamApiKey = '';
+    } else if (prefs.eulerApiKey !== undefined) {
+      const trimmedApiKey = prefs.eulerApiKey.trim();
+      credentialUpdates.eulerStreamApiKey = trimmedApiKey;
+      if (trimmedApiKey) {
+        // Exactly one Euler credential may be active at a time.
+        credentialUpdates.eulerStreamJwtKey = '';
+      }
+    }
+
+    if (prefs.clearEulerJwtKey) {
+      credentialUpdates.eulerStreamJwtKey = '';
+    } else if (prefs.eulerJwtKey !== undefined) {
+      const trimmedJwtKey = prefs.eulerJwtKey.trim();
+      credentialUpdates.eulerStreamJwtKey = trimmedJwtKey;
+      if (trimmedJwtKey) {
+        // Exactly one Euler credential may be active at a time.
+        credentialUpdates.eulerStreamApiKey = '';
+      }
+    }
+
     const nextSettings: AppSettings = {
       ...settingsRef.current,
       tiktokConnectionMethod: prefs.connectionMethod,
       tiktokEulerFallbackEnabled: prefs.fallbackEnabled,
-      ...(prefs.clearEulerApiKey
-        ? { eulerStreamApiKey: '' }
-        : prefs.eulerApiKey !== undefined
-        ? { eulerStreamApiKey: prefs.eulerApiKey }
-        : {}),
+      ...credentialUpdates,
     };
     settingsRef.current = nextSettings;
     setSettings(nextSettings);
     await writeSettingsToStorage(nextSettings);
+
+    const activeStatus = tiktokLiveConnector.getStatus();
+    if (
+      (prefs.clearEulerApiKey || prefs.clearEulerJwtKey) &&
+      (tiktokLiveConnector.isActiveSession() || activeStatus.state === 'waiting_for_live') &&
+      (prefs.connectionMethod === 'euler' ||
+        activeStatus.connectionMethod === 'euler' ||
+        activeStatus.transport === 'euler')
+    ) {
+      await tiktokLiveConnector.disconnect();
+    }
   };
 
   const handleConnectTikTok = async (
     username: string,
     eulerApiKey?: string,
     allowEulerFallback?: boolean,
-    connectionMethod?: TikTokConnectionMethod
+    connectionMethod?: TikTokConnectionMethod,
+    eulerJwtKey?: string
   ) => {
     const normalized = normalizeTikTokTargetUsername(username);
     if (!isValidTikTokTargetUsername(normalized)) {
       return;
     }
 
+    const useCallerCredentials = eulerApiKey !== undefined || eulerJwtKey !== undefined;
     await tiktokLiveConnector.connect({
       username: normalized,
-      eulerApiKey: eulerApiKey ?? settingsRef.current.eulerStreamApiKey,
+      eulerApiKey: useCallerCredentials ? eulerApiKey : settingsRef.current.eulerStreamApiKey,
+      eulerJwtKey: useCallerCredentials ? eulerJwtKey : settingsRef.current.eulerStreamJwtKey,
       allowEulerFallback:
         allowEulerFallback ??
         tiktokAccountRef.current.fallbackEnabled ??
@@ -2087,6 +2122,7 @@ export default function App() {
       username: targetUsername,
       connectionMethod: acct.connectionMethod ?? activeSettings.tiktokConnectionMethod ?? 'direct',
       eulerApiKey: activeSettings.eulerStreamApiKey,
+      eulerJwtKey: activeSettings.eulerStreamJwtKey,
       allowEulerFallback: acct.fallbackEnabled ?? activeSettings.tiktokEulerFallbackEnabled ?? true,
     });
   };

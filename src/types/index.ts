@@ -93,6 +93,7 @@ export interface AppSettings {
   tiktokConnected?: boolean;
   tiktokConnectionMethod?: TikTokConnectionMethod;
   eulerStreamApiKey?: string;
+  eulerStreamJwtKey?: string;
   tiktokEulerFallbackEnabled?: boolean;
   // Soundboard & Audio routing
   soundboardVolume?: number;

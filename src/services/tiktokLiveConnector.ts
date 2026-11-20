@@ -63,6 +63,7 @@ export function resolveTikTokTargetUsername(
 export interface TikTokConnectOptions {
   username: string;
   eulerApiKey?: string;
+  eulerJwtKey?: string;
   allowEulerFallback?: boolean;
   connectionMethod?: TikTokConnectionMethod;
 }
@@ -125,6 +126,13 @@ export class TikTokLiveConnector {
   private stateHandle: PluginListenerHandle | null = null;
   private eventHandle: PluginListenerHandle | null = null;
   private connectInFlight = false;
+  private activeConnectConfig: {
+    username: string;
+    connectionMethod: TikTokConnectionMethod;
+    allowEulerFallback: boolean;
+    eulerApiKey: string;
+    eulerJwtKey: string;
+  } | null = null;
 
   constructor(
     adapter: TikTokTransportAdapter = DEFAULT_NATIVE_ADAPTER,
@@ -208,8 +216,12 @@ export class TikTokLiveConnector {
     const cleanUser = sanitizeUsernameInput(options.username);
     const connectionMethod: TikTokConnectionMethod =
       options.connectionMethod === 'euler' ? 'euler' : 'direct';
+    const allowEulerFallback = options.allowEulerFallback ?? true;
+    const cleanApiKey = (options.eulerApiKey || '').trim();
+    const cleanJwtKey = (options.eulerJwtKey || '').trim();
 
     if (!cleanUser || !/^[A-Za-z0-9._]{1,64}$/.test(cleanUser)) {
+      this.activeConnectConfig = null;
       this.updateStatus({
         state: 'error',
         transport: 'none',
@@ -225,19 +237,58 @@ export class TikTokLiveConnector {
       return this.getStatus();
     }
 
+    if (cleanApiKey && cleanJwtKey) {
+      this.activeConnectConfig = null;
+      this.updateStatus({
+        state: 'error',
+        transport: 'none',
+        connectionMethod,
+        roomStatus: 'unknown',
+        username: cleanUser,
+        roomId: '',
+        viewerCount: 0,
+        totalLikeCount: 0,
+        message: 'EulerStream hanya menerima tepat satu kredensial: API Key atau JWT Key, bukan keduanya bersamaan.',
+        errorCode: 'EULER_CONFLICTING_CREDENTIALS',
+      });
+      return this.getStatus();
+    }
+
+    if (connectionMethod === 'euler' && !cleanApiKey && !cleanJwtKey) {
+      this.activeConnectConfig = null;
+      this.updateStatus({
+        state: 'error',
+        transport: 'none',
+        connectionMethod,
+        roomStatus: 'unknown',
+        username: cleanUser,
+        roomId: '',
+        viewerCount: 0,
+        totalLikeCount: 0,
+        message: 'EulerStream memerlukan API Key atau JWT. Pilih Direct TikTok untuk koneksi tanpa kunci tambahan.',
+        errorCode: 'EULER_API_KEY_REQUIRED',
+      });
+      return this.getStatus();
+    }
+
     if (this.connectInFlight) {
       return this.getStatus();
     }
 
     if (
       this.isActiveSession() &&
-      this.status.username.toLowerCase() === cleanUser.toLowerCase() &&
-      (this.status.connectionMethod ?? 'direct') === connectionMethod
+      this.activeConnectConfig !== null &&
+      this.activeConnectConfig.username.toLowerCase() === cleanUser.toLowerCase() &&
+      this.activeConnectConfig.connectionMethod === connectionMethod &&
+      this.activeConnectConfig.allowEulerFallback === allowEulerFallback &&
+      this.activeConnectConfig.eulerApiKey === cleanApiKey &&
+      this.activeConnectConfig.eulerJwtKey === cleanJwtKey
     ) {
       return this.getStatus();
     }
 
     if (!this.adapter.isSupported()) {
+      this.activeConnectConfig = null;
       this.updateStatus({
         state: 'error',
         transport: 'none',
@@ -259,6 +310,14 @@ export class TikTokLiveConnector {
       await this.ensureListenersAttached();
       this.normalizer.reset();
 
+      this.activeConnectConfig = {
+        username: cleanUser,
+        connectionMethod,
+        allowEulerFallback,
+        eulerApiKey: cleanApiKey,
+        eulerJwtKey: cleanJwtKey,
+      };
+
       this.updateStatus({
         state: 'resolving_room',
         transport: 'none',
@@ -274,14 +333,16 @@ export class TikTokLiveConnector {
 
       const res = await this.adapter.connect({
         username: cleanUser,
-        eulerApiKey: options.eulerApiKey?.trim() || undefined,
-        allowEulerFallback: options.allowEulerFallback ?? true,
+        eulerApiKey: cleanApiKey || undefined,
+        eulerJwtKey: cleanJwtKey || undefined,
+        allowEulerFallback,
         connectionMethod,
       });
 
       if (res.status) {
         this.applyNativeState(res.status);
       } else if (!res.accepted) {
+        this.activeConnectConfig = null;
         this.updateStatus({
           state: 'error',
           transport: 'none',
@@ -302,6 +363,7 @@ export class TikTokLiveConnector {
   }
 
   async disconnect(): Promise<TikTokConnectorStatus> {
+    this.activeConnectConfig = null;
     if (this.adapter.isSupported()) {
       const res = await this.adapter.disconnect();
       if (res.status) {
@@ -327,6 +389,7 @@ export class TikTokLiveConnector {
   }
 
   async destroy(): Promise<void> {
+    this.activeConnectConfig = null;
     if (this.stateHandle) {
       await this.stateHandle.remove().catch(() => {});
       this.stateHandle = null;
@@ -391,6 +454,10 @@ export class TikTokLiveConnector {
     const nextState: TikTokConnectionState = allowedStates.has(payload.state)
       ? payload.state
       : 'disconnected';
+
+    if (nextState === 'disconnected' || nextState === 'error') {
+      this.activeConnectConfig = null;
+    }
 
     const derivedRoomStatus: TikTokRoomStatus = payload.roomStatus
       ? payload.roomStatus

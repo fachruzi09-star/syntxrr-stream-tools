@@ -232,6 +232,47 @@ public class TikTokTransportProtocolTest {
                 "sample_live", "api-key", "jwt-token"));
     }
 
+    @Test
+    public void connectorRecognizesApiKeyOrJwtForEulerFallback() {
+        assertFalse(TikTokLiveConnector.canAttemptEulerFallback(true, false, "", ""));
+        assertFalse(TikTokLiveConnector.canAttemptEulerFallback(false, false, "api-key", ""));
+        assertFalse(TikTokLiveConnector.canAttemptEulerFallback(true, true, "", "jwt.token"));
+        assertTrue(TikTokLiveConnector.canAttemptEulerFallback(true, false, "api-key", ""));
+        assertTrue(TikTokLiveConnector.canAttemptEulerFallback(true, false, "", "jwt.token"));
+    }
+
+    @Test
+    public void connectorValidatesExclusiveEulerCredentialsAndAllowsDirectZeroKey() {
+        assertEquals(null, TikTokLiveConnector.validateEulerCredentialErrorCode("direct", "", ""));
+        assertEquals(null, TikTokLiveConnector.validateEulerCredentialErrorCode("euler", "api-key", ""));
+        assertEquals(null, TikTokLiveConnector.validateEulerCredentialErrorCode("euler", "", "jwt.token"));
+        assertEquals("EULER_API_KEY_REQUIRED",
+                TikTokLiveConnector.validateEulerCredentialErrorCode("euler", " ", ""));
+        assertEquals("EULER_CONFLICTING_CREDENTIALS",
+                TikTokLiveConnector.validateEulerCredentialErrorCode("euler", "api-key", "jwt.token"));
+        assertEquals("EULER_CONFLICTING_CREDENTIALS",
+                TikTokLiveConnector.validateEulerCredentialErrorCode("direct", "api-key", "jwt.token"));
+    }
+
+    @Test
+    public void connectorDetectsSessionConfigChangesIncludingJwtAndFallback() {
+        assertTrue(TikTokLiveConnector.hasSameSessionConfiguration(
+                true, "connected_direct", "sample_live", "SAMPLE_LIVE",
+                "direct", "direct", true, true, "", "", "jwt-1", " jwt-1 "));
+        assertFalse(TikTokLiveConnector.hasSameSessionConfiguration(
+                true, "connected_euler", "sample_live", "sample_live",
+                "euler", "euler", true, true, "", "", "jwt-1", "jwt-2"));
+        assertFalse(TikTokLiveConnector.hasSameSessionConfiguration(
+                true, "connected_euler", "sample_live", "sample_live",
+                "euler", "euler", true, true, "api-1", "", "", "jwt-1"));
+        assertFalse(TikTokLiveConnector.hasSameSessionConfiguration(
+                true, "connected_direct", "sample_live", "sample_live",
+                "direct", "direct", true, false, "", "", "jwt-1", "jwt-1"));
+        assertFalse(TikTokLiveConnector.hasSameSessionConfiguration(
+                true, "connected_direct", "sample_live", "sample_live",
+                "direct", "direct", true, true, "", "", "jwt-1", ""));
+    }
+
     private static void assertIllegalArgument(ThrowingRunnable action) {
         try {
             action.run();

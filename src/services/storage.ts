@@ -82,6 +82,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tiktokConnected: false,
   tiktokConnectionMethod: 'direct',
   eulerStreamApiKey: '',
+  eulerStreamJwtKey: '',
   tiktokEulerFallbackEnabled: true,
   soundboardVolume: 0.85,
   // === SETTINGS FOUNDATION DEFAULTS ===
@@ -724,6 +725,7 @@ export const CREDENTIAL_SETTING_KEYS = [
   'youtubeApiKey',
   'spotifyAccessToken',
   'eulerStreamApiKey',
+  'eulerStreamJwtKey',
 ] as const;
 export type CredentialSettingKey = (typeof CREDENTIAL_SETTING_KEYS)[number];
 
@@ -775,12 +777,17 @@ export function mergeBackupSettings(imported: unknown, current: AppSettings): Ap
 }
 
 function normalizeSettingsFields(settings: AppSettings): AppSettings {
+  const eulerStreamApiKey = typeof settings.eulerStreamApiKey === 'string' ? settings.eulerStreamApiKey.trim() : '';
+  const eulerStreamJwtKey = typeof settings.eulerStreamJwtKey === 'string' ? settings.eulerStreamJwtKey.trim() : '';
   return {
     ...settings,
     operatingMode: normalizeOperatingMode(settings.operatingMode),
     modeBAudioSource: normalizeModeBAudioSource(settings.modeBAudioSource, 'mix'),
     streamKey: typeof settings.streamKey === 'string' ? settings.streamKey : '',
     rtmpServer: typeof settings.rtmpServer === 'string' ? settings.rtmpServer : DEFAULT_SETTINGS.rtmpServer,
+    eulerStreamApiKey,
+    // Enforce mutual exclusivity if corrupted storage contains both credentials.
+    eulerStreamJwtKey: eulerStreamApiKey ? '' : eulerStreamJwtKey,
     audioVolume: normalizeUnitVolume(settings.audioVolume, DEFAULT_SETTINGS.audioVolume ?? 0.85),
     soundboardVolume: normalizeUnitVolume(settings.soundboardVolume, DEFAULT_SETTINGS.soundboardVolume ?? 0.85),
     micGain:
@@ -1357,6 +1364,7 @@ export const StorageService = {
       ...(shouldClearTarget ? { tiktokUsername: '' } : {}),
       tiktokConnected: false,
       eulerStreamApiKey: '',
+      eulerStreamJwtKey: '',
     };
     await this.saveSettings(nextSettings);
 

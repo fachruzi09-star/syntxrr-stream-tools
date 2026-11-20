@@ -60,12 +60,15 @@ interface IntegrationsViewProps {
     fallbackEnabled: boolean;
     eulerApiKey?: string;
     clearEulerApiKey?: boolean;
+    eulerJwtKey?: string;
+    clearEulerJwtKey?: boolean;
   }) => Promise<void> | void;
   onConnectTikTok?: (
     username: string,
     eulerApiKey?: string,
     allowEulerFallback?: boolean,
-    connectionMethod?: TikTokConnectionMethod
+    connectionMethod?: TikTokConnectionMethod,
+    eulerJwtKey?: string
   ) => Promise<void> | void;
   onDisconnectTikTok?: () => Promise<void> | void;
 }
@@ -126,6 +129,10 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   const [editingProvider, setEditingProvider] = useState<IntegrationProvider | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [eulerApiKeyDraft, setEulerApiKeyDraft] = useState('');
+  const [eulerJwtKeyDraft, setEulerJwtKeyDraft] = useState('');
+  const [eulerAuthMode, setEulerAuthMode] = useState<'api_key' | 'jwt'>(() =>
+    settings?.eulerStreamJwtKey?.trim() ? 'jwt' : 'api_key'
+  );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const savedTargetUsername = resolveTikTokTargetUsername(settings, tiktokAccount);
@@ -189,6 +196,16 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
 
   const authConfig = getTikTokAuthConfiguration();
   const savedEulerKeyMask = maskApiKeyPreview(settings?.eulerStreamApiKey);
+  const savedEulerJwtMask = maskApiKeyPreview(settings?.eulerStreamJwtKey);
+  const hasAnyEulerCredential = Boolean(savedEulerKeyMask || savedEulerJwtMask);
+
+  useEffect(() => {
+    if (settings?.eulerStreamJwtKey?.trim() && !settings?.eulerStreamApiKey?.trim()) {
+      setEulerAuthMode('jwt');
+    } else if (settings?.eulerStreamApiKey?.trim()) {
+      setEulerAuthMode('api_key');
+    }
+  }, [settings?.eulerStreamApiKey, settings?.eulerStreamJwtKey]);
 
   const isTransportActiveOrBusy =
     tiktokStatus.state === 'connected_direct' ||
@@ -213,6 +230,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   const handleOpenConfig = (provider: IntegrationProvider) => {
     if (provider.id === 'tiktok') {
       setEulerApiKeyDraft('');
+      setEulerJwtKeyDraft('');
+      setEulerAuthMode(settings?.eulerStreamJwtKey?.trim() ? 'jwt' : 'api_key');
       setTargetUsernameDraft(savedTargetUsername);
       setTargetValidationError(null);
       setIsTikTokSettingsOpen(true);
@@ -228,6 +247,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   const handleToggleConnection = (providerId: IntegrationProviderId) => {
     if (providerId === 'tiktok') {
       setEulerApiKeyDraft('');
+      setEulerJwtKeyDraft('');
+      setEulerAuthMode(settings?.eulerStreamJwtKey?.trim() ? 'jwt' : 'api_key');
       setIsTikTokSettingsOpen(true);
       return;
     }
@@ -274,25 +295,38 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   const handleSaveConnectionPrefs = async (next: {
     connectionMethod?: TikTokConnectionMethod;
     fallbackEnabled?: boolean;
-    saveKey?: boolean;
-    clearKey?: boolean;
+    saveCredentialMode?: 'api_key' | 'jwt';
+    clearCredentialMode?: 'api_key' | 'jwt' | 'all';
   }) => {
     const method = next.connectionMethod ?? tiktokAccount.connectionMethod;
     const fallback = next.fallbackEnabled ?? tiktokAccount.fallbackEnabled;
 
+    const saveApiKey = next.saveCredentialMode === 'api_key';
+    const saveJwtKey = next.saveCredentialMode === 'jwt';
+    const clearApiKey = next.clearCredentialMode === 'api_key' || next.clearCredentialMode === 'all' || saveJwtKey;
+    const clearJwtKey = next.clearCredentialMode === 'jwt' || next.clearCredentialMode === 'all' || saveApiKey;
+
     await onUpdateTikTokConnectionPrefs?.({
       connectionMethod: method,
       fallbackEnabled: fallback,
-      eulerApiKey: next.saveKey ? eulerApiKeyDraft.trim() : undefined,
-      clearEulerApiKey: next.clearKey,
+      eulerApiKey: saveApiKey ? eulerApiKeyDraft.trim() : undefined,
+      clearEulerApiKey: clearApiKey,
+      eulerJwtKey: saveJwtKey ? eulerJwtKeyDraft.trim() : undefined,
+      clearEulerJwtKey: clearJwtKey,
     });
 
-    if (next.saveKey) {
+    if (saveApiKey) {
       setEulerApiKeyDraft('');
-      showToast('EulerStream API Key disimpan secara lokal (tidak masuk backup).');
-    } else if (next.clearKey) {
+      setEulerJwtKeyDraft('');
+      showToast('EulerStream API Key disimpan lokal (JWT sebelumnya otomatis dihapus).');
+    } else if (saveJwtKey) {
       setEulerApiKeyDraft('');
-      showToast('EulerStream API Key dihapus.');
+      setEulerJwtKeyDraft('');
+      showToast('EulerStream JWT Key disimpan lokal (API Key sebelumnya otomatis dihapus).');
+    } else if (next.clearCredentialMode) {
+      setEulerApiKeyDraft('');
+      setEulerJwtKeyDraft('');
+      showToast('Kredensial EulerStream dihapus.');
     } else {
       showToast('Preferensi metode koneksi TikTok disimpan.');
     }
@@ -614,7 +648,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                Menggunakan <code>TikTokRoomResolver</code> dan <code>TikTokWebSocketTransport</code> langsung dari perangkat Android. API Key EulerStream bersifat opsional.
+                Menggunakan <code>TikTokRoomResolver</code> dan <code>TikTokWebSocketTransport</code> langsung dari perangkat Android. API Key maupun JWT EulerStream bersifat opsional.
               </p>
               <label
                 onClick={(e) => e.stopPropagation()}
@@ -656,63 +690,134 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                Menggunakan <code>EulerStreamTransport</code> secara langsung setelah resolusi room. Memakai API Key EulerStream yang Anda isi sendiri.
+                Menggunakan <code>EulerStreamTransport</code> secara langsung setelah resolusi room. Memakai tepat satu kredensial EulerStream (API Key atau JWT Key).
               </p>
             </div>
           </div>
 
-          {/* API Key EulerStream (Masked & Aman) */}
+          {/* Kredensial EulerStream Eksklusif: API Key atau JWT (Masked & Aman) */}
           <div className="p-4 rounded-xl bg-[#080c16] border border-slate-800 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-bold text-white flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5 text-blue-400" />
                   <span>
-                    API Key EulerStream{' '}
+                    Kredensial EulerStream{' '}
                     {tiktokAccount.connectionMethod === 'direct' ? '(Opsional untuk Fallback)' : '(Untuk Metode EulerStream)'}
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Disimpan aman di perangkat, tidak ditampilkan utuh, tidak dicatat ke log, dan tidak disertakan dalam ekspor/cadangan.
+                  Pilih salah satu metode autentikasi: API Key atau JWT Key (tidak keduanya). Disimpan lokal, dimask, dan tidak masuk ekspor/cadangan.
                 </div>
               </div>
               <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 self-start sm:self-auto">
-                {savedEulerKeyMask ? `Tersimpan (${savedEulerKeyMask})` : 'Belum diisi'}
+                {savedEulerKeyMask
+                  ? `API Key tersimpan (${savedEulerKeyMask})`
+                  : savedEulerJwtMask
+                  ? `JWT Key tersimpan (${savedEulerJwtMask})`
+                  : 'Belum diisi'}
               </span>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="password"
-                value={eulerApiKeyDraft}
-                onChange={(e) => setEulerApiKeyDraft(e.target.value)}
-                autoComplete="off"
-                placeholder={
-                  savedEulerKeyMask
-                    ? 'Masukkan API Key baru untuk mengganti...'
-                    : 'Masukkan EulerStream API Key Anda...'
-                }
-                className="flex-1 bg-[#0e172a] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
-              />
+            {/* Selector Eksklusif API Key vs JWT */}
+            <div className="inline-flex rounded-xl bg-[#0e172a] border border-slate-800 p-1 gap-1">
               <button
                 type="button"
-                disabled={!eulerApiKeyDraft.trim()}
-                onClick={() => void handleSaveConnectionPrefs({ saveKey: true })}
-                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold"
+                onClick={() => {
+                  setEulerAuthMode('api_key');
+                  setEulerJwtKeyDraft('');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  eulerAuthMode === 'api_key'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
-                Simpan Key
+                API Key
               </button>
-              {savedEulerKeyMask && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEulerAuthMode('jwt');
+                  setEulerApiKeyDraft('');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  eulerAuthMode === 'jwt'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                JWT Key
+              </button>
+            </div>
+
+            {eulerAuthMode === 'api_key' ? (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="password"
+                  value={eulerApiKeyDraft}
+                  onChange={(e) => setEulerApiKeyDraft(e.target.value)}
+                  autoComplete="off"
+                  placeholder={
+                    savedEulerKeyMask
+                      ? 'Masukkan API Key baru untuk mengganti...'
+                      : 'Masukkan EulerStream API Key Anda...'
+                  }
+                  className="flex-1 bg-[#0e172a] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+                />
                 <button
                   type="button"
-                  onClick={() => void handleSaveConnectionPrefs({ clearKey: true })}
-                  className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/60 text-rose-200 text-xs font-semibold flex items-center justify-center gap-1"
+                  disabled={!eulerApiKeyDraft.trim()}
+                  onClick={() => void handleSaveConnectionPrefs({ saveCredentialMode: 'api_key' })}
+                  className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus</span>
+                  Simpan API Key
                 </button>
-              )}
-            </div>
+                {hasAnyEulerCredential && (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveConnectionPrefs({ clearCredentialMode: 'all' })}
+                    className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/60 text-rose-200 text-xs font-semibold flex items-center justify-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Hapus</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="password"
+                  value={eulerJwtKeyDraft}
+                  onChange={(e) => setEulerJwtKeyDraft(e.target.value)}
+                  autoComplete="off"
+                  placeholder={
+                    savedEulerJwtMask
+                      ? 'Masukkan JWT Key baru untuk mengganti...'
+                      : 'Masukkan EulerStream JWT Key Anda...'
+                  }
+                  className="flex-1 bg-[#0e172a] border border-[#1e293b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#2563EB]"
+                />
+                <button
+                  type="button"
+                  disabled={!eulerJwtKeyDraft.trim()}
+                  onClick={() => void handleSaveConnectionPrefs({ saveCredentialMode: 'jwt' })}
+                  className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold"
+                >
+                  Simpan JWT
+                </button>
+                {hasAnyEulerCredential && (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveConnectionPrefs({ clearCredentialMode: 'all' })}
+                    className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/60 text-rose-200 text-xs font-semibold flex items-center justify-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Hapus</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
@@ -801,7 +906,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                     candidate,
                     settings?.eulerStreamApiKey,
                     tiktokAccount.fallbackEnabled,
-                    tiktokAccount.connectionMethod
+                    tiktokAccount.connectionMethod,
+                    settings?.eulerStreamJwtKey
                   );
                   showToast(`Memulai koneksi transport LIVE @${candidate}...`);
                 }}

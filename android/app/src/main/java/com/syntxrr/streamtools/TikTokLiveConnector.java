@@ -108,6 +108,8 @@ public final class TikTokLiveConnector {
     private String mRoomId = "";
     @NonNull
     private String mEulerApiKey = "";
+    @NonNull
+    private String mEulerJwtKey = "";
     private boolean mAllowEulerFallback = true;
     private boolean mEulerFallbackUnavailable = false;
     private boolean mUseAlternateDirectWsHost = false;
@@ -169,12 +171,70 @@ public final class TikTokLiveConnector {
         }
     }
 
+    static boolean hasEulerCredential(@Nullable String apiKey, @Nullable String jwtKey) {
+        return !normalizeSecret(apiKey).isEmpty() || !normalizeSecret(jwtKey).isEmpty();
+    }
+
+    static boolean canAttemptEulerFallback(
+            boolean allowEulerFallback,
+            boolean eulerFallbackUnavailable,
+            @Nullable String apiKey,
+            @Nullable String jwtKey
+    ) {
+        return allowEulerFallback && !eulerFallbackUnavailable && hasEulerCredential(apiKey, jwtKey);
+    }
+
+    static boolean hasSameSessionConfiguration(
+            boolean sessionActive,
+            @NonNull String currentState,
+            @NonNull String currentUsername,
+            @NonNull String suppliedUsername,
+            @NonNull String currentMethod,
+            @NonNull String suppliedMethod,
+            boolean currentAllowFallback,
+            boolean suppliedAllowFallback,
+            @Nullable String currentApiKey,
+            @Nullable String suppliedApiKey,
+            @Nullable String currentJwtKey,
+            @Nullable String suppliedJwtKey
+    ) {
+        return sessionActive
+                && !"waiting_for_live".equals(currentState)
+                && suppliedUsername.equalsIgnoreCase(currentUsername)
+                && suppliedMethod.equals(currentMethod)
+                && suppliedAllowFallback == currentAllowFallback
+                && normalizeSecret(suppliedApiKey).equals(normalizeSecret(currentApiKey))
+                && normalizeSecret(suppliedJwtKey).equals(normalizeSecret(currentJwtKey));
+    }
+
+    @Nullable
+    static String validateEulerCredentialErrorCode(
+            @NonNull String method,
+            @Nullable String apiKey,
+            @Nullable String jwtKey
+    ) {
+        String cleanApiKey = normalizeSecret(apiKey);
+        String cleanJwtKey = normalizeSecret(jwtKey);
+        if (!cleanApiKey.isEmpty() && !cleanJwtKey.isEmpty()) {
+            return "EULER_CONFLICTING_CREDENTIALS";
+        }
+        if ("euler".equals(method) && cleanApiKey.isEmpty() && cleanJwtKey.isEmpty()) {
+            return "EULER_API_KEY_REQUIRED";
+        }
+        return null;
+    }
+
+    @NonNull
+    private static String normalizeSecret(@Nullable String value) {
+        return value != null ? value.trim() : "";
+    }
+
     public void connect(
             @Nullable String rawUsername,
             @Nullable String eulerApiKey,
             boolean allowEulerFallback
     ) {
-        connect(rawUsername, eulerApiKey, allowEulerFallback, "direct");
+        connect(rawUsername, eulerApiKey, null, allowEulerFallback, "direct");
     }
 
     public void connect(
@@ -183,14 +243,31 @@ public final class TikTokLiveConnector {
             boolean allowEulerFallback,
             @Nullable String rawConnectionMethod
     ) {
+        connect(rawUsername, eulerApiKey, null, allowEulerFallback, rawConnectionMethod);
+    }
+
+    public void connect(
+            @Nullable String rawUsername,
+            @Nullable String eulerApiKey,
+            @Nullable String eulerJwtKey,
+            boolean allowEulerFallback,
+            @Nullable String rawConnectionMethod
+    ) {
         String normalized = TikTokRoomResolver.normalizeUsername(rawUsername);
         String method = "euler".equalsIgnoreCase(rawConnectionMethod != null ? rawConnectionMethod.trim() : "")
                 ? "euler"
                 : "direct";
-        String suppliedEulerKey = eulerApiKey != null ? eulerApiKey.trim() : "";
-        if ("euler".equals(method) && suppliedEulerKey.isEmpty()) {
-            stopInternal("error", "EULER_API_KEY_REQUIRED",
-                    "EulerStream memerlukan API key atau JWT. Pilih koneksi Direct TikTok untuk koneksi tanpa kunci tambahan.");
+        String suppliedApiKey = normalizeSecret(eulerApiKey);
+        String suppliedJwtKey = normalizeSecret(eulerJwtKey);
+        String credentialError = validateEulerCredentialErrorCode(method, suppliedApiKey, suppliedJwtKey);
+        if (credentialError != null) {
+            if ("EULER_CONFLICTING_CREDENTIALS".equals(credentialError)) {
+                stopInternal("error", credentialError,
+                        "EulerStream hanya menerima tepat satu kredensial: API key atau JWT, bukan keduanya.");
+            } else {
+                stopInternal("error", credentialError,
+                        "EulerStream memerlukan API key atau JWT. Pilih koneksi Direct TikTok untuk koneksi tanpa kunci tambahan.");
+            }
             return;
         }
         if (normalized.isEmpty()) {
@@ -203,12 +280,20 @@ public final class TikTokLiveConnector {
 
         final long gen;
         synchronized (mLock) {
-            boolean alreadySameSession = isSessionActive()
-                    && !"waiting_for_live".equals(mState)
-                    && normalized.equalsIgnoreCase(mUsername)
-                    && method.equals(mConnectionMethod)
-                    && allowEulerFallback == mAllowEulerFallback
-                    && suppliedEulerKey.equals(mEulerApiKey);
+            boolean alreadySameSession = hasSameSessionConfiguration(
+                    isSessionActive(),
+                    mState,
+                    mUsername,
+                    normalized,
+                    mConnectionMethod,
+                    method,
+                    mAllowEulerFallback,
+                    allowEulerFallback,
+                    mEulerApiKey,
+                    suppliedApiKey,
+                    mEulerJwtKey,
+                    suppliedJwtKey
+            );
             if (alreadySameSession) {
                 emitCurrentState();
                 return;
@@ -219,7 +304,8 @@ public final class TikTokLiveConnector {
             closeActiveWsLocked();
 
             mUsername = normalized;
-            mEulerApiKey = suppliedEulerKey;
+            mEulerApiKey = suppliedApiKey;
+            mEulerJwtKey = suppliedJwtKey;
             mAllowEulerFallback = allowEulerFallback;
             mEulerFallbackUnavailable = false;
             mUseAlternateDirectWsHost = false;
@@ -255,6 +341,7 @@ public final class TikTokLiveConnector {
             cancelPendingTaskLocked();
             closeActiveWsLocked();
             mEulerApiKey = "";
+            mEulerJwtKey = "";
             mSessionCookies.clear();
             mCursor = "";
             mInternalExt = "";
@@ -306,7 +393,7 @@ public final class TikTokLiveConnector {
                 final boolean tryEuler;
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
-                    tryEuler = (mAllowEulerFallback && !mEulerFallbackUnavailable && !mEulerApiKey.isEmpty())
+                    tryEuler = canAttemptEulerFallback(mAllowEulerFallback, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey)
                             || "euler".equals(mConnectionMethod);
                 }
                 // A stale/partial TikTok room lookup must not be the final authority.
@@ -325,7 +412,7 @@ public final class TikTokLiveConnector {
                     if (isStaleGeneration(gen)) return;
                     mRoomStatus = "unreadable";
                     mSessionCookies.putAll(res.sessionCookies);
-                    tryEuler = (mAllowEulerFallback && !mEulerFallbackUnavailable && !mEulerApiKey.isEmpty())
+                    tryEuler = canAttemptEulerFallback(mAllowEulerFallback, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey)
                             || "euler".equals(mConnectionMethod);
                 }
                 if (tryEuler) {
@@ -583,7 +670,7 @@ public final class TikTokLiveConnector {
                 boolean retryOnAlternateHost = false;
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
-                    fallbackAvailable = allowEuler && !mEulerFallbackUnavailable && !mEulerApiKey.isEmpty();
+                    fallbackAvailable = canAttemptEulerFallback(allowEuler, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey);
                     mTransportConnectedAtMs = 0L;
                     if (!mUseAlternateDirectWsHost
                             && wsBaseForAttempt.contains("webcast-ws.tiktok.com")
@@ -643,12 +730,14 @@ public final class TikTokLiveConnector {
     private void startEulerFallback(long gen, @NonNull String initialMessage) {
         final String username;
         final String apiKey;
+        final String jwtKey;
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
             closeActiveWsLocked();
             cancelPendingTaskLocked();
             username = mUsername;
             apiKey = mEulerApiKey;
+            jwtKey = mEulerJwtKey;
             if (!"reconnecting".equals(mState)) {
                 mReconnectAttempt = 0;
             }
@@ -657,7 +746,7 @@ public final class TikTokLiveConnector {
 
         final String wsUrl;
         try {
-            wsUrl = EulerStreamTransport.buildWebSocketUrl(username, apiKey);
+            wsUrl = EulerStreamTransport.buildWebSocketUrl(username, apiKey, jwtKey);
         } catch (Exception e) {
             failSessionIfCurrent(gen, "error", "EULER_URL_ERROR", "Gagal menyiapkan koneksi EulerStream: " + safeErrorMessage(e));
             return;
@@ -1159,7 +1248,7 @@ public final class TikTokLiveConnector {
             cancelPendingTaskLocked();
 
             if (!useEuler && mReconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
-                if (mAllowEulerFallback && !mEulerFallbackUnavailable && !mEulerApiKey.isEmpty()) {
+                if (canAttemptEulerFallback(mAllowEulerFallback, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey)) {
                     startEulerFallback(gen, "Koneksi langsung gagal setelah beberapa percobaan; beralih ke EulerStream...");
                     return;
                 }
@@ -1231,6 +1320,8 @@ public final class TikTokLiveConnector {
             mSessionGeneration.incrementAndGet();
             cancelPendingTaskLocked();
             closeActiveWsLocked();
+            mEulerApiKey = "";
+            mEulerJwtKey = "";
             mSessionCookies.clear();
             mErrorCode = errorCode;
             setStateLocked(state, "none", message);

@@ -393,6 +393,104 @@ async function runConnectorStateAndBusTests(): Promise<void> {
   assertEqual(eulerRes.connectionMethod, 'euler', 'status preserves connectionMethod=euler');
   assertEqual(eulerRes.roomStatus, 'live', 'status preserves roomStatus=live');
   await methodConnector.destroy();
+
+  // Euler JWT passthrough, mutual exclusivity, missing-key rejection, Direct zero-key, & credential change detection
+  const recordedConnectCalls: Array<{
+    username: string;
+    connectionMethod?: string;
+    eulerApiKey?: string;
+    eulerJwtKey?: string;
+    allowEulerFallback?: boolean;
+  }> = [];
+  const jwtConnector = new TikTokLiveConnector({
+    ...mockAdapter,
+    connect: async (opts) => {
+      recordedConnectCalls.push({ ...opts });
+      return {
+        accepted: true,
+        status: {
+          state: opts.connectionMethod === 'euler' ? 'connecting_euler' : 'resolving_room',
+          transport: opts.connectionMethod === 'euler' ? 'euler' : 'none',
+          connectionMethod: opts.connectionMethod,
+          roomStatus: 'unknown',
+          username: opts.username,
+          roomId: '',
+          viewerCount: 0,
+          totalLikeCount: 0,
+          message: `Connecting @${opts.username}`,
+        },
+      };
+    },
+  });
+
+  // 1. Direct mode requires neither API key nor JWT
+  const directZeroKey = await jwtConnector.connect({
+    username: 'direct_creator',
+    connectionMethod: 'direct',
+    allowEulerFallback: true,
+  });
+  assertEqual(directZeroKey.state, 'resolving_room', 'Direct mode connects without API key or JWT');
+  assertEqual(recordedConnectCalls.length, 1, 'Direct zero-key reaches adapter');
+  assertEqual(recordedConnectCalls[0].eulerApiKey, undefined, 'Direct zero-key sends no API key');
+  assertEqual(recordedConnectCalls[0].eulerJwtKey, undefined, 'Direct zero-key sends no JWT');
+
+  // 2. Updating credentials (adding JWT) during an active session must reconfigure instead of being blocked by dedup
+  const withFallbackJwt = await jwtConnector.connect({
+    username: 'direct_creator',
+    connectionMethod: 'direct',
+    allowEulerFallback: true,
+    eulerJwtKey: '  jwt.secret.token.1234  ',
+  });
+  assertEqual(withFallbackJwt.state, 'resolving_room', 'Credential update triggers new connect');
+  assertEqual(recordedConnectCalls.length, 2, 'Credential update bypasses duplicate suppression');
+  assertEqual(recordedConnectCalls[1].eulerJwtKey, 'jwt.secret.token.1234', 'Trimmed JWT passed to adapter');
+  assertEqual(recordedConnectCalls[1].eulerApiKey, undefined, 'API key omitted when JWT is active');
+
+  // 3. Clearing credentials or toggling fallback during active session must also reconfigure
+  await jwtConnector.connect({
+    username: 'direct_creator',
+    connectionMethod: 'direct',
+    allowEulerFallback: false,
+  });
+  assertEqual(recordedConnectCalls.length, 3, 'Fallback/credential clear triggers reconfigure');
+  assertEqual(recordedConnectCalls[2].allowEulerFallback, false, 'allowEulerFallback=false forwarded');
+  assertEqual(recordedConnectCalls[2].eulerJwtKey, undefined, 'Cleared JWT no longer forwarded');
+
+  // 4. Simultaneous API Key + JWT must be rejected honestly without touching adapter or leaking secrets
+  const conflictingRes = await jwtConnector.connect({
+    username: 'direct_creator',
+    connectionMethod: 'euler',
+    eulerApiKey: 'secret-api-value',
+    eulerJwtKey: 'secret-jwt-value',
+  });
+  assertEqual(conflictingRes.state, 'error', 'Conflicting credentials enter error state');
+  assertEqual(conflictingRes.errorCode, 'EULER_CONFLICTING_CREDENTIALS', 'Reports EULER_CONFLICTING_CREDENTIALS');
+  assert(!conflictingRes.message.includes('secret-api-value'), 'Conflict error never exposes API key');
+  assert(!conflictingRes.message.includes('secret-jwt-value'), 'Conflict error never exposes JWT');
+  assertEqual(recordedConnectCalls.length, 3, 'Conflicting credentials never sent to adapter');
+
+  // 5. Explicit Euler method without API Key or JWT fails honestly
+  const missingEulerCredsRes = await jwtConnector.connect({
+    username: 'direct_creator',
+    connectionMethod: 'euler',
+  });
+  assertEqual(missingEulerCredsRes.state, 'error', 'Euler without credentials enters error state');
+  assertEqual(missingEulerCredsRes.errorCode, 'EULER_API_KEY_REQUIRED', 'Reports EULER_API_KEY_REQUIRED');
+  assertEqual(recordedConnectCalls.length, 3, 'Missing Euler credential never sent to adapter');
+
+  // 6. Explicit Euler method with JWT connects cleanly
+  const validEulerJwtRes = await jwtConnector.connect({
+    username: 'euler_jwt_user',
+    connectionMethod: 'euler',
+    eulerJwtKey: 'eyJhbGciOiJIUzI1NiJ9.payload.sig',
+  });
+  assertEqual(validEulerJwtRes.state, 'connecting_euler', 'Euler with JWT transitions to connecting_euler');
+  assertEqual(recordedConnectCalls.length, 4, 'Valid Euler JWT invokes adapter');
+  assertEqual(recordedConnectCalls[3].eulerJwtKey, 'eyJhbGciOiJIUzI1NiJ9.payload.sig', 'Euler JWT forwarded');
+  assertEqual(recordedConnectCalls[3].eulerApiKey, undefined, 'No API key sent with Euler JWT');
+
+  await jwtConnector.disconnect();
+  await jwtConnector.destroy();
 }
 
 function runStorageAndBackupSecurityTests(): void {
@@ -420,17 +518,24 @@ function runStorageAndBackupSecurityTests(): void {
   assertEqual(fakeLinked.isLinked, false, 'account without openId must not remain linked');
   assertEqual(fakeLinked.accountLinkStatus, 'unlinked', 'missing openId resets status to unlinked');
 
-  // Credential exclusion from backup export/import
+  // Credential exclusion from backup export/import (both API Key and JWT Key)
   const withSecret = {
     ...DEFAULT_SETTINGS,
     eulerStreamApiKey: 'euler_live_secret_9999',
+    eulerStreamJwtKey: 'eyJhbGciOiJIUzI1NiJ9.secret.jwt8888',
     tiktokConnectionMethod: 'euler' as const,
   };
   const exported = omitCredentials(withSecret);
   assertEqual('eulerStreamApiKey' in exported, false, 'eulerStreamApiKey omitted from backup export');
-  const merged = mergeBackupSettings({ eulerStreamApiKey: 'attacker_key', theme: 'midnight_oled' }, withSecret);
+  assertEqual('eulerStreamJwtKey' in exported, false, 'eulerStreamJwtKey omitted from backup export');
+  const merged = mergeBackupSettings(
+    { eulerStreamApiKey: 'attacker_key', eulerStreamJwtKey: 'attacker_jwt', theme: 'midnight_oled' },
+    withSecret
+  );
   assertEqual(merged.eulerStreamApiKey, 'euler_live_secret_9999', 'import never overwrites local euler key');
+  assertEqual(merged.eulerStreamJwtKey, 'eyJhbGciOiJIUzI1NiJ9.secret.jwt8888', 'import never overwrites local euler jwt');
   assertEqual(maskApiKeyPreview('euler_live_secret_9999'), '••••9999', 'API key masked cleanly');
+  assertEqual(maskApiKeyPreview('eyJhbGciOiJIUzI1NiJ9.secret.8888'), '••••8888', 'JWT masked cleanly');
 }
 
 async function runOAuthPkceAndScopeTests(): Promise<void> {
