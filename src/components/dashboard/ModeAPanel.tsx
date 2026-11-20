@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   Users,
 } from 'lucide-react';
+import { useTranslation } from '../../i18n/I18nContext';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { StatusDot } from '../ui/StatusDot';
@@ -79,6 +80,7 @@ export function ModeAPanel({
   onRefreshHud,
   onRequestOverlay,
 }: ModeAPanelProps) {
+  const { t } = useTranslation();
   const transportTone = isLiveTransportConnected ? 'success' : 'warning';
   const hudTone = !isOverlayGranted ? 'danger' : isHudVisible ? 'success' : 'neutral';
 
@@ -88,24 +90,16 @@ export function ModeAPanel({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 id="mode-a-heading" className="text-[15px] font-semibold tracking-tight text-sx-text">
-              {isEnglish ? 'TikTok LIVE Companion' : 'Kompanion TikTok LIVE'}
+              {t('dash.modeA.title')}
             </h2>
             <p className="mt-0.5 text-sx-caption leading-relaxed text-sx-text-muted">
-              {isEnglish
-                ? 'SYNTXRR reads LIVE activity and runs its own companion tools. Broadcasting stays in the official TikTok app.'
-                : 'SYNTXRR membaca aktivitas LIVE dan menjalankan alat kompanion. Siaran tetap di aplikasi TikTok resmi.'}
+              {t('dash.modeA.desc')}
             </p>
           </div>
           <span className="flex shrink-0 items-center gap-1.5 rounded-sx-full border border-sx-border bg-sx-surface-2 px-2 py-1">
             <StatusDot tone={isCompanionActive ? 'ready' : 'idle'} />
             <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-sx-text-secondary">
-              {isCompanionActive
-                ? isEnglish
-                  ? 'Active'
-                  : 'Aktif'
-                : isEnglish
-                  ? 'Standby'
-                  : 'Siaga'}
+              {isCompanionActive ? t('dash.modeA.active') : t('dash.modeA.standby')}
             </span>
           </span>
         </div>
@@ -113,50 +107,50 @@ export function ModeAPanel({
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <MetricTile
             icon={Radio}
-            label={isEnglish ? 'Connector' : 'Konektor'}
+            label={t('dash.modeA.connector')}
             value={honestStatus.eventTransport.label}
             tone={isLiveTransportConnected ? 'success' : 'warning'}
           />
           <MetricTile
             icon={Activity}
-            label={isEnglish ? 'Room' : 'Ruang'}
+            label={t('dash.modeA.room')}
             value={honestStatus.roomStatus.label}
             tone={isLiveTransportConnected ? 'success' : 'neutral'}
           />
           <MetricTile
             icon={Users}
-            label={isEnglish ? 'Viewers' : 'Penonton'}
+            label={t('dash.modeA.viewers')}
             value={isLiveTransportConnected ? String(viewerCount) : '—'}
-            hint={isLiveTransportConnected ? undefined : isEnglish ? 'No source' : 'Tanpa sumber'}
+            hint={isLiveTransportConnected ? undefined : t('dash.modeA.noSource')}
           />
           <MetricTile
             icon={Eye}
-            label={isEnglish ? 'Likes' : 'Suka'}
+            label={t('dash.modeA.likes')}
             value={isLiveTransportConnected ? String(likeCount) : '—'}
-            hint={isLiveTransportConnected ? undefined : isEnglish ? 'No source' : 'Tanpa sumber'}
+            hint={isLiveTransportConnected ? undefined : t('dash.modeA.noSource')}
           />
         </div>
 
         <div className="mt-3 divide-y divide-sx-border-subtle rounded-sx-md border border-sx-border-subtle bg-sx-surface-2 px-2.5 py-1">
           <StatusRow
-            label={isEnglish ? 'TikTok account' : 'Akun TikTok'}
+            label={t('dash.modeA.account')}
             value={honestStatus.accountLinked.label}
             detail={honestStatus.accountLinked.detail}
             tone={honestStatus.accountLinked.label ? 'neutral' : 'neutral'}
           />
           <StatusRow
-            label={isEnglish ? 'Target username' : 'Target username'}
-            value={hasValidTargetUsername ? `@${targetUsername}` : isEnglish ? 'Not set' : 'Belum diatur'}
+            label={t('dash.modeA.targetUsername')}
+            value={hasValidTargetUsername ? `@${targetUsername}` : t('dash.modeA.notSet')}
             tone={hasValidTargetUsername ? 'success' : 'warning'}
           />
           <StatusRow
-            label={isEnglish ? 'Companion service' : 'Layanan kompanion'}
+            label={t('dash.modeA.companionService')}
             value={honestStatus.modeASession.label}
             detail={honestStatus.modeASession.detail}
             tone={isCompanionActive ? 'success' : 'neutral'}
           />
           <StatusRow
-            label={isEnglish ? 'Event transport' : 'Transport event'}
+            label={t('dash.modeA.eventTransport')}
             value={honestStatus.eventTransport.label}
             detail={honestStatus.eventTransport.detail}
             tone={transportTone}
@@ -165,23 +159,17 @@ export function ModeAPanel({
             label="Floating HUD"
             value={
               !isOverlayGranted
-                ? isEnglish
-                  ? 'Permission required'
-                  : 'Izin diperlukan'
+                ? t('dash.modeA.permRequired')
                 : isHudVisible
-                  ? isEnglish
-                    ? 'Visible'
-                    : 'Tampil'
-                  : isEnglish
-                    ? 'Hidden'
-                    : 'Tersembunyi'
+                  ? t('dash.modeA.hudVisible')
+                  : t('dash.modeA.hudHidden')
             }
             tone={hudTone}
           />
         </div>
 
         {sessionValidationError ? (
-          <InfoBanner tone="danger" title={isEnglish ? 'Cannot activate yet' : 'Belum bisa diaktifkan'} className="mt-3">
+          <InfoBanner tone="danger" title={t('dash.modeA.cannotActivate')} className="mt-3">
             {sessionValidationError}
           </InfoBanner>
         ) : null}
@@ -197,7 +185,7 @@ export function ModeAPanel({
 
         {lastHudClickTime ? (
           <p className="mt-2 font-mono text-[10px] text-sx-text-muted">
-            {isEnglish ? 'Last HUD tap' : 'Tap HUD terakhir'}: {lastHudClickTime}
+            {t('dash.modeA.lastHudTap')}: {lastHudClickTime}
           </p>
         ) : null}
 
@@ -210,7 +198,7 @@ export function ModeAPanel({
               disabled={isSessionActionPending}
               loading={isSessionActionPending}
             >
-              {isEnglish ? 'Stop Companion' : 'Hentikan Kompanion'}
+              {t('dash.modeA.stop')}
             </Button>
           ) : (
             <Button
@@ -220,13 +208,13 @@ export function ModeAPanel({
               disabled={isSessionActionPending}
               loading={isSessionActionPending}
             >
-              {isEnglish ? 'Activate Companion' : 'Aktifkan Kompanion'}
+              {t('dash.modeA.activate')}
             </Button>
           )}
 
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="sm" onClick={() => onOpenTikTokConnection?.()}>
-              {isEnglish ? 'Connect TikTok' : 'Hubungkan TikTok'}
+              {t('dash.modeA.connectTikTok')}
             </Button>
             <Button
               variant="outline"
@@ -235,29 +223,21 @@ export function ModeAPanel({
               disabled={isHudActionPending}
               loading={isHudActionPending}
             >
-              {isHudVisible
-                ? isEnglish
-                  ? 'Hide HUD'
-                  : 'Sembunyikan HUD'
-                : isEnglish
-                  ? 'Open Floating HUD'
-                  : 'Buka Floating HUD'}
+              {isHudVisible ? t('dash.modeA.hideHud') : t('dash.modeA.openHud')}
             </Button>
           </div>
 
           {!isOverlayGranted ? (
             <InfoBanner
               tone="warning"
-              title={isEnglish ? 'Overlay permission needed' : 'Izin overlay diperlukan'}
+              title={t('dash.modeA.overlayTitle')}
               action={
                 <Button variant="secondary" size="sm" onClick={onRequestOverlay}>
-                  {isEnglish ? 'Open' : 'Buka'}
+                  {t('dash.modeA.open')}
                 </Button>
               }
             >
-              {isEnglish
-                ? 'Allow “Display over other apps” so the HUD can appear above TikTok LIVE.'
-                : 'Aktifkan “Tampilkan di atas aplikasi lain” agar HUD muncul di atas TikTok LIVE.'}
+              {t('dash.modeA.overlayBody')}
             </InfoBanner>
           ) : null}
 
@@ -267,7 +247,7 @@ export function ModeAPanel({
             className="mx-auto flex min-h-[36px] items-center gap-1.5 rounded-sx-md px-3 text-[11px] font-semibold text-sx-text-muted transition-colors hover:text-sx-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sx-focus"
           >
             <Icon icon={RefreshCw} size="xs" tone="inherit" />
-            {isEnglish ? 'Refresh HUD status' : 'Segarkan status HUD'}
+            {t('dash.modeA.refreshHud')}
           </button>
         </div>
       </div>
@@ -277,14 +257,14 @@ export function ModeAPanel({
           <div className="flex items-center gap-1.5">
             <Icon icon={Layers} size="xs" tone="muted" />
             <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-sx-text-muted">
-              {isEnglish ? 'Active preset' : 'Preset aktif'}
+              {t('dash.modeA.activePreset')}
             </span>
           </div>
           <div className="mt-1 truncate text-sx-caption font-semibold text-sx-text">
-            {presetName || (isEnglish ? 'No preset' : 'Belum ada preset')}
+            {presetName || t('dash.modeA.noPreset')}
           </div>
           <div className="mt-0.5 font-mono text-[10px] text-sx-text-muted">
-            {visibleElementsCount} {isEnglish ? 'visible elements' : 'elemen terlihat'}
+            {visibleElementsCount} {t('dash.modeA.visibleElements')}
           </div>
         </div>
 
@@ -292,13 +272,11 @@ export function ModeAPanel({
           <div className="flex items-center gap-1.5">
             <Icon icon={ShieldAlert} size="xs" tone="muted" />
             <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-sx-text-muted">
-              {isEnglish ? 'Companion boundary' : 'Batas kompanion'}
+              {t('dash.modeA.boundaryTitle')}
             </span>
           </div>
           <p className="mt-1 text-[11px] leading-relaxed text-sx-text-secondary">
-            {isEnglish
-              ? 'SYNTXRR cannot start, pause or stop the official TikTok LIVE broadcast. Use the TikTok app for that.'
-              : 'SYNTXRR tidak dapat memulai, menjeda, atau menghentikan siaran LIVE TikTok resmi. Gunakan aplikasi TikTok untuk itu.'}
+            {t('dash.modeA.boundaryBody')}
           </p>
         </div>
       </div>

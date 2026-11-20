@@ -23,6 +23,7 @@ import {
   validateModeBRtmpConfig,
 } from '../services/modeBController';
 import { useTranslation } from '../i18n/I18nContext';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   Radio,
   Tv,
@@ -139,6 +140,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenModeModal,
 }) => {
   const { t, isEnglish } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
 
   const isModeA = isModeAOperatingMode(settings.operatingMode);
   const targetUsername = resolveTikTokTargetUsername(settings, tiktokAccount);
@@ -403,6 +405,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       <ModeSelector isModeA={isModeA} onSelect={onSelectMode} onOpenInfo={onOpenModeModal} />
 
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={isModeA ? 'mode-a' : 'mode-b'}
+          initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -4 }}
+          transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: 'easeOut' }}
+        >
       {isModeA ? (
         <ModeAPanel
           isEnglish={isEnglish}
@@ -456,6 +466,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           onUpdateSettings={onUpdateSettings}
         />
       )}
+        </motion.div>
+      </AnimatePresence>
 
       <div className="space-y-2">
         <SectionHeading
