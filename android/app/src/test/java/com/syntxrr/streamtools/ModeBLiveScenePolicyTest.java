@@ -10,11 +10,12 @@ public class ModeBLiveScenePolicyTest {
                 "text", "shape", "separator", "running_text", "counter", "event_feed", "progress_bar")));
     }
 
-    @Test public void acceptsImageStickerAndVideoWithSceneAssetNamespaces() {
+    @Test public void acceptsImageStickerVideoAndCameraWithSceneAssetNamespaces() {
         assertTrue(ModeBLiveScenePolicy.supportsStaticOverlayTypes(Arrays.asList("text", "image")));
         assertTrue(ModeBLiveScenePolicy.supportsStaticOverlayTypes(Arrays.asList("video")));
         assertTrue(ModeBLiveScenePolicy.supportsStaticOverlayTypes(Arrays.asList("sticker")));
-        assertFalse(ModeBLiveScenePolicy.supportsStaticOverlayTypes(Arrays.asList("camera")));
+        // Camera2 passes this type gate only; physical lens ownership is verified separately.
+        assertTrue(ModeBLiveScenePolicy.supportsStaticOverlayTypes(Arrays.asList("camera")));
     }
 
     @Test public void rejectsUnknownTypesAndNullInput() {
