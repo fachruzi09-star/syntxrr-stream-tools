@@ -2249,10 +2249,10 @@ export default function App() {
 
   const handleResetDefaults = async () => {
     setPendingConfirmModal({
-      title: 'Atur Ulang ke Pengaturan Bawaan?',
+      title: 'Atur Ulang Semua ke Bawaan?',
       message:
-        'Semua pengaturan tampilan, preset studio, soundboard kustom, dan daftar integrasi akan dikembalikan ke bawaan awal aplikasi.',
-      confirmLabel: 'Ya, Atur Ulang',
+        'Koneksi TikTok yang sedang aktif akan diputus, dan seluruh data berikut akan dikembalikan ke bawaan awal: pengaturan aplikasi, daftar preset & preset aktif, elemen Studio, soundboard beserta audio kustomnya, item marketplace & integrasi, status akun TikTok, konfigurasi TTS, serta antrean musik terpadu dan metadata trek lokal. Tindakan ini tidak dapat dibatalkan dari aplikasi setelah dikonfirmasi.',
+      confirmLabel: 'Ya, Atur Ulang Semua',
       tone: 'danger',
       onConfirm: async () => {
         // Selesaikan tulisan tertunda agar data lama tidak dibangkitkan setelah reset.

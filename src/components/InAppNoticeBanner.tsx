@@ -78,7 +78,7 @@ export const InAppNoticeBanner: React.FC = () => {
               type="button"
               onClick={() => dismissInAppNotice(notice.id)}
               aria-label="Tutup pemberitahuan"
-              className="min-w-[36px] min-h-[36px] -mr-1 -mt-1 rounded-lg flex items-center justify-center text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] transition-colors"
+              className="min-w-[44px] min-h-[44px] -mr-1 -mt-1 rounded-lg flex items-center justify-center text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
