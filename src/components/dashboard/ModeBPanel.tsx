@@ -51,6 +51,10 @@ export function ModeBPanel({
   const isBusy = BUSY_STATUSES.includes(modeBStatus.status);
   const isHostWait = modeBStatus.status === 'host_wait';
   const canStop = isModeBStoppableStatus(modeBStatus.status);
+  // Capture truth: a lost capture is a failure state, and asking the user to
+  // re-share means the previous screen is gone — not attached.
+  const isCaptureLost = modeBStatus.status === 'capture_lost';
+  const isAwaitingScreen = modeBStatus.status === 'reshare_waiting';
 
   const statusTone: PanelTone = isLiveVerified
     ? 'success'
@@ -58,7 +62,9 @@ export function ModeBPanel({
       ? 'danger'
       : isBusy || isHostWait || modeBStatus.status === 'reshare_waiting'
         ? 'warning'
-        : 'neutral';
+        : modeBStatus.status === 'disconnected'
+          ? 'warning'
+          : 'neutral';
 
   const statusLabel = isLiveVerified
     ? isEnglish
@@ -173,7 +179,17 @@ export function ModeBPanel({
             </p>
           </div>
           <span className="flex shrink-0 items-center gap-1.5 rounded-sx-full border border-sx-border bg-sx-surface-2 px-2 py-1">
-            <StatusDot tone={isLiveVerified ? 'connected' : isBusy ? 'connecting' : modeBStatus.status === 'error' ? 'disconnected' : 'idle'} />
+            <StatusDot
+              tone={
+                isLiveVerified
+                  ? 'connected'
+                  : isCaptureLost || modeBStatus.status === 'error'
+                    ? 'disconnected'
+                    : isBusy || isHostWait || isAwaitingScreen
+                      ? 'connecting'
+                      : 'idle'
+              }
+            />
             <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-sx-text-secondary">
               {statusLabel}
             </span>
@@ -234,19 +250,23 @@ export function ModeBPanel({
           <StatusRow
             label={isEnglish ? 'Screen capture' : 'Tangkap layar'}
             value={
-              modeBStatus.status === 'capture_lost'
+              isCaptureLost
                 ? isEnglish
                   ? 'Lost'
                   : 'Terputus'
-                : isLiveVerified || isHostWait || modeBStatus.status === 'reshare_waiting'
+                : isAwaitingScreen
                   ? isEnglish
-                    ? 'Attached'
-                    : 'Terpasang'
-                  : isEnglish
-                    ? 'Idle'
-                    : 'Siaga'
+                    ? 'Waiting for screen'
+                    : 'Menunggu layar'
+                  : isLiveVerified || isHostWait
+                    ? isEnglish
+                      ? 'Attached'
+                      : 'Terpasang'
+                    : isEnglish
+                      ? 'Idle'
+                      : 'Siaga'
             }
-            tone={modeBStatus.status === 'capture_lost' ? 'danger' : isLiveVerified ? 'success' : 'neutral'}
+            tone={isCaptureLost ? 'danger' : isAwaitingScreen ? 'warning' : isLiveVerified ? 'success' : 'neutral'}
           />
         </div>
 

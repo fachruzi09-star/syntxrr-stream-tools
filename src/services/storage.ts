@@ -61,7 +61,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   targetResolution: '1080p',
   frameRate: 60,
   performanceProfile: 'balanced',
-  theme: 'navy_dark',
+  theme: 'adaptive_dark',
   canvasOrientation: '9:16',
   rtmpServer: 'rtmp://live.twitch.tv/app',
   streamKey: '',

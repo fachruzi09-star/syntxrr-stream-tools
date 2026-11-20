@@ -2701,7 +2701,7 @@ export default function App() {
 
   return (
     <I18nProvider language={settings.language || 'id-ID'}>
-      <div className="min-h-screen bg-[#080c16] text-slate-100 flex flex-col font-sans">
+      <div className="min-h-screen bg-sx-bg text-sx-text flex flex-col font-sans">
       {/* Top Header Bar */}
       <Header
         activeNav={activeNav}
