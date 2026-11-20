@@ -459,7 +459,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       <div className="space-y-2">
         <SectionHeading
-          title={isEnglish ? 'Go to' : 'Buka'}
+          title={isEnglish ? 'Shortcuts' : 'Pintasan'}
           description={
             isEnglish
               ? 'Every module stays reachable from here and from the drawer.'
