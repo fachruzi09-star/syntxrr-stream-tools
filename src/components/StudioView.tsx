@@ -50,7 +50,32 @@ import {
   type StudioSaveState,
 } from '../services/studioPresetActions';
 import { SOURCE_CATALOG } from './SourcesLibraryView';
-import { createStudioElementFromSource } from '../services/studioElementCatalog';
+import {
+  createStudioElementFromSource,
+  normalizeStudioElementProperties,
+} from '../services/studioElementCatalog';
+import { soundboardEngine } from '../services/soundboardEngine';
+import {
+  appendUniqueStreamEvent,
+  buildEventFeedItems,
+  buildLeaderboardEntries,
+  buildLiveTextRenderModel,
+  computeProgressBarModel,
+  deduplicateStreamEvents,
+  extractLikeIncrementFromEvent,
+  extractViewerCountFromEvent,
+  getActiveTargetTextFromElements,
+  getLatestViewerCountFromHistory,
+  getTopDonorNameFromHistory,
+  resolveActiveUsernameModel,
+  resolveDynamicAvatarModel,
+  resolveDynamicTextOutput,
+  resolveSeparatorStyle,
+  resolveSoundboardControlModel,
+  resolveStickerVisualModel,
+  resolveViewerCounterDisplay,
+  validateSafeBrowserEmbedUrl,
+} from '../services/studioElementRenderModel';
 import {
   Tv,
   Layers,
@@ -105,6 +130,10 @@ import {
   Search,
   Download,
   Move,
+  User,
+  Users,
+  Award,
+  Radio,
 } from 'lucide-react';
 
 interface StudioViewProps {
@@ -235,7 +264,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Active Reactions on Canvas (Trigger Engine)
   const [activeReactions, setActiveReactions] = useState<Record<string, ActiveElementReaction>>({});
 
-  // Dynamic Live Simulation Counter States
+  // Dynamic Live Event & Counter States (initialized cleanly from event bus history)
+  const [studioEventHistory, setStudioEventHistory] = useState<StreamEvent[]>(() =>
+    deduplicateStreamEvents(streamEventBus.getHistory(), 50),
+  );
+  const [latestViewerCount, setLatestViewerCount] = useState<number | null>(() =>
+    getLatestViewerCountFromHistory(streamEventBus.getHistory()),
+  );
   const [simulatedLikes, setSimulatedLikes] = useState<number>(1240);
   const [recentChatList, setRecentChatList] = useState<{ id: string; user: string; text: string; badge?: string }[]>([
     { id: 'c1', user: 'DimasGamer', text: 'Keren banget gameplay-nya bang! 🔥', badge: 'VIP' },
@@ -711,15 +746,37 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
   }, []);
 
-  // EVENT-TO-ELEMENT ENGINE: Subscribe to streamEventBus
+  // EVENT-TO-ELEMENT ENGINE: Single clean subscription to streamEventBus
   useEffect(() => {
     const unsubscribe = streamEventBus.subscribe((event: StreamEvent) => {
       const now = Date.now();
+      setStudioEventHistory((prev) => appendUniqueStreamEvent(prev, event, 50));
 
-      elements.forEach((elem) => {
+      if (event.type === 'viewer') {
+        const nextViewerCount = extractViewerCountFromEvent(event);
+        if (nextViewerCount !== null) {
+          setLatestViewerCount(nextViewerCount);
+        }
+      } else if (event.type === 'like') {
+        const likeIncrement = extractLikeIncrementFromEvent(event);
+        if (likeIncrement > 0) {
+          setSimulatedLikes((prev) => prev + likeIncrement);
+        }
+      } else if (event.type === 'chat') {
+        const chatEntryId = event.id || `c_${now}`;
+        setRecentChatList((prev) => {
+          if (prev.some((item) => item.id === chatEntryId)) return prev;
+          return [
+            ...prev.slice(-4),
+            { id: chatEntryId, user: event.username, text: event.detail, badge: 'LIVE' },
+          ];
+        });
+      }
+
+      elementsRef.current.forEach((elem) => {
         let isMatch = false;
         let action: 'show' | 'pulse' | 'bounce' | 'text_update' = 'pulse';
-        let durationSec = elem.triggerConfig?.durationSec || 5;
+        const durationSec = elem.triggerConfig?.durationSec || 5;
         let textOverride: string | undefined = undefined;
 
         // Auto-Trigger Logic per Element Type
@@ -744,18 +801,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
           if (event.type === 'chat') {
             isMatch = true;
             action = 'text_update';
-            setRecentChatList((prev) => [
-              ...prev.slice(-4),
-              { id: `c_${now}`, user: event.username, text: event.detail, badge: 'LIVE' },
-            ]);
             soundSynth.playAlertChime('chat_event');
           }
-        } else if (elem.type === 'counter' || elem.type === 'live_viewer_counter') {
+        } else if (elem.type === 'counter') {
           if (event.type === 'like') {
             isMatch = true;
             action = 'pulse';
-            setSimulatedLikes((prev) => prev + (event.amount || 1));
             soundSynth.playAlertChime('like');
+          }
+        } else if (elem.type === 'live_viewer_counter') {
+          if (event.type === 'viewer' && extractViewerCountFromEvent(event) !== null) {
+            isMatch = true;
+            action = 'pulse';
           }
         } else if (elem.type === 'song_request') {
           if (event.type === 'chat' && event.detail.startsWith('!play')) {
@@ -786,7 +843,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [elements]);
+  }, []);
 
   // Periodic expiration cleaner for active reactions
   useEffect(() => {
@@ -1689,10 +1746,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return typeof rawUrl === 'string' ? rawUrl : '';
   };
 
-  // Render Element on Canvas
+  // Render Element on Canvas (All 26 SourceTypes explicitly handled with non-destructive render-time normalization)
   const renderElementContent = (elem: StudioElement) => {
-    const isCameraActive = !!activeCameraStreams[elem.id];
-    const reaction = activeReactions[elem.id];
+    const normalizedElem = normalizeStudioElementProperties(elem);
+    const props = normalizedElem.properties;
+    const isCameraActive = !!activeCameraStreams[normalizedElem.id];
+    const reaction = activeReactions[normalizedElem.id];
 
     let animClass = '';
     if (reaction) {
@@ -1701,43 +1760,44 @@ export const StudioView: React.FC<StudioViewProps> = ({
       else if (reaction.action === 'show') animClass = 'animate-fadeIn ring-2 ring-emerald-400';
     }
 
-    switch (elem.type) {
-      case 'camera':
+    switch (normalizedElem.type) {
+      case 'camera': {
+        const aspectFit = props.aspectFit === 'contain' ? 'object-contain' : 'object-cover';
         return (
           <div
             className={`w-full h-full rounded-xl bg-zinc-950 border relative overflow-hidden flex flex-col items-center justify-center transition-all ${animClass}`}
             style={{
-              borderColor: elem.properties.borderColor || '#F2C230',
-              borderRadius: `${elem.properties.borderRadius || 14}px`,
-              borderWidth: `${elem.properties.borderWidth || 2}px`,
+              borderColor: props.borderColor || '#F2C230',
+              borderRadius: `${props.borderRadius ?? 14}px`,
+              borderWidth: `${props.borderWidth ?? 2}px`,
             }}
           >
             {isCameraActive ? (
               <video
                 ref={(el) => {
-                  videoRefs.current[elem.id] = el;
-                  if (el && activeCameraStreams[elem.id] && el.srcObject !== activeCameraStreams[elem.id]) {
-                    el.srcObject = activeCameraStreams[elem.id];
+                  videoRefs.current[normalizedElem.id] = el;
+                  if (el && activeCameraStreams[normalizedElem.id] && el.srcObject !== activeCameraStreams[normalizedElem.id]) {
+                    el.srcObject = activeCameraStreams[normalizedElem.id];
                     el.play().catch(() => {});
                   }
                 }}
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className={`w-full h-full ${aspectFit}`}
               />
             ) : (
               <div className="flex flex-col items-center justify-center text-zinc-400 p-2 text-center select-none">
                 <Camera className="w-6 h-6 text-[#F2C230] mb-1" />
-                <span className="text-[10px] font-bold text-white truncate max-w-full px-1">{elem.name}</span>
+                <span className="text-[10px] font-bold text-white truncate max-w-full px-1">{normalizedElem.name}</span>
                 <span className="text-[9px] text-zinc-400">
-                  {elem.properties.facingMode === 'environment' ? 'Kamera Belakang' : 'Kamera Depan'}
+                  {props.facingMode === 'environment' ? 'Kamera Belakang' : 'Kamera Depan'}
                 </span>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleToggleCameraForElement(elem.id, elem.properties.facingMode);
+                    handleToggleCameraForElement(normalizedElem.id, props.facingMode);
                   }}
                   className="mt-1 px-2.5 py-1 rounded-md bg-[#F2C230] hover:bg-[#e0b220] text-zinc-950 text-[9px] font-bold"
                 >
@@ -1755,12 +1815,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           </div>
         );
+      }
 
-      case 'screen_capture':
+      case 'screen_capture': {
+        const cropClass =
+          props.cropMode === 'cover' || props.cropMode === 'fill'
+            ? 'object-cover'
+            : 'object-contain';
+        const fpsVal =
+          typeof props.fps === 'number' && Number.isFinite(props.fps) && props.fps > 0
+            ? Math.round(props.fps)
+            : 60;
         return (
           <div
             className={`w-full h-full rounded-xl bg-zinc-950 border border-zinc-700 relative overflow-hidden flex flex-col items-center justify-center ${animClass}`}
-            style={{ borderRadius: `${elem.properties.borderRadius || 12}px` }}
+            style={{ borderRadius: `${props.borderRadius ?? 12}px` }}
           >
             {screenCaptureStream ? (
               <video
@@ -1774,13 +1843,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-contain bg-black"
+                className={`w-full h-full ${cropClass} bg-black`}
               />
             ) : (
               <div className="flex flex-col items-center justify-center text-zinc-400 p-3 text-center select-none">
                 <Monitor className="w-8 h-8 text-rose-400 mb-1.5" />
                 <span className="text-xs font-bold text-white">Tangkapan Layar Android</span>
-                <span className="text-[9px] text-zinc-400 mt-0.5">MediaProjection 60 FPS</span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">MediaProjection {fpsVal} FPS</span>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1795,35 +1864,219 @@ export const StudioView: React.FC<StudioViewProps> = ({
             )}
           </div>
         );
+      }
 
-      case 'event_alert':
+      case 'shape': {
+        const borderWidth =
+          typeof props.borderWidth === 'number' && Number.isFinite(props.borderWidth) && props.borderWidth >= 0
+            ? props.borderWidth
+            : 2;
+        const borderRadius =
+          typeof props.borderRadius === 'number' && Number.isFinite(props.borderRadius) && props.borderRadius >= 0
+            ? props.borderRadius
+            : 12;
         return (
           <div
-            className={`w-full h-full rounded-xl bg-gradient-to-r from-amber-950/95 via-zinc-900/95 to-amber-950/95 border-2 border-[#F2C230] p-2.5 flex items-center gap-3 shadow-2xl transition-all ${animClass}`}
+            aria-label={normalizedElem.name}
+            className={`w-full h-full transition-all ${animClass}`}
+            style={{
+              backgroundColor:
+                typeof props.backgroundColor === 'string' && props.backgroundColor.trim()
+                  ? props.backgroundColor
+                  : 'rgba(242, 194, 48, 0.25)',
+              borderColor:
+                typeof props.borderColor === 'string' && props.borderColor.trim()
+                  ? props.borderColor
+                  : '#F2C230',
+              borderWidth: `${borderWidth}px`,
+              borderStyle: borderWidth > 0 ? 'solid' : 'none',
+              borderRadius: `${borderRadius}px`,
+            }}
+          />
+        );
+      }
+
+      case 'separator': {
+        const sep = resolveSeparatorStyle(normalizedElem, props);
+        return (
+          <div
+            aria-label={normalizedElem.name}
+            className={`w-full h-full flex items-center justify-center ${animClass}`}
           >
-            <div className="w-8 h-8 rounded-lg bg-[#F2C230] flex items-center justify-center text-zinc-950 shrink-0 font-bold shadow-md">
+            <div
+              className="rounded-full"
+              style={
+                sep.orientation === 'vertical'
+                  ? {
+                      width: `${sep.thickness}px`,
+                      height: '100%',
+                      backgroundColor: sep.lineColor,
+                      boxShadow: sep.glow ? `0 0 10px ${sep.lineColor}` : 'none',
+                    }
+                  : {
+                      width: '100%',
+                      height: `${sep.thickness}px`,
+                      backgroundColor: sep.lineColor,
+                      boxShadow: sep.glow ? `0 0 10px ${sep.lineColor}` : 'none',
+                    }
+              }
+            />
+          </div>
+        );
+      }
+
+      case 'browser_embed': {
+        const urlCheck = validateSafeBrowserEmbedUrl(props.url);
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950 border border-zinc-700 overflow-hidden flex flex-col ${animClass}`}
+          >
+            {urlCheck.isValid ? (
+              <>
+                <div className="px-2 py-1 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5 text-[9px] text-zinc-300 shrink-0">
+                  <Globe className="w-3 h-3 text-teal-400 shrink-0" />
+                  <span className="truncate font-mono">{urlCheck.hostname}</span>
+                </div>
+                <iframe
+                  src={urlCheck.safeUrl}
+                  title={normalizedElem.name}
+                  sandbox="allow-scripts"
+                  referrerPolicy="no-referrer"
+                  loading="lazy"
+                  className="w-full flex-1 border-0 pointer-events-none bg-zinc-950"
+                />
+              </>
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center text-zinc-400 select-none">
+                <Globe className="w-6 h-6 text-teal-400 mb-1" />
+                <span className="text-[10px] font-bold text-white">
+                  {urlCheck.reason === 'empty'
+                    ? 'URL Browser Embed Kosong'
+                    : 'URL Browser Embed Tidak Valid'}
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">
+                  Hanya URL http:// atau https:// yang diizinkan
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'soundboard': {
+        const sfxPlan = resolveSoundboardControlModel(props);
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/95 border border-pink-500/50 px-2.5 py-2 flex items-center justify-between gap-2 transition-all ${animClass}`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-pink-500/20 border border-pink-500/40 flex items-center justify-center text-pink-400 shrink-0">
+                <Music className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0 text-left">
+                <div className="text-[10px] font-bold text-white truncate">{sfxPlan.label}</div>
+                <div className="text-[8px] text-zinc-400 font-mono truncate">
+                  Vol: {sfxPlan.volumePercent}% ·{' '}
+                  {sfxPlan.mode === 'custom_url'
+                    ? 'Audio URL'
+                    : sfxPlan.mode === 'synth'
+                      ? sfxPlan.sfxType
+                      : 'Invalid SFX'}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={!sfxPlan.isSupported}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!sfxPlan.isSupported) return;
+                if (sfxPlan.mode === 'custom_url') {
+                  void soundboardEngine.playCustomFile(
+                    normalizedElem.id,
+                    sfxPlan.audioUrl,
+                    sfxPlan.volumeUnit,
+                  );
+                } else {
+                  void soundboardEngine.playSynthesizedSFX(
+                    sfxPlan.sfxType,
+                    sfxPlan.volumeUnit,
+                  );
+                }
+              }}
+              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1 shrink-0 transition-colors ${
+                sfxPlan.isSupported
+                  ? 'bg-pink-500 hover:bg-pink-400 text-zinc-950'
+                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+              }`}
+            >
+              <Play className="w-3 h-3" />
+              <span>Putar</span>
+            </button>
+          </div>
+        );
+      }
+
+      case 'event_alert': {
+        const badgeColor =
+          (typeof props.badgeColor === 'string' && props.badgeColor.trim()) ||
+          (typeof props.accentColor === 'string' && props.accentColor.trim()) ||
+          '#F2C230';
+        const fallbackAlertBody =
+          typeof props.alertMessage === 'string' && props.alertMessage.trim()
+            ? props.alertMessage
+            : 'Menunggu event Gift / Follow / Donasi...';
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-gradient-to-r from-amber-950/95 via-zinc-900/95 to-amber-950/95 border-2 p-2.5 flex items-center gap-3 shadow-2xl transition-all ${animClass}`}
+            style={{ borderColor: badgeColor }}
+          >
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-950 shrink-0 font-bold shadow-md"
+              style={{ backgroundColor: badgeColor }}
+            >
               <Sparkles className="w-5 h-5 text-zinc-950" />
             </div>
             <div className="text-left min-w-0 flex-1">
-              <div className="text-[9px] uppercase tracking-wider font-extrabold text-[#F2C230]">
-                {elem.properties.alertTitle || 'GIFT RECEIVED!'}
+              <div
+                className="text-[9px] uppercase tracking-wider font-extrabold"
+                style={{ color: badgeColor }}
+              >
+                {props.alertTitle || 'GIFT RECEIVED!'}
               </div>
               <div className="text-xs font-black text-white truncate">
-                {reaction?.textOverride || '@RizkyKing mengirim Paus Biru (2.150 Koin)!'}
+                {reaction?.textOverride || fallbackAlertBody}
               </div>
             </div>
           </div>
         );
+      }
 
-      case 'chat_message':
+      case 'chat_message': {
+        const maxMessages =
+          typeof props.maxMessages === 'number' && Number.isFinite(props.maxMessages) && props.maxMessages > 0
+            ? Math.max(1, Math.min(10, Math.floor(props.maxMessages)))
+            : 5;
+        const chatBg =
+          typeof props.backgroundColor === 'string' && props.backgroundColor.trim()
+            ? props.backgroundColor
+            : `rgba(12, 14, 18, ${(typeof props.bgOpacity === 'number' ? props.bgOpacity : 85) / 100})`;
+        const chatFontSize =
+          typeof props.fontSize === 'number' && Number.isFinite(props.fontSize) && props.fontSize > 0
+            ? props.fontSize
+            : 11;
         return (
           <div
             className={`w-full h-full p-2.5 space-y-1.5 overflow-hidden text-left bg-zinc-950/90 rounded-xl border border-zinc-800 transition-all ${animClass}`}
-            style={{ backgroundColor: `rgba(12, 14, 18, ${(elem.properties.bgOpacity || 85) / 100})` }}
+            style={{ backgroundColor: chatBg }}
           >
-            {recentChatList.map((chat) => (
-              <div key={chat.id} className="flex items-center gap-1.5 text-[11px] leading-tight">
-                {elem.properties.showBadges && chat.badge && (
+            {recentChatList.slice(-maxMessages).map((chat) => (
+              <div
+                key={chat.id}
+                className="flex items-center gap-1.5 leading-tight"
+                style={{ fontSize: `${chatFontSize}px` }}
+              >
+                {props.showBadges !== false && chat.badge && (
                   <span className="px-1 py-0.2 rounded bg-amber-500/20 text-[#F2C230] font-bold text-[8px]">
                     {chat.badge}
                   </span>
@@ -1834,50 +2087,94 @@ export const StudioView: React.FC<StudioViewProps> = ({
             ))}
           </div>
         );
+      }
 
-      case 'combo_counter':
+      case 'combo_counter': {
+        const themeColor =
+          typeof props.themeColor === 'string' && props.themeColor.trim()
+            ? props.themeColor
+            : '#EA580C';
         return (
           <div
-            className={`w-full h-full rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 p-2 flex items-center justify-center gap-2 text-white shadow-xl transition-all ${animClass}`}
+            className={`w-full h-full rounded-xl p-2 flex items-center justify-center gap-2 text-white shadow-xl transition-all ${animClass}`}
+            style={{
+              background: `linear-gradient(90deg, ${themeColor}, #F59E0B)`,
+            }}
           >
-            <Flame className="w-5 h-5 text-amber-200" />
-            <span className="text-xs font-black tracking-wider">
-              {elem.properties.comboLabel || 'x25 COMBO LOVE!'}
+            <Flame className="w-5 h-5 text-amber-100 shrink-0" />
+            <span className="text-xs font-black tracking-wider truncate">
+              {props.comboLabel || 'x25 COMBO LOVE!'}
             </span>
           </div>
         );
+      }
 
-      case 'counter':
-      case 'live_viewer_counter':
+      case 'counter': {
+        const goalValue = props.targetGoal ?? props.target;
         return (
           <div
-            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 p-2 flex items-center justify-between text-xs px-3 transition-all ${animClass}`}
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 p-2 flex items-center justify-between gap-2 text-xs px-3 transition-all ${animClass}`}
           >
-            <div className="flex items-center gap-2 font-bold text-white">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="font-mono text-sm">{simulatedLikes.toLocaleString('id-ID')}</span>
+            <div className="flex items-center gap-2 font-bold text-white min-w-0">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+              <span className="font-mono text-sm tabular-nums">
+                {simulatedLikes.toLocaleString('id-ID')}
+              </span>
+              {typeof goalValue === 'number' && Number.isFinite(goalValue) && goalValue > 0 && (
+                <span className="text-[9px] text-zinc-400 font-mono truncate">
+                  / {goalValue.toLocaleString('id-ID')}
+                </span>
+              )}
             </div>
-            <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider">
-              {elem.properties.label || 'Taps / Likes'}
+            <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider truncate">
+              {props.label || 'Taps / Likes'}
             </span>
           </div>
         );
+      }
+
+      case 'live_viewer_counter': {
+        const viewerDisplay = resolveViewerCounterDisplay({
+          liveViewerCount: latestViewerCount,
+          fallbackPropertyValue: props.viewerCount,
+        });
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 px-3 py-1.5 flex items-center justify-between gap-2 text-xs transition-all ${animClass}`}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              {props.liveBadge !== false && (
+                <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[8px] font-black tracking-wider shrink-0">
+                  LIVE
+                </span>
+              )}
+              <Users className="w-3.5 h-3.5 text-zinc-300 shrink-0" />
+              <span className="font-mono text-sm font-bold text-white tabular-nums">
+                {viewerDisplay.formattedCount}
+              </span>
+            </div>
+            <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider shrink-0">
+              Penonton
+            </span>
+          </div>
+        );
+      }
 
       case 'running_text':
         return (
           <div
             className="w-full h-full flex items-center overflow-hidden rounded px-2 border border-zinc-800"
-            style={{ backgroundColor: elem.properties.bgColor || '#0F1115' }}
+            style={{ backgroundColor: props.bgColor || '#0F1115' }}
           >
             <div
               className="whitespace-nowrap animate-marquee text-[11px] font-bold"
               style={{
-                color: elem.properties.textColor || '#F2C230',
-                fontSize: `${elem.properties.fontSize || 12}px`,
-                animationDuration: `${Math.max(1, 20 - (elem.properties.speed || 4) * 2)}s`,
+                color: props.textColor || '#F2C230',
+                fontSize: `${props.fontSize || 12}px`,
+                animationDuration: `${Math.max(1, 20 - (props.speed || 4) * 2)}s`,
               }}
             >
-              {elem.properties.text || '🔥 SYNTXRR STREAM: Siaran Langsung TikTok & Multi-Platform'}
+              {props.text || '🔥 SYNTXRR STREAM: Siaran Langsung TikTok & Multi-Platform'}
             </div>
           </div>
         );
@@ -1893,13 +2190,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 : 'border-[#F2C230]/50'
             } flex items-center gap-3 text-left transition-all ${animClass}`}
           >
-            <div
-              className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow ${
-                srState.isPlaying ? 'bg-[#F2C230] text-zinc-950' : 'bg-zinc-800 text-zinc-300'
-              }`}
-            >
-              <Music className="w-4 h-4" />
-            </div>
+            {props.showArt !== false && props.showAlbumArt !== false && (
+              <div
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow ${
+                  srState.isPlaying ? 'bg-[#F2C230] text-zinc-950' : 'bg-zinc-800 text-zinc-300'
+                }`}
+              >
+                <Music className="w-4 h-4" />
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <div className="text-[10px] text-[#F2C230] font-bold truncate">
                 {srState.currentTrack?.title || 'Tidak ada lagu aktif'}
@@ -1916,10 +2215,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     ? 'Dijeda'
                     : 'Idle'}
                 </span>
-                {elem.properties.showRequester && srState.currentTrack?.requester && (
+                {props.showRequester !== false && srState.currentTrack?.requester && (
                   <span>· @{srState.currentTrack.requester}</span>
                 )}
-                {elem.properties.showQueueCount !== false && (
+                {props.showQueueCount !== false && (
                   <span className="px-1 py-0.2 rounded bg-zinc-900 text-[#F2C230] font-mono">
                     Antrean: {srState.queue.length}
                   </span>
@@ -1938,12 +2237,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
         const activeTitle = srState.currentTrack?.title || manualAudioTitle;
         const activeArtist = srState.currentTrack?.artist || manualAudioArtist;
         const customLyrics =
-          typeof elem.properties.lyricsText === 'string'
-            ? elem.properties.lyricsText.trim()
+          typeof props.lyricsText === 'string'
+            ? props.lyricsText.trim()
             : '';
+        const textAlignClass =
+          props.align === 'left'
+            ? 'text-left'
+            : props.align === 'right'
+              ? 'text-right'
+              : 'text-center';
         return (
           <div
-            className={`w-full h-full p-2.5 rounded-xl bg-zinc-950/90 border border-violet-500/40 flex flex-col justify-center text-center transition-all ${animClass}`}
+            className={`w-full h-full p-2.5 rounded-xl bg-zinc-950/90 border border-violet-500/40 flex flex-col justify-center ${textAlignClass} transition-all ${animClass}`}
           >
             <div className="text-[9px] font-bold text-violet-300 truncate">
               {activeTitle
@@ -1971,63 +2276,337 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[10px] text-cyan-300 font-bold truncate">
-                {elem.properties.title || elem.name || 'Audio Manual (BGM)'}
+                {props.title || normalizedElem.name || 'Audio Manual (BGM)'}
               </div>
               <div className="text-[8px] text-zinc-400 truncate flex items-center gap-1.5 mt-0.5">
                 <span className="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 font-mono uppercase text-[7px] font-bold">
-                  {elem.properties.channel || 'bgm'}
+                  {props.channel || 'bgm'}
                 </span>
-                {elem.properties.localFileName && (
+                {props.localFileName && (
                   <span className="px-1 py-0.2 rounded bg-zinc-800 text-zinc-300 truncate max-w-[90px]">
-                    📁 {elem.properties.localFileName}
+                    📁 {props.localFileName}
                   </span>
                 )}
-                <span>Vol: {elem.properties.volume ?? 85}%</span>
-                {elem.properties.loop !== false && <span className="text-cyan-400">↻ Loop</span>}
+                <span>Vol: {props.volume ?? 85}%</span>
+                {props.loop !== false && <span className="text-cyan-400">↻ Loop</span>}
               </div>
             </div>
           </div>
         );
 
-      case 'text':
-      case 'dynamic_text':
+      case 'text': {
+        const textColor = props.textColor || props.color || '#FFFFFF';
+        const bgColor =
+          typeof props.backgroundColor === 'string' && props.backgroundColor.trim()
+            ? props.backgroundColor
+            : 'transparent';
         return (
           <div
-            className={`w-full h-full flex items-center justify-center text-center font-bold px-2 select-none ${animClass}`}
+            className={`w-full h-full flex items-center justify-center text-center px-2 select-none ${animClass}`}
             style={{
-              color: elem.properties.textColor || '#FFFFFF',
-              fontSize: `${elem.properties.fontSize || 16}px`,
+              color: textColor,
+              fontSize: `${props.fontSize || 16}px`,
+              fontWeight: props.fontWeight === 'normal' ? 500 : 700,
+              backgroundColor: bgColor,
             }}
           >
-            {elem.properties.text || elem.name}
+            {props.text || normalizedElem.name}
           </div>
         );
+      }
 
-      case 'image':
-      case 'sticker': {
-        const resolvedImgSrc = resolveStudioElementMediaSrc(elem, 'image');
+      case 'dynamic_text': {
+        const nowTimeText = new Date().toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        const latestUser = studioEventHistory.find(
+          (item) => typeof item.username === 'string' && item.username.trim().length > 0,
+        )?.username;
+        const dynamicResult = resolveDynamicTextOutput({
+          template: props.template ?? props.text,
+          fallback: props.fallback,
+          context: {
+            latestUsername: latestUser || null,
+            targetText: getActiveTargetTextFromElements(elements, props),
+            currentTimeText: nowTimeText,
+            durationText: null,
+            topDonorName: getTopDonorNameFromHistory(studioEventHistory),
+          },
+        });
+        return (
+          <div
+            className={`w-full h-full rounded-lg bg-zinc-950/75 border border-zinc-800 flex items-center justify-center text-center px-2.5 select-none ${animClass}`}
+            style={{
+              color: props.textColor || props.color || '#FFFFFF',
+              fontSize: `${props.fontSize || 14}px`,
+              fontWeight: 700,
+            }}
+          >
+            <span className="truncate">{dynamicResult.text}</span>
+          </div>
+        );
+      }
+
+      case 'username': {
+        const userModel = resolveActiveUsernameModel(studioEventHistory, props);
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-emerald-500/40 px-2.5 py-1.5 flex items-center justify-between gap-2 text-left ${animClass}`}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <User className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span
+                className={`text-xs font-bold truncate ${
+                  userModel.hasEvent ? 'text-white' : 'text-zinc-400 font-medium'
+                }`}
+              >
+                {userModel.displayText}
+              </span>
+            </div>
+            {userModel.hasEvent && userModel.badge && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[8px] font-bold shrink-0">
+                {userModel.badge}
+              </span>
+            )}
+          </div>
+        );
+      }
+
+      case 'avatar': {
+        const avatarModel = resolveDynamicAvatarModel(studioEventHistory, props);
+        const shapeClass =
+          avatarModel.shape === 'square'
+            ? 'rounded-none'
+            : avatarModel.shape === 'rounded'
+              ? 'rounded-xl'
+              : 'rounded-full';
+        const glowClass = avatarModel.borderGlow
+          ? 'ring-2 ring-[#F2C230] shadow-[0_0_12px_rgba(242,194,48,0.45)]'
+          : 'border border-zinc-700';
+        return (
+          <div className={`w-full h-full flex items-center justify-center p-1 ${animClass}`}>
+            {avatarModel.avatarUrl ? (
+              <img
+                src={avatarModel.avatarUrl}
+                alt={avatarModel.username || 'Avatar Penonton'}
+                className={`w-full h-full object-cover select-none pointer-events-none ${shapeClass} ${glowClass}`}
+              />
+            ) : (
+              <div
+                className={`w-full h-full bg-zinc-900 flex items-center justify-center text-[#F2C230] font-black text-sm select-none ${shapeClass} ${glowClass}`}
+              >
+                {avatarModel.initial ? (
+                  <span>{avatarModel.initial}</span>
+                ) : (
+                  <User className="w-5 h-5 text-zinc-400" />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'event_feed': {
+        const feedItems = buildEventFeedItems(studioEventHistory, props.maxItems);
+        const slideAnim = props.slideAnimation !== false;
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 p-2 overflow-hidden flex flex-col justify-start gap-1 text-left ${animClass}`}
+          >
+            {feedItems.length === 0 ? (
+              <div className="w-full h-full flex items-center justify-center text-[10px] text-zinc-400 text-center">
+                Belum ada aktivitas penonton
+              </div>
+            ) : (
+              feedItems.map((item) => (
+                <div
+                  key={item.id}
+                  className={`flex items-center gap-1.5 text-[10px] leading-tight ${
+                    slideAnim ? 'transition-all' : ''
+                  }`}
+                >
+                  <span className="px-1 py-0.2 rounded bg-orange-500/20 text-orange-300 font-mono text-[8px] font-bold uppercase shrink-0">
+                    {item.type}
+                  </span>
+                  <span className="font-bold text-white shrink-0">@{item.username}</span>
+                  <span className="text-zinc-300 truncate">{item.detail}</span>
+                </div>
+              ))
+            )}
+          </div>
+        );
+      }
+
+      case 'progress_bar': {
+        const progress = computeProgressBarModel(props);
+        const barColor =
+          typeof props.barColor === 'string' && props.barColor.trim()
+            ? props.barColor
+            : '#F2C230';
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 px-3 py-1.5 flex flex-col justify-center gap-1 text-left ${animClass}`}
+          >
+            <div className="flex items-center justify-between gap-2 text-[9px] font-bold">
+              <span className="text-zinc-200 truncate">
+                {progress.formattedCurrent} / {progress.formattedTarget}
+              </span>
+              <span className="font-mono text-[#F2C230] shrink-0">{progress.percentLabel}</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{
+                  width: `${progress.percent}%`,
+                  backgroundColor: barColor,
+                }}
+              />
+            </div>
+          </div>
+        );
+      }
+
+      case 'leaderboard': {
+        const entries = buildLeaderboardEntries(studioEventHistory, props.topCount);
+        const showAmounts = props.showAmounts !== false;
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-amber-500/40 p-2 overflow-hidden flex flex-col justify-start gap-1 text-left ${animClass}`}
+          >
+            <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#F2C230] shrink-0">
+              <Award className="w-3 h-3 shrink-0" />
+              <span>Top Supporters</span>
+            </div>
+            {entries.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-[10px] text-zinc-400 text-center">
+                Belum ada gift / donasi sesi ini
+              </div>
+            ) : (
+              entries.map((entry) => (
+                <div
+                  key={entry.username.toLowerCase()}
+                  className="flex items-center justify-between gap-1.5 text-[10px]"
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-mono font-bold text-[#F2C230] shrink-0">
+                      #{entry.rank}
+                    </span>
+                    <span className="font-semibold text-white truncate">@{entry.username}</span>
+                    <span className="text-[8px] text-zinc-400 shrink-0">
+                      ({entry.supportCount}x)
+                    </span>
+                  </div>
+                  {showAmounts && entry.formattedLastAmount && (
+                    <span className="text-[9px] font-mono text-emerald-300 shrink-0">
+                      {entry.formattedLastAmount}
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        );
+      }
+
+      case 'live_text': {
+        const liveModel = buildLiveTextRenderModel({
+          isModeBSelected,
+          modeBStatus,
+          showFps: props.showFps !== false,
+          showBitrate: props.showBitrate !== false,
+        });
+        const badgeClass =
+          liveModel.tone === 'live'
+            ? 'bg-red-600 text-white'
+            : liveModel.tone === 'transition'
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+              : liveModel.tone === 'error'
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                : 'bg-zinc-800 text-zinc-300 border border-zinc-700';
+        return (
+          <div
+            className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 px-2.5 py-1 flex items-center justify-between gap-2 text-[9px] font-mono ${animClass}`}
+          >
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Radio
+                className={`w-3 h-3 ${
+                  liveModel.isLive ? 'text-red-400' : 'text-zinc-400'
+                }`}
+              />
+              <span className={`px-1.5 py-0.5 rounded font-bold text-[8px] ${badgeClass}`}>
+                {liveModel.statusLabel}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-zinc-300 truncate">
+              <span>RES: {liveModel.resolutionLabel}</span>
+              {props.showFps !== false && <span>FPS: {liveModel.fpsLabel}</span>}
+              {props.showBitrate !== false && <span>{liveModel.bitrateLabel}</span>}
+            </div>
+          </div>
+        );
+      }
+
+      case 'image': {
+        const resolvedImgSrc = resolveStudioElementMediaSrc(normalizedElem, 'image');
+        const fitClass =
+          props.fit === 'cover'
+            ? 'object-cover'
+            : props.fit === 'fill'
+              ? 'object-fill'
+              : 'object-contain';
+        const imgRadius =
+          typeof props.borderRadius === 'number' && Number.isFinite(props.borderRadius) && props.borderRadius >= 0
+            ? props.borderRadius
+            : 8;
         return resolvedImgSrc ? (
           <img
             src={resolvedImgSrc}
-            alt={elem.name}
-            className={`w-full h-full object-contain rounded select-none pointer-events-none ${animClass}`}
+            alt={normalizedElem.name}
+            className={`w-full h-full ${fitClass} select-none pointer-events-none ${animClass}`}
+            style={{ borderRadius: `${imgRadius}px` }}
           />
         ) : (
           <div className="w-full h-full rounded bg-zinc-900/90 border border-[#F2C230]/40 flex flex-col items-center justify-center text-[#F2C230]">
             <ImageIcon className="w-5 h-5 mb-1" />
-            <span className="text-[9px] font-bold">{elem.name}</span>
+            <span className="text-[9px] font-bold">{normalizedElem.name}</span>
+          </div>
+        );
+      }
+
+      case 'sticker': {
+        const resolvedStickerImgSrc = resolveStudioElementMediaSrc(normalizedElem, 'image');
+        const stickerVisual = resolveStickerVisualModel(props.stickerId, props.floatEffect);
+        const floatClass = stickerVisual.floatEffect ? 'animate-bounce' : '';
+        return resolvedStickerImgSrc ? (
+          <img
+            src={resolvedStickerImgSrc}
+            alt={normalizedElem.name}
+            className={`w-full h-full object-contain select-none pointer-events-none ${floatClass} ${animClass}`}
+          />
+        ) : (
+          <div
+            className={`w-full h-full rounded-xl bg-amber-500/15 border border-[#F2C230]/50 flex flex-col items-center justify-center gap-0.5 select-none ${animClass}`}
+          >
+            <span className={`text-2xl leading-none ${floatClass}`} role="img" aria-label={stickerVisual.label}>
+              {stickerVisual.emoji}
+            </span>
+            <span className="text-[8px] font-bold text-[#F2C230] uppercase tracking-wider">
+              {stickerVisual.label}
+            </span>
           </div>
         );
       }
 
       case 'video': {
-        const resolvedVideoSrc = resolveStudioElementMediaSrc(elem, 'video');
+        const resolvedVideoSrc = resolveStudioElementMediaSrc(normalizedElem, 'video');
         return resolvedVideoSrc ? (
           <video
             src={resolvedVideoSrc}
-            autoPlay
-            loop
-            muted
+            autoPlay={props.autoplay !== false}
+            loop={props.loop !== false}
+            muted={props.muted !== false}
             playsInline
             className="w-full h-full object-cover rounded pointer-events-none"
           />
@@ -2039,12 +2618,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
         );
       }
 
-      default:
+      default: {
+        const _exhaustiveCheck: never = normalizedElem.type;
         return (
-          <div className="w-full h-full flex items-center justify-center text-zinc-300 text-xs font-semibold">
-            {elem.name}
+          <div className="w-full h-full flex items-center justify-center text-zinc-400 text-xs">
+            {String(_exhaustiveCheck)}
           </div>
         );
+      }
     }
   };
 
