@@ -2913,6 +2913,7 @@ export default function App() {
 
           {activeNav === 'studio' && legacySubview === 'sources' && (
             <SourcesLibraryView
+              existingElements={studioElements}
               onAddElementToStudio={handleAddSingleElementToStudio}
               onNavigateToStudio={() => handleNavigate('studio')}
             />

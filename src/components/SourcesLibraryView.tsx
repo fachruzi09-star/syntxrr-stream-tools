@@ -5,8 +5,12 @@ import {
 } from '../types';
 import {
   STATUS_DEFINITIONS,
-  FeatureStatus,
 } from '../theme/designSystem';
+import {
+  STUDIO_ELEMENT_CATALOG,
+  StudioSourceCatalogEntry,
+  createStudioElementFromSource,
+} from '../services/studioElementCatalog';
 import {
   Layers,
   Search,
@@ -37,413 +41,52 @@ import {
   Eye,
 } from 'lucide-react';
 
-interface SourceDefinition {
-  type: SourceType;
-  name: string;
-  category: 'basic' | 'dynamic';
-  categoryLabel: string;
-  status: FeatureStatus;
-  description: string;
+export interface SourceDefinition extends StudioSourceCatalogEntry {
   icon: React.ReactNode;
-  defaultDimensions: { width: number; height: number };
-  defaultProperties: Record<string, any>;
 }
 
-export const SOURCE_CATALOG: SourceDefinition[] = [
-  // 11 BASIC SOURCES
-  {
-    type: 'text',
-    name: 'Teks Statis',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Menampilkan judul siaran, pengumuman, atau jadwal live streaming dengan kustomisasi font dan warna.',
-    icon: <Type className="w-5 h-5 text-blue-400" />,
-    defaultDimensions: { width: 60, height: 8 },
-    defaultProperties: {
-      text: 'SYNTXRR LIVE STREAM',
-      fontSize: 20,
-      color: '#FFFFFF',
-      fontWeight: 'bold',
-      backgroundColor: 'transparent',
-    },
-  },
-  {
-    type: 'image',
-    name: 'Gambar / Logo',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Logo watermark, sponsor banner, bingkai foto, atau stiker PNG transparan.',
-    icon: <ImageIcon className="w-5 h-5 text-emerald-400" />,
-    defaultDimensions: { width: 25, height: 15 },
-    defaultProperties: {
-      url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=300&auto=format&fit=crop&q=80',
-      borderRadius: 8,
-      fit: 'contain',
-    },
-  },
-  {
-    type: 'video',
-    name: 'Pemutar Video Loop',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Video latar belakang animasi loop, intro siaran, atau video transisi MP4/WebM.',
-    icon: <Video className="w-5 h-5 text-indigo-400" />,
-    defaultDimensions: { width: 50, height: 30 },
-    defaultProperties: {
-      loop: true,
-      muted: true,
-      autoplay: true,
-    },
-  },
-  {
-    type: 'shape',
-    name: 'Bentuk Geometri',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Bentuk latar belakang persegi atau rounded pill untuk memberi kontras pada elemen teks.',
-    icon: <Square className="w-5 h-5 text-amber-400" />,
-    defaultDimensions: { width: 40, height: 12 },
-    defaultProperties: {
-      backgroundColor: 'rgba(242, 194, 48, 0.25)',
-      borderColor: '#F2C230',
-      borderWidth: 2,
-      borderRadius: 12,
-    },
-  },
-  {
-    type: 'separator',
-    name: 'Garis Pembatas',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Garis pembatas vertikal/horizontal elegan dengan efek glow untuk pemisah informasi.',
-    icon: <Minus className="w-5 h-5 text-slate-400" />,
-    defaultDimensions: { width: 80, height: 2 },
-    defaultProperties: {
-      lineColor: '#F2C230',
-      glow: true,
-      thickness: 2,
-    },
-  },
-  {
-    type: 'camera',
-    name: 'Kamera / Facecam',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Feed video kamera depan/belakang smartphone secara real-time dengan border modern.',
-    icon: <Camera className="w-5 h-5 text-cyan-400" />,
-    defaultDimensions: { width: 38, height: 24 },
-    defaultProperties: {
-      facingMode: 'user',
-      borderColor: '#F2C230',
-      borderRadius: 16,
-      borderWidth: 3,
-    },
-  },
-  {
-    type: 'screen_capture',
-    name: 'Tangkapan Layar HP',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Tangkapan layar game atau aplikasi Android via MediaProjection API 60FPS.',
-    icon: <Smartphone className="w-5 h-5 text-rose-400" />,
-    defaultDimensions: { width: 90, height: 50 },
-    defaultProperties: {
-      cropMode: 'fit',
-      fps: 60,
-    },
-  },
-  {
-    type: 'browser_embed',
-    name: 'Browser Embed Web',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Menyematkan widget HTML kustom, URL situs web, atau browser source eksternal.',
-    icon: <Globe className="w-5 h-5 text-teal-400" />,
-    defaultDimensions: { width: 70, height: 35 },
-    defaultProperties: {
-      url: 'https://syntxrr.com/widgets/preview',
-      refreshRate: 0,
-    },
-  },
-  {
-    type: 'running_text',
-    name: 'Teks Berjalan (Marquee)',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Running text pengumuman berjalan horizontal di bagian atas atau bawah siaran.',
-    icon: <Sliders className="w-5 h-5 text-sky-400" />,
-    defaultDimensions: { width: 100, height: 6 },
-    defaultProperties: {
-      text: 'SELAMAT DATANG DI LIVE STREAM! FOLLOW & TAP LAYAR UNTUK MENDUKUNG KREATOR!',
-      speed: 2,
-      textColor: '#FFFFFF',
-      bgColor: '#1E232D',
-    },
-  },
-  {
-    type: 'audio',
-    name: 'Audio Latar Belakang',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Jalur input audio untuk musik BGM atau mixing mikrofon dengan kontrol volume independen.',
-    icon: <Volume2 className="w-5 h-5 text-purple-400" />,
-    defaultDimensions: { width: 25, height: 8 },
-    defaultProperties: {
-      volume: 85,
-      channel: 'bgm',
-    },
-  },
-  {
-    type: 'soundboard',
-    name: 'Soundboard Cues',
-    category: 'basic',
-    categoryLabel: 'Sumber Dasar',
-    status: 'ACTIVE',
-    description: 'Pemicu efek suara reaksi langsung (Air Horn, Applause, Level Up, Tada).',
-    icon: <Music className="w-5 h-5 text-pink-400" />,
-    defaultDimensions: { width: 30, height: 10 },
-    defaultProperties: {
-      presetSfx: 'horn',
-      volume: 90,
-    },
-  },
+const SOURCE_TYPE_ICONS: Record<SourceType, React.ReactNode> = {
+  text: <Type className="w-5 h-5 text-blue-400" />,
+  image: <ImageIcon className="w-5 h-5 text-emerald-400" />,
+  video: <Video className="w-5 h-5 text-indigo-400" />,
+  shape: <Square className="w-5 h-5 text-amber-400" />,
+  separator: <Minus className="w-5 h-5 text-slate-400" />,
+  camera: <Camera className="w-5 h-5 text-cyan-400" />,
+  screen_capture: <Smartphone className="w-5 h-5 text-rose-400" />,
+  browser_embed: <Globe className="w-5 h-5 text-teal-400" />,
+  running_text: <Sliders className="w-5 h-5 text-sky-400" />,
+  audio: <Volume2 className="w-5 h-5 text-purple-400" />,
+  soundboard: <Music className="w-5 h-5 text-pink-400" />,
+  dynamic_text: <Type className="w-5 h-5 text-blue-300" />,
+  username: <User className="w-5 h-5 text-green-400" />,
+  avatar: <User className="w-5 h-5 text-yellow-400" />,
+  chat_message: <MessageSquare className="w-5 h-5 text-sky-400" />,
+  event_feed: <Flame className="w-5 h-5 text-orange-400" />,
+  counter: <BarChart3 className="w-5 h-5 text-emerald-400" />,
+  combo_counter: <Sparkles className="w-5 h-5 text-amber-300" />,
+  progress_bar: <BarChart3 className="w-5 h-5 text-cyan-400" />,
+  leaderboard: <Award className="w-5 h-5 text-yellow-300" />,
+  song_request: <ListMusic className="w-5 h-5 text-pink-400" />,
+  lyrics: <FileText className="w-5 h-5 text-violet-400" />,
+  live_viewer_counter: <Users className="w-5 h-5 text-red-400" />,
+  event_alert: <Bell className="w-5 h-5 text-blue-400" />,
+  sticker: <Sparkles className="w-5 h-5 text-amber-400" />,
+  live_text: <Radio className="w-5 h-5 text-emerald-400" />,
+};
 
-  // 14 DYNAMIC SOURCES
-  {
-    type: 'dynamic_text',
-    name: 'Teks Dinamis Variabel',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Teks otomatis dengan variabel token seperti {username}, {target}, {waktu}, atau {durasi}.',
-    icon: <Type className="w-5 h-5 text-blue-300" />,
-    defaultDimensions: { width: 65, height: 8 },
-    defaultProperties: {
-      template: 'Top Donatur: {top_donor_name}',
-      fallback: 'Belum ada donasi hari ini',
-    },
-  },
-  {
-    type: 'username',
-    name: 'Nama Penonton Aktif',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Menyorot nama penonton terbaru yang mengirim gift, komentar, atau melakukan share.',
-    icon: <User className="w-5 h-5 text-green-400" />,
-    defaultDimensions: { width: 45, height: 8 },
-    defaultProperties: {
-      prefix: '⭐ ',
-      badge: 'VIP Supporter',
-    },
-  },
-  {
-    type: 'avatar',
-    name: 'Avatar Penonton Dinamis',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Foto profil penonton yang baru saja memberikan interaksi live terbaru.',
-    icon: <User className="w-5 h-5 text-yellow-400" />,
-    defaultDimensions: { width: 14, height: 14 },
-    defaultProperties: {
-      shape: 'circle',
-      borderGlow: true,
-    },
-  },
-  {
-    type: 'chat_message',
-    name: 'Kotak Chat Interaktif',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Stream chatbox real-time dengan dukungan avatar, nama pengirim, badge, dan animasi masuk.',
-    icon: <MessageSquare className="w-5 h-5 text-sky-400" />,
-    defaultDimensions: { width: 85, height: 28 },
-    defaultProperties: {
-      maxMessages: 5,
-      fontSize: 13,
-      showBadges: true,
-      backgroundColor: 'rgba(15, 19, 27, 0.82)',
-    },
-  },
-  {
-    type: 'event_feed',
-    name: 'Event Feed Berjalan',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Daftar riwayat aktivitas penonton (follow, share, like, gift) yang terus terupdate otomatis.',
-    icon: <Flame className="w-5 h-5 text-orange-400" />,
-    defaultDimensions: { width: 80, height: 16 },
-    defaultProperties: {
-      maxItems: 4,
-      slideAnimation: true,
-    },
-  },
-  {
-    type: 'counter',
-    name: 'Penghitung Target (Goal)',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Penghitung angka dinamis untuk target Like, Follower baru, atau Sub target siaran.',
-    icon: <BarChart3 className="w-5 h-5 text-emerald-400" />,
-    defaultDimensions: { width: 50, height: 10 },
-    defaultProperties: {
-      current: 1240,
-      target: 2000,
-      label: 'Target Follower Hari Ini',
-    },
-  },
-  {
-    type: 'combo_counter',
-    name: 'Combo Gift Counter',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Penghitung multiplier gift berturut-turut (Combo x10, x50, x100) dengan efek membesar.',
-    icon: <Sparkles className="w-5 h-5 text-amber-300" />,
-    defaultDimensions: { width: 35, height: 12 },
-    defaultProperties: {
-      multiplier: 25,
-      giftName: 'Mawar Merah',
-    },
-  },
-  {
-    type: 'progress_bar',
-    name: 'Progress Bar Donasi',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Bilah progres visual donasi dengan persentase real-time dan jumlah nominal terkumpul.',
-    icon: <BarChart3 className="w-5 h-5 text-cyan-400" />,
-    defaultDimensions: { width: 80, height: 9 },
-    defaultProperties: {
-      currentAmount: 350000,
-      targetAmount: 1000000,
-      currency: 'Rp',
-      barColor: '#F2C230',
-    },
-  },
-  {
-    type: 'leaderboard',
-    name: 'Peringkat Donatur (Leaderboard)',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Klasemen 3 donatur teratas siaran hari ini dengan lencana mahkota emas/perak/perunggu.',
-    icon: <Award className="w-5 h-5 text-yellow-300" />,
-    defaultDimensions: { width: 65, height: 22 },
-    defaultProperties: {
-      topCount: 3,
-      showAmounts: true,
-    },
-  },
-  {
-    type: 'song_request',
-    name: 'Now Playing & Request',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Kartu lagu yang sedang diputar beserta judul, artis, pengirim request, dan durasi.',
-    icon: <ListMusic className="w-5 h-5 text-pink-400" />,
-    defaultDimensions: { width: 85, height: 11 },
-    defaultProperties: {
-      showAlbumArt: true,
-      showRequester: true,
-      cardStyle: 'compact',
-    },
-  },
-  {
-    type: 'lyrics',
-    name: 'Tampilan Lirik Berjalan',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'SIMULATION',
-    description: 'Lirik lagu otomatis selaras dengan playback musik lokal atau streaming.',
-    icon: <FileText className="w-5 h-5 text-violet-400" />,
-    defaultDimensions: { width: 70, height: 14 },
-    defaultProperties: {
-      currentLine: 'Menatap layar malam tak berujung...',
-      align: 'center',
-    },
-  },
-  {
-    type: 'live_viewer_counter',
-    name: 'Jumlah Penonton Aktif',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Badge kecil indikator siaran langsung disertai angka jumlah penonton aktif.',
-    icon: <Users className="w-5 h-5 text-red-400" />,
-    defaultDimensions: { width: 30, height: 7 },
-    defaultProperties: {
-      viewerCount: 1420,
-      liveBadge: true,
-    },
-  },
-  {
-    type: 'event_alert',
-    name: 'Event Alert Pop-up',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Notifikasi animasi pop-up saat terjadi Gift, Follow, Share, atau Donasi masuk.',
-    icon: <Bell className="w-5 h-5 text-blue-400" />,
-    defaultDimensions: { width: 80, height: 11 },
-    defaultProperties: {
-      soundEnabled: true,
-      accentColor: '#F2C230',
-      animation: 'slide_in',
-    },
-  },
-  {
-    type: 'sticker',
-    name: 'Stiker Reaksi Interaktif',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Animasi stiker interaktif yang muncul ketika penonton mengetuk layar berkali-kali.',
-    icon: <Sparkles className="w-5 h-5 text-amber-400" />,
-    defaultDimensions: { width: 22, height: 22 },
-    defaultProperties: {
-      stickerId: 'fire',
-      floatEffect: true,
-    },
-  },
-  {
-    type: 'live_text',
-    name: 'Teks Siaran Langsung',
-    category: 'dynamic',
-    categoryLabel: 'Sumber Dinamis',
-    status: 'ACTIVE',
-    description: 'Status siaran langsung: Bitrate, FPS, Resolusi 1080p, dan Durasi On-Air.',
-    icon: <Radio className="w-5 h-5 text-emerald-400" />,
-    defaultDimensions: { width: 45, height: 6 },
-    defaultProperties: {
-      showFps: true,
-      showBitrate: true,
-    },
-  },
-];
+export const SOURCE_CATALOG: SourceDefinition[] = STUDIO_ELEMENT_CATALOG.map((entry) => ({
+  ...entry,
+  icon: SOURCE_TYPE_ICONS[entry.type],
+}));
 
 interface SourcesLibraryViewProps {
+  existingElements?: StudioElement[];
   onAddElementToStudio: (element: StudioElement) => void;
   onNavigateToStudio: () => void;
 }
 
 export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
+  existingElements = [],
   onAddElementToStudio,
   onNavigateToStudio,
 }) => {
@@ -468,21 +111,7 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
   });
 
   const handleInstallToStudio = (src: SourceDefinition) => {
-    const newElement: StudioElement = {
-      id: `elem_${src.type}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: src.name,
-      type: src.type,
-      x: 10 + Math.floor(Math.random() * 10),
-      y: 15 + Math.floor(Math.random() * 20),
-      width: src.defaultDimensions.width,
-      height: src.defaultDimensions.height,
-      layer: 5,
-      visible: true,
-      locked: false,
-      opacity: 100,
-      rotation: 0,
-      properties: { ...src.defaultProperties },
-    };
+    const newElement = createStudioElementFromSource(src.type, existingElements);
 
     onAddElementToStudio(newElement);
     setInstalledCount((prev) => prev + 1);

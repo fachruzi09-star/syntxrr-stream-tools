@@ -50,6 +50,7 @@ import {
   type StudioSaveState,
 } from '../services/studioPresetActions';
 import { SOURCE_CATALOG } from './SourcesLibraryView';
+import { createStudioElementFromSource } from '../services/studioElementCatalog';
 import {
   Tv,
   Layers,
@@ -1115,203 +1116,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setIsTestingAudio(false);
   };
 
-  // Add Element with strictly mapped auto-triggers and defaults
-  const handleAddQuickElement = (type: SourceType, defaultName: string) => {
+  // Add Element via unified catalog factory (consistent with SourcesLibrary & Tab Sumber)
+  const handleAddQuickElement = (type: SourceType, _defaultName?: string) => {
     if (isStrictModeBLocked) return;
-    const uniqueId = `elem_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    let defaultWidth = 80;
-    let defaultHeight = 12;
-    let defaultX = 10;
-    let defaultY = 20 + (elements.length % 5) * 8;
-    let defaultProps: Record<string, any> = {};
-    let defaultTrigger: any = undefined;
-
-    switch (type) {
-      case 'camera':
-        const cameraCount = elements.filter((e) => e.type === 'camera').length + 1;
-        defaultName = `Kamera ${cameraCount} (${cameraCount === 1 ? 'Depan / Facecam' : 'Belakang / Tablecam'})`;
-        defaultWidth = 42;
-        defaultHeight = 24;
-        defaultProps = {
-          facingMode: cameraCount === 1 ? 'user' : 'environment',
-          borderColor: '#F2C230',
-          borderRadius: 14,
-          borderWidth: 2,
-          aspectFit: 'cover',
-        };
-        break;
-
-      case 'screen_capture':
-        defaultName = 'Tangkapan Layar (Game)';
-        defaultWidth = 92;
-        defaultHeight = 52;
-        defaultProps = {
-          cropMode: 'fit',
-          fps: 60,
-          borderRadius: 12,
-        };
-        break;
-
-      case 'event_alert':
-        defaultName = 'Alert Notifikasi (Gift & Follow)';
-        defaultWidth = 86;
-        defaultHeight = 14;
-        defaultProps = {
-          alertTitle: 'GIFT MAWAR EMAS',
-          alertMessage: 'mengirim 500 Koin!',
-          animationEffect: 'bounce',
-          soundEffect: true,
-          badgeColor: '#F59E0B',
-        };
-        defaultTrigger = {
-          eventType: 'gift',
-          action: 'bounce',
-          durationSec: 5,
-        };
-        break;
-
-      case 'chat_message':
-        defaultName = 'Kotak Chat Interaktif';
-        defaultWidth = 85;
-        defaultHeight = 26;
-        defaultProps = {
-          maxMessages: 4,
-          fontSize: 12,
-          showBadges: true,
-          bgOpacity: 85,
-        };
-        defaultTrigger = {
-          eventType: 'chat',
-          action: 'text_update',
-          durationSec: 8,
-        };
-        break;
-
-      case 'combo_counter':
-        defaultName = 'Combo Gift Multiplier';
-        defaultWidth = 45;
-        defaultHeight = 12;
-        defaultProps = {
-          comboLabel: 'x50 COMBO MAWAR!',
-          themeColor: '#EA580C',
-        };
-        defaultTrigger = {
-          eventType: 'gift',
-          action: 'pulse',
-          durationSec: 4,
-        };
-        break;
-
-      case 'counter':
-      case 'live_viewer_counter':
-        defaultName = 'Penghitung Like & Target';
-        defaultWidth = 48;
-        defaultHeight = 10;
-        defaultProps = {
-          targetGoal: 5000,
-          label: 'Target Like Hari Ini',
-        };
-        defaultTrigger = {
-          eventType: 'like',
-          action: 'pulse',
-          durationSec: 2,
-        };
-        break;
-
-      case 'running_text':
-        defaultName = 'Running Text (Ticker)';
-        defaultWidth = 100;
-        defaultHeight = 6;
-        defaultProps = {
-          text: '🔥 SYNTXRR STREAM: Selamat datang di siaran langsung! Follow & Tap Layar!',
-          speed: 4,
-          fontSize: 12,
-          textColor: '#60A5FA',
-          bgColor: '#0B1120',
-        };
-        break;
-
-      case 'song_request':
-        defaultName = 'Widget Song Request (Now Playing)';
-        defaultWidth = 88;
-        defaultHeight = 13;
-        defaultProps = {
-          cardStyle: 'compact',
-          showRequester: true,
-          showQueueCount: true,
-        };
-        defaultTrigger = {
-          eventType: 'chat',
-          action: 'pulse',
-          durationSec: 4,
-        };
-        break;
-
-      case 'audio':
-        defaultName = 'Audio Manual (BGM)';
-        defaultWidth = 65;
-        defaultHeight = 12;
-        defaultProps = {
-          title: 'Audio Manual (BGM)',
-          channel: 'bgm',
-          volume: 85,
-          loop: true,
-          audioUrl: 'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg',
-        };
-        break;
-
-      case 'image':
-      case 'sticker':
-        defaultName = 'Gambar / Logo Sponsor';
-        defaultWidth = 28;
-        defaultHeight = 16;
-        defaultProps = {
-          imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=300&auto=format&fit=crop&q=80',
-          borderRadius: 8,
-        };
-        break;
-
-      case 'video':
-        defaultName = 'Video Background Loop';
-        defaultWidth = 60;
-        defaultHeight = 34;
-        defaultProps = {
-          loop: true,
-          muted: true,
-          videoUrl: '',
-        };
-        break;
-
-      case 'text':
-      case 'dynamic_text':
-      default:
-        defaultName = 'Teks Siaran';
-        defaultWidth = 60;
-        defaultHeight = 8;
-        defaultProps = {
-          text: 'STREAM TITLE HERE',
-          fontSize: 18,
-          textColor: '#FFFFFF',
-        };
-        break;
-    }
-
-    const newElem: StudioElement = {
-      id: uniqueId,
-      name: defaultName,
-      type,
-      x: defaultX,
-      y: defaultY,
-      width: defaultWidth,
-      height: defaultHeight,
-      layer: elements.length + 1,
-      visible: true,
-      locked: false,
-      opacity: 100,
-      rotation: 0,
-      properties: defaultProps,
-      triggerConfig: defaultTrigger,
-    };
+    const newElem = createStudioElementFromSource(type, elements);
 
     commitElements([...elements, newElem]);
     setSelectedGroupId(null);
@@ -4215,7 +4023,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               >
                 <div className="flex items-center gap-2">
                   <Box className="w-4 h-4 shrink-0" />
-                  <span>Katalog 25 Sumber Siaran Lengkap</span>
+                  <span>Katalog {SOURCE_CATALOG.length} Sumber Siaran Lengkap</span>
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
               </button>
@@ -4391,7 +4199,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           {activeSidePanel === 'sources' && (
             <div className="space-y-3.5 max-h-[480px] overflow-y-auto pr-1">
               <div className="pl-3 border-l-2 border-[var(--app-accent)] text-xs text-[var(--app-text-secondary)]">
-                Pustaka 25 sumber overlay siaran terkurasi. Klik <strong className="text-[var(--app-text)]">Tambah</strong> untuk memasukkan sumber ke kanvas.
+                Pustaka {SOURCE_CATALOG.length} sumber overlay siaran terkurasi. Klik <strong className="text-[var(--app-text)]">Tambah</strong> untuk memasukkan sumber ke kanvas.
               </div>
 
               {/* Category Filter & Search */}
@@ -4408,7 +4216,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                       }`}
                     >
-                      {cat === 'all' ? 'Semua (25)' : cat === 'basic' ? 'Dasar (11)' : 'Dinamis (14)'}
+                      {cat === 'all'
+                        ? `Semua (${SOURCE_CATALOG.length})`
+                        : cat === 'basic'
+                          ? `Dasar (${SOURCE_CATALOG.filter((item) => item.category === 'basic').length})`
+                          : `Dinamis (${SOURCE_CATALOG.filter((item) => item.category === 'dynamic').length})`}
                     </button>
                   ))}
                 </div>
