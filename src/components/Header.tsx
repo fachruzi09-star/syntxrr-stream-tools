@@ -1,29 +1,24 @@
 import React from 'react';
-import { NavigationTab, OperatingMode, isModeAOperatingMode, StudioPreset } from '../types';
+import { NavigationTab, StudioPreset } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
-import { Radio, Monitor, Layers } from 'lucide-react';
+import { Radio, Layers } from 'lucide-react';
 
 interface HeaderProps {
   activeNav: NavigationTab;
-  operatingMode: OperatingMode;
   activePreset: StudioPreset | null;
   honestStatusLabel?: string;
   honestStatusTone?: 'ok' | 'warn' | 'error' | 'off';
   onNavigate: (nav: NavigationTab) => void;
-  onOpenModeModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activeNav,
-  operatingMode,
   activePreset,
   honestStatusLabel,
   honestStatusTone = 'off',
   onNavigate,
-  onOpenModeModal,
 }) => {
   const { t } = useTranslation();
-  const isModeA = isModeAOperatingMode(operatingMode);
 
   const primaryGroup: { id: NavigationTab; label: string }[] = [
     { id: 'dashboard', label: t('nav.dashboard', 'Dashboard') },
@@ -96,8 +91,9 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="pt-safe sticky top-0 z-30 bg-[var(--app-bg)]/95 backdrop-blur-md border-b border-[var(--app-border)] px-2.5 sm:px-5 h-12 sm:h-14 flex items-center justify-between gap-2">
-      {/* Zone 1: Compact Brand Wordmark */}
+    <header className="pt-safe sticky top-0 z-30 bg-[var(--app-bg)]/95 backdrop-blur-md border-b border-[var(--app-border)]">
+      <div className="px-2.5 sm:px-5 min-h-[46px] sm:min-h-[52px] flex items-center justify-between gap-2">
+        {/* Zone 1: Compact Brand Wordmark */}
       <div className="flex items-center min-w-0 shrink-0">
         <button
           type="button"
@@ -166,19 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="truncate max-w-[96px] font-medium">{activePreset.name}</span>
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={onOpenModeModal}
-          className="btn-press min-h-[44px] px-2.5 sm:px-3 rounded-[9px] bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] hover:border-[var(--app-accent-border)] text-[var(--app-text)] text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-          title={t('header.changeMode', 'Ubah Mode Operasi Studio')}
-        >
-          <Monitor className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
-          <span className="sm:hidden">{isModeA ? 'Mode A' : 'Mode B'}</span>
-          <span className="hidden sm:inline">
-            {isModeA ? t('header.modeA', 'Mode A: TikTok') : t('header.modeB', 'Mode B: Encoder')}
-          </span>
-        </button>
+      </div>
       </div>
     </header>
   );

@@ -2721,12 +2721,10 @@ export default function App() {
       {/* Top Header Bar */}
       <Header
         activeNav={activeNav}
-        operatingMode={settings.operatingMode}
         activePreset={activePreset}
         honestStatusLabel={headerStatusLabel}
         honestStatusTone={headerStatusTone}
         onNavigate={handleNavigate}
-        onOpenModeModal={() => setIsModeModalOpen(true)}
       />
 
       {/* In-app Confirmation Modal (Mode Switch, Confirm End Live & Reset Defaults) */}
@@ -2787,7 +2785,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-2.5 pt-2.5 pb-20 sm:px-6 sm:pt-5 lg:px-8 xl:pb-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-2.5 pt-3.5 pb-20 sm:px-6 sm:pt-5 lg:px-8 xl:pb-8">
         {modeBNoticeBanner && (
           <div
             role="status"
@@ -2836,7 +2834,6 @@ export default function App() {
               onOpenTikTokConnection={handleOpenTikTokConnection}
               onSelectMode={handleSelectMode}
               onNavigate={handleNavigate}
-              onOpenModeModal={() => setIsModeModalOpen(true)}
             />
           )}
 

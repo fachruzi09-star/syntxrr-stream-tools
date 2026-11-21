@@ -78,7 +78,6 @@ interface DashboardViewProps {
   onOpenTikTokConnection?: () => void;
   onSelectMode: (mode: OperatingMode) => void;
   onNavigate: (nav: NavigationTab) => void;
-  onOpenModeModal: () => void;
 }
 
 const DEFAULT_ACCOUNT: TikTokAccountState = {
@@ -173,7 +172,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenTikTokConnection,
   onSelectMode,
   onNavigate,
-  onOpenModeModal,
 }) => {
   const { t, isEnglish } = useTranslation();
 
@@ -901,7 +899,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       )}
 
       {/* Compact Command Top Bar (~48px) */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 pb-2.5 border-b border-[var(--app-border)]">
         <div className="flex items-center gap-2 min-w-0">
           <h1 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] tracking-tight whitespace-nowrap">
             {t('nav.dashboard', 'Dashboard')}
@@ -912,7 +910,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-between sm:justify-end">
+        <div className="flex items-center w-full sm:w-auto sm:justify-end">
           <div
             className="grid grid-cols-2 flex-1 sm:flex-initial p-0.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]"
             role="tablist"
@@ -949,16 +947,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="hidden md:inline text-[var(--app-text-muted)] font-normal">· Encoder</span>
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={onOpenModeModal}
-            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-accent-text)] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
-          >
-            <span className="hidden sm:inline">{t('dash.modeArchitecture')}</span>
-            <span className="sm:hidden">Mode</span>
-            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
-          </button>
         </div>
       </div>
 
@@ -1385,6 +1373,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Compact Single-Row Active Preset Launcher inside Main Panel */}
+            <button
+              type="button"
+              onClick={() => onNavigate('studio')}
+              className="btn-press w-full min-h-[44px] px-3.5 sm:px-5 py-2 border-t border-[var(--app-border)] bg-[var(--app-surface-muted)]/55 hover:bg-[var(--app-surface-hover)] flex items-center justify-between gap-2.5 text-left"
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span
+                  aria-hidden="true"
+                  className={`shrink-0 rounded-[3px] border border-[var(--app-accent-border)] bg-[var(--app-accent-soft)] ${
+                    isPortraitPreset ? 'w-3 h-4' : 'w-4 h-3'
+                  }`}
+                />
+                <span className="font-display text-xs sm:text-sm font-bold text-[var(--app-text)] truncate min-w-0">
+                  {activePreset ? activePreset.name : 'Mobile Gaming (9:16)'}
+                </span>
+                <span className="text-[11px] font-mono-num text-[var(--app-text-muted)] whitespace-nowrap shrink-0">
+                  {activePreset?.canvasOrientation || settings.canvasOrientation || '9:16'} ·{' '}
+                  {visibleElementsCount} {isEnglish ? 'elements' : 'elemen'}
+                </span>
+              </div>
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--app-accent-text)] whitespace-nowrap shrink-0">
+                <span>{t('dash.openStudioBtn')}</span>
+                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+              </span>
+            </button>
           </section>
 
           {/* Docked Mode Utility Panel (Floating HUD for Mode A / Audio Source for Mode B) */}
@@ -1627,47 +1642,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </div>
 
-        {/* Right 4 Cols — Active Studio Scene + Instant 2x2 Permission Readiness */}
+        {/* Right 4 Cols — Instant 2x2 Permission Readiness */}
         <aside className="lg:col-span-4 space-y-3.5 min-w-0">
-          {/* Active Studio Preset Quick Launcher */}
-          <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-4 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
-                {t('dash.activePreset')}
-              </span>
-              <button
-                type="button"
-                onClick={() => onNavigate('studio')}
-                className="btn-press min-h-[44px] px-2 -mr-2 rounded-lg text-xs font-semibold text-[var(--app-accent-text)] hover:bg-[var(--app-accent-soft)] inline-flex items-center gap-1 shrink-0"
-              >
-                <span>{t('dash.openStudioBtn')}</span>
-                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onNavigate('studio')}
-              className="btn-press w-full min-h-[44px] text-left p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-hover)] flex items-center justify-between gap-3"
-            >
-              <div className="min-w-0 space-y-0.5">
-                <div className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] truncate">
-                  {activePreset ? activePreset.name : 'Mobile Gaming (9:16)'}
-                </div>
-                <div className="text-xs font-mono-num text-[var(--app-text-muted)] truncate">
-                  {activePreset?.canvasOrientation || settings.canvasOrientation || '9:16'} ·{' '}
-                  {visibleElementsCount} {isEnglish ? 'elements' : 'elemen'}
-                </div>
-              </div>
-              <span
-                aria-hidden="true"
-                className={`shrink-0 rounded-[4px] border border-[var(--app-accent-border)] bg-[var(--app-accent-soft)] ${
-                  isPortraitPreset ? 'w-4 h-6' : 'w-6 h-4'
-                }`}
-              />
-            </button>
-          </section>
-
           {/* Instant 2x2 Hardware & Permission Readiness (no collapsed blind accordion) */}
           <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-4 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
