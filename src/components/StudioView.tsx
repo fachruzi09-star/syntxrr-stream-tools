@@ -207,6 +207,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [isMonitorExpanded, setIsMonitorExpanded] = useState(false);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Multi-Camera Stream Store (elementId -> MediaStream)
@@ -2212,9 +2213,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const getCanvasAspectClass = () => {
-    if (canvasOrientation === '9:16') return 'aspect-[9/16] w-[270px] sm:w-[320px]';
+    if (canvasOrientation === '9:16') {
+      return isMonitorExpanded
+        ? 'aspect-[9/16] w-[260px] sm:w-[320px]'
+        : 'aspect-[9/16] w-[176px] sm:w-[270px] lg:w-[310px]';
+    }
     if (canvasOrientation === '16:9') return 'aspect-video w-full max-w-[580px]';
-    return 'aspect-square w-[320px]';
+    return isMonitorExpanded ? 'aspect-square w-[290px] sm:w-[320px]' : 'aspect-square w-[240px] sm:w-[300px]';
   };
 
   const filteredPresets = presets.filter((p) => {
@@ -2300,60 +2305,48 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20 md:pb-8">
+    <div className="space-y-4 pb-6">
       {/* === PRESET SELECTION ENTRY SCREEN === */}
       {showPresetSelector ? (
-        <div className="space-y-6">
-          {/* Selector Header */}
-          <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl p-5 sm:p-6 shadow-sm relative overflow-hidden">
-            <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-[var(--app-accent)] via-[var(--app-accent)]/40 to-transparent pointer-events-none" />
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-mono-num font-bold uppercase tracking-wider bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border border-[var(--app-accent-border)]">
-                    Studio Scene Presets
-                  </span>
-                  <span className="text-xs font-mono-num text-[var(--app-text-secondary)]">
-                    {presets.length} Preset Tersimpan
-                  </span>
-                </div>
-                <h1 className="text-2xl font-display font-bold text-[var(--app-text)] tracking-tight flex items-center gap-2.5">
-                  <Tv className="w-6 h-6 text-[var(--app-accent-text)]" />
+        <div className="space-y-4">
+          <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-baseline gap-2.5 min-w-0">
+                <h1 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] tracking-tight truncate">
                   Pilih Preset Studio
                 </h1>
-                <p className="text-sm text-[var(--app-text-secondary)] mt-1 max-w-2xl">
-                  Pilih preset untuk dimuat ke kanvas, buat preset baru dari template, atau mulai dengan kanvas kosong. Mendukung orientasi 9:16, 16:9, dan 1:1.
-                </p>
+                <span className="text-xs text-[var(--app-text-muted)] tabular-metrics whitespace-nowrap">
+                  {presets.length} Tersimpan
+                </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setSelectorCreateModalOpen(true)}
                   disabled={isModeBMutationLocked}
-                  className="min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] active:scale-95 text-[var(--app-accent-ink)] font-bold text-sm flex items-center gap-2 transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Buat Preset Baru</span>
+                  <span>Buat Preset</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleSelectorBlankCanvas}
                   disabled={isStrictModeBLocked}
-                  className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:border-[var(--app-border-strong)] border border-[var(--app-border)] active:scale-95 text-[var(--app-text-secondary)] hover:text-[var(--app-text)] font-bold text-sm flex items-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
-                  <Layout className="w-4 h-4" />
+                  <Layout className="w-4 h-4 text-[var(--app-accent-text)]" />
                   <span>Kanvas Kosong</span>
                 </button>
               </div>
             </div>
 
-            {/* Selector Category Tabs */}
-            <div className="mt-6 flex flex-wrap gap-2 pt-4 border-t border-[var(--app-border)]">
+            <div className="pt-2.5 border-t border-[var(--app-border)] flex items-center gap-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] overflow-x-auto no-scrollbar">
               {(
                 [
-                  { id: 'all', label: 'Semua Preset' },
-                  { id: 'hp_screen', label: 'Layar HP (9:16)' },
-                  { id: 'landscape', label: 'Landscape (16:9)' },
+                  { id: 'all', label: 'Semua' },
+                  { id: 'hp_screen', label: '9:16 HP' },
+                  { id: 'landscape', label: '16:9 PC' },
                   { id: 'portrait', label: 'Portrait' },
                   { id: 'favorites', label: 'Favorit' },
                 ] as const
@@ -2362,114 +2355,121 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   key={cat.id}
                   type="button"
                   onClick={() => setSelectorFilterCategory(cat.id)}
-                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold transition ${
+                  className={`btn-press min-h-[44px] px-3 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                     selectorFilterCategory === cat.id
-                      ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                      : 'bg-[var(--app-surface-muted)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] border border-[var(--app-border)]'
+                      ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                      : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                   }`}
                 >
                   {cat.label}
                 </button>
               ))}
             </div>
-          </div>
+          </header>
 
           {/* Selector Preset Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {selectorFilteredPresets.map((preset) => {
               const isActive = preset.id === activePresetId;
               return (
                 <div
                   key={preset.id}
-                  className={`rounded-2xl border transition-all flex flex-col justify-between overflow-hidden ${
+                  className={`rounded-2xl border flex flex-col justify-between overflow-hidden transition-colors ${
                     isActive
-                      ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] shadow-md'
+                      ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)]'
                       : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)]'
                   }`}
                 >
-                  <div className="p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-mono-num font-bold bg-[var(--app-surface-muted)] text-[var(--app-accent-text)] border border-[var(--app-border)] flex items-center gap-1">
-                          {preset.canvasOrientation === '9:16' && <Smartphone className="w-3 h-3" />}
-                          {preset.canvasOrientation === '16:9' && <Monitor className="w-3 h-3" />}
-                          {preset.canvasOrientation === '1:1' && <Square className="w-3 h-3" />}
-                          <span>{preset.canvasOrientation}</span>
-                        </span>
-                        {isActive && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[var(--app-ok-soft)] text-[var(--app-ok)] border border-emerald-500/30 flex items-center gap-1">
-                            <Check className="w-3 h-3" />
-                            <span>Aktif</span>
+                  <div className="p-4 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-[11px] text-[var(--app-text-muted)] tabular-metrics">
+                          <span className="inline-flex items-center gap-1">
+                            {preset.canvasOrientation === '9:16' && <Smartphone className="w-3 h-3" />}
+                            {preset.canvasOrientation === '16:9' && <Monitor className="w-3 h-3" />}
+                            {preset.canvasOrientation === '1:1' && <Square className="w-3 h-3" />}
+                            <span>{preset.canvasOrientation}</span>
                           </span>
+                          <span aria-hidden="true">·</span>
+                          <span>{preset.elements.length} elemen</span>
+                          {isActive && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-bold text-[var(--app-ok)]">Aktif</span>
+                            </>
+                          )}
+                        </div>
+
+                        {editingPresetIdInSelector === preset.id ? (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <input
+                              type="text"
+                              value={editingNameInSelector}
+                              onChange={(e) => setEditingNameInSelector(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSelectorSaveRename(preset.id);
+                                if (e.key === 'Escape') setEditingPresetIdInSelector(null);
+                              }}
+                              className="flex-1 min-w-[130px] min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-accent)] rounded-xl px-3 text-xs text-[var(--app-text)] focus:outline-none font-bold"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSelectorSaveRename(preset.id)}
+                              className="btn-press min-h-[44px] px-3 bg-[var(--app-accent)] text-[var(--app-accent-ink)] text-xs rounded-xl font-bold shrink-0"
+                            >
+                              Simpan
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPresetIdInSelector(null)}
+                              className="btn-press min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs rounded-xl shrink-0"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <h2 className="text-sm sm:text-base font-display font-bold text-[var(--app-text)] tracking-tight truncate">
+                              {preset.name}
+                            </h2>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPresetIdInSelector(preset.id);
+                                setEditingNameInSelector(preset.name);
+                              }}
+                              className="min-h-[44px] min-w-[44px] -my-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0"
+                              aria-label={`Ubah nama ${preset.name}`}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         )}
                       </div>
+
                       <button
                         type="button"
                         onClick={() => onToggleFavoritePreset?.(preset.id)}
                         aria-label="Toggle favorit preset"
-                        className="min-h-[44px] min-w-[44px] -mt-2 -mr-2 rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-accent-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center transition"
+                        className="btn-press min-h-[44px] min-w-[44px] -mt-1 -mr-1 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-accent-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center shrink-0"
                       >
-                        <Star className={`w-4 h-4 ${preset.isFavorite ? 'fill-[var(--app-accent)] text-[var(--app-accent-text)]' : ''}`} />
+                        <Star className={`w-4 h-4 ${preset.isFavorite ? 'fill-[var(--app-accent)] text-[var(--app-accent)]' : ''}`} />
                       </button>
                     </div>
 
-                    {editingPresetIdInSelector === preset.id ? (
-                      <div className="flex flex-wrap items-center gap-1.5 my-1">
-                        <input
-                          type="text"
-                          value={editingNameInSelector}
-                          onChange={(e) => setEditingNameInSelector(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSelectorSaveRename(preset.id);
-                            if (e.key === 'Escape') setEditingPresetIdInSelector(null);
-                          }}
-                          className="flex-1 min-w-[140px] min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-accent)] rounded-xl px-3 text-sm text-[var(--app-text)] focus:outline-none font-bold"
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSelectorSaveRename(preset.id)}
-                          className="min-h-[44px] px-3 bg-[var(--app-accent)] text-[var(--app-accent-ink)] text-xs rounded-xl hover:bg-[var(--app-accent-hover)] font-bold shrink-0"
-                        >
-                          Simpan
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingPresetIdInSelector(null)}
-                          className="min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs rounded-xl hover:text-[var(--app-text)] shrink-0"
-                        >
-                          Batal
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-base font-display font-bold text-[var(--app-text)] tracking-tight truncate">{preset.name}</h3>
-                        <button
-                          type="button"
-                          onClick={() => { setEditingPresetIdInSelector(preset.id); setEditingNameInSelector(preset.name); }}
-                          className="min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-accent-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center transition"
-                          title="Ubah Nama"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-
-                    <p className="text-xs text-[var(--app-text-secondary)] mt-1 line-clamp-2 leading-relaxed">{preset.description}</p>
-
-                    <div className="mt-4 flex items-center gap-2 text-xs text-[var(--app-text-secondary)] font-mono-num">
-                      <Layers className="w-3.5 h-3.5 text-[var(--app-accent-text)]" />
-                      <span>{preset.elements.length} Elemen Overlay</span>
-                    </div>
+                    <p className="text-xs text-[var(--app-text-muted)] line-clamp-2 leading-relaxed">
+                      {preset.description}
+                    </p>
                   </div>
 
-                  <div className="p-3.5 bg-[var(--app-surface-muted)] border-t border-[var(--app-border)] flex items-center justify-between gap-2">
+                  <div className="px-4 py-3 bg-[var(--app-surface-muted)] border-t border-[var(--app-border)] flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => onDuplicatePreset?.(preset.id)}
                         disabled={isModeBMutationLocked}
-                        className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center text-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Duplikasi"
                       >
                         <Copy className="w-4 h-4" />
@@ -2479,7 +2479,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           type="button"
                           onClick={() => onDeletePreset?.(preset.id)}
                           disabled={isModeBMutationLocked}
-                          className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:bg-[var(--app-error-soft)] text-[var(--app-text-muted)] hover:text-[var(--app-error)] flex items-center justify-center text-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:bg-rose-950/60 text-[var(--app-text-muted)] hover:text-rose-300 flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Hapus"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -2489,10 +2489,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleSelectorSelectPreset(preset.id)}
-                      className={`min-h-[44px] px-4 rounded-xl font-bold text-xs flex items-center gap-1.5 transition ${
+                      className={`btn-press min-h-[44px] px-4 rounded-xl font-bold text-xs inline-flex items-center gap-1.5 whitespace-nowrap ${
                         isActive
-                          ? 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] active:scale-95 text-[var(--app-accent-ink)] shadow-sm'
-                          : 'bg-[var(--app-surface)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-ink)] border border-[var(--app-border)] text-[var(--app-text)]'
+                          ? 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
+                          : 'bg-[var(--app-surface)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-ink)] border border-[var(--app-border-strong)] text-[var(--app-text)]'
                       }`}
                     >
                       <span>{isActive ? 'Muat ke Studio' : 'Gunakan Preset'}</span>
@@ -2507,7 +2507,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           {/* Selector: Create Preset Modal */}
           {selectorCreateModalOpen && (
             <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-[var(--app-surface-elevated)] border border-[var(--app-border)] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-[var(--app-shadow)] space-y-4 anim-pop-in">
                 <div className="flex items-center justify-between pb-3 border-b border-[var(--app-border)]">
                   <div className="flex items-center gap-2">
                     <Layout className="w-5 h-5 text-[var(--app-accent-text)]" />
@@ -2517,33 +2517,33 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     type="button"
                     onClick={() => setSelectorCreateModalOpen(false)}
                     aria-label="Tutup modal preset"
-                    className="min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center transition-colors"
+                    className="btn-press min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
                 <form onSubmit={handleSelectorCreatePreset} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)] mb-1.5">Nama Preset</label>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">Nama Preset</label>
                     <input
                       type="text"
                       value={selectorPresetName}
                       onChange={(e) => setSelectorPresetName(e.target.value)}
                       placeholder="Misal: Mobile Gaming Pro, TikTok Live Malam"
                       required
-                      className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl px-3 text-sm text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none focus:border-[var(--app-accent)]"
+                      className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl px-3.5 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none focus:border-[var(--app-accent)]"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)] mb-1.5">Orientasi Kanvas</label>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">Orientasi Kanvas</label>
                     <div className="grid grid-cols-3 gap-2">
                       {(
                         [
-                          { id: '9:16', label: '9:16 (Layar HP)', icon: <Smartphone className="w-4 h-4 mx-auto mb-1" /> },
-                          { id: '16:9', label: '16:9 (Landscape)', icon: <Monitor className="w-4 h-4 mx-auto mb-1" /> },
-                          { id: '1:1', label: '1:1 (Persegi)', icon: <Square className="w-4 h-4 mx-auto mb-1" /> },
+                          { id: '9:16', label: '9:16 HP', icon: <Smartphone className="w-4 h-4 mx-auto mb-1" /> },
+                          { id: '16:9', label: '16:9 Wide', icon: <Monitor className="w-4 h-4 mx-auto mb-1" /> },
+                          { id: '1:1', label: '1:1 Square', icon: <Square className="w-4 h-4 mx-auto mb-1" /> },
                         ] as const
                       ).map((orient) => (
                         <button
@@ -2555,9 +2555,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             else if (orient.id === '16:9') setSelectorCategory('landscape');
                             else setSelectorCategory('portrait');
                           }}
-                          className={`min-h-[56px] p-2.5 rounded-xl text-center text-xs font-semibold border transition ${
+                          className={`btn-press min-h-[58px] p-2.5 rounded-xl text-center text-xs font-bold border transition-colors ${
                             selectorOrientation === orient.id
-                              ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                              ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
                               : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                           }`}
                         >
@@ -2568,42 +2568,42 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)] mb-1.5">Pilihan Template Permulaan</label>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">Pilihan Template</label>
                     <div className="grid grid-cols-2 gap-2">
                       {(
                         [
-                          { id: 'gaming', label: 'Mobile Gaming', desc: 'Screen Capture + Facecam + Chat' },
-                          { id: 'chatting', label: 'Just Chatting', desc: 'Kamera Penuh + Alert + Chat' },
-                          { id: 'music', label: 'Music Stream', desc: 'Now Playing + Queue + Chat' },
-                          { id: 'blank', label: 'Kanvas Kosong', desc: 'Mulai dari kanvas bersih' },
+                          { id: 'gaming', label: 'Mobile Gaming', desc: 'Screen + Facecam + Chat' },
+                          { id: 'chatting', label: 'Just Chatting', desc: 'Kamera + Alert + Chat' },
+                          { id: 'music', label: 'Music Stream', desc: 'Now Playing + Chat' },
+                          { id: 'blank', label: 'Kanvas Kosong', desc: 'Mulai dari nol' },
                         ] as const
                       ).map((tmpl) => (
                         <button
                           key={tmpl.id}
                           type="button"
                           onClick={() => setSelectorTemplate(tmpl.id)}
-                          className={`min-h-[56px] p-2.5 rounded-xl text-left border transition ${
+                          className={`btn-press min-h-[56px] p-2.5 rounded-xl text-left border transition-colors ${
                             selectorTemplate === tmpl.id
-                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-text)]'
+                              ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)] text-[var(--app-text)]'
                               : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                           }`}
                         >
-                          <div className="text-xs font-bold text-[var(--app-text)] mb-0.5">{tmpl.label}</div>
-                          <div className="text-[10px] text-[var(--app-text-secondary)]">{tmpl.desc}</div>
+                          <div className="text-xs font-bold text-[var(--app-text)]">{tmpl.label}</div>
+                          <div className="text-[10px] text-[var(--app-text-muted)] mt-0.5">{tmpl.desc}</div>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)] mb-1.5">Deskripsi (Opsional)</label>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">Deskripsi (Opsional)</label>
                     <textarea
                       value={selectorDescription}
                       onChange={(e) => setSelectorDescription(e.target.value)}
                       placeholder="Keterangan singkat tentang preset ini..."
                       rows={2}
-                      className="w-full bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl px-3 py-2 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none focus:border-[var(--app-accent)]"
+                      className="w-full bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl px-3.5 py-2 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none focus:border-[var(--app-accent)]"
                     />
                   </div>
 
@@ -2611,13 +2611,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setSelectorCreateModalOpen(false)}
-                      className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs font-semibold hover:text-[var(--app-text)]"
+                      className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs font-semibold hover:text-[var(--app-text)]"
                     >
                       Batal
                     </button>
                     <button
                       type="submit"
-                      className="min-h-[44px] px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold shadow-sm"
+                      className="btn-press min-h-[44px] px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold"
                     >
                       Simpan &amp; Buat Preset
                     </button>
@@ -2630,88 +2630,69 @@ export const StudioView: React.FC<StudioViewProps> = ({
       ) : (
       /* === MAIN STUDIO CANVAS VIEW === */
       <>
-      {/* Studio Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-[11px] font-mono-num font-bold tracking-wider text-[var(--app-accent-text)] uppercase">
-            <span>Workspace Visual Tunggal</span>
-            <span className="text-[var(--app-text-muted)]">·</span>
-            <span>SYNTXRR STUDIO</span>
+      {/* Compact Studio Toolbar Header */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <button
+            type="button"
+            onClick={() => setShowPresetSelector(true)}
+            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+            title="Ganti Preset"
+          >
+            <Layout className="w-4 h-4 text-[var(--app-accent-text)]" />
+            <span>Preset</span>
+          </button>
+          <div className="min-w-0">
+            <h1 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] tracking-tight truncate">
+              {activePreset?.name || 'Studio Produksi'}
+            </h1>
+            <div className="text-[11px] text-[var(--app-text-muted)] tabular-metrics truncate">
+              {canvasOrientation} · {elements.length} elemen
+            </div>
           </div>
-          <h1 className="text-xl sm:text-2xl font-display font-bold text-[var(--app-text)] tracking-tight flex items-center gap-2 mt-0.5">
-            <Tv className="w-6 h-6 text-[var(--app-accent-text)]" />
-            Studio Produksi &amp; Presets
-          </h1>
-          <p className="text-xs text-[var(--app-text-secondary)]">
-            Pusat penyusunan visual siaran, preset bersama, import media lokal, multi-kamera, dan uji live pipeline
-          </p>
         </div>
 
-        {/* Canvas Ratio & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Orientation Selector */}
-          <div className="flex items-center p-1 bg-[var(--app-surface)] rounded-xl border border-[var(--app-border)] text-xs font-semibold">
-            <button
-              type="button"
-              disabled={isModeBMutationLocked}
-              onClick={() => onChangeOrientation('9:16')}
-              className={`min-h-[44px] px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                canvasOrientation === '9:16'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-              }`}
-            >
-              9:16 Vertikal
-            </button>
-            <button
-              type="button"
-              disabled={isModeBMutationLocked}
-              onClick={() => onChangeOrientation('16:9')}
-              className={`min-h-[44px] px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                canvasOrientation === '16:9'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-              }`}
-            >
-              16:9 Horisontal
-            </button>
-            <button
-              type="button"
-              disabled={isModeBMutationLocked}
-              onClick={() => onChangeOrientation('1:1')}
-              className={`min-h-[44px] px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                canvasOrientation === '1:1'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-              }`}
-            >
-              1:1 Kotak
-            </button>
+          <div className="flex items-center p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-xs font-bold">
+            {(
+              [
+                { id: '9:16', label: '9:16' },
+                { id: '16:9', label: '16:9' },
+                { id: '1:1', label: '1:1' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                disabled={isModeBMutationLocked}
+                onClick={() => onChangeOrientation(opt.id)}
+                className={`btn-press min-h-[44px] px-2.5 sm:px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  canvasOrientation === opt.id
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
 
           <button
             type="button"
             disabled={isModeBMutationLocked}
             onClick={onSaveAsPreset}
-            className="min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
           >
-            <Sparkles className="w-4 h-4" /> Simpan Preset
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowPresetSelector(true)}
-            className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface)] hover:border-[var(--app-border-strong)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] text-xs font-semibold flex items-center gap-1.5 transition-colors"
-            title="Ganti Preset"
-          >
-            <Layout className="w-4 h-4" /> Ganti Preset
+            <Sparkles className="w-4 h-4" />
+            <span>Simpan Preset</span>
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Mode B Active Status / Lock / Live Apply Banner */}
       {isModeBSelected && isModeBMutationLocked && (
         <div
-          className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
             isModeBLive
               ? 'bg-[var(--app-ok-soft)] border-emerald-500/35 text-[var(--app-text)]'
               : 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-text)]'
@@ -2747,7 +2728,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 const res = await onApplyLiveSceneToModeB(elements, activePreset);
                 setModeBLiveApplyFeedback(res);
               }}
-              className="shrink-0 min-h-[44px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-press shrink-0 min-h-[44px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isModeBActionPending ? 'Menerapkan...' : 'Terapkan Perubahan ke LIVE'}
             </button>
@@ -2755,20 +2736,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
       )}
 
-      {/* Main Studio Viewport Split (Canvas on Left, Modular Consolidated Panel on Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* Main Studio Viewport Split (Canvas on Left, Consolidated Panel on Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* SECTION 1: CANVAS EDITOR */}
         <div
-          className="lg:col-span-7 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col items-center justify-between space-y-4 overscroll-y-contain"
+          className="lg:col-span-7 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-between space-y-3 overscroll-y-contain"
           style={{ overscrollBehaviorY: 'contain' }}
         >
           {/* Viewport Toolbar */}
-          <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--app-text-secondary)] px-1 border-b border-[var(--app-border)] pb-3">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[var(--app-accent)]" />
-              <span className="font-bold text-[var(--app-text)] font-mono-num">
-                Kanvas {canvasOrientation} ({elements.length} Elemen)
+          <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--app-text-secondary)] border-b border-[var(--app-border)] pb-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-[var(--app-accent)] shrink-0" />
+              <span className="font-bold text-[var(--app-text)] tabular-metrics truncate">
+                Kanvas {canvasOrientation} ({elements.length})
               </span>
+              <button
+                type="button"
+                onClick={() => setIsMonitorExpanded((v) => !v)}
+                className="lg:hidden min-h-[36px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text-secondary)]"
+              >
+                {isMonitorExpanded ? 'Ringkas' : 'Perbesar'}
+              </button>
             </div>
 
             <div className="flex items-center gap-1">
@@ -2776,7 +2764,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 type="button"
                 onClick={handleUndo}
                 disabled={history.length === 0}
-                className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Undo"
               >
                 <Undo2 className="w-4 h-4" />
@@ -2785,7 +2773,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 type="button"
                 onClick={handleRedo}
                 disabled={redoStack.length === 0}
-                className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Redo"
               >
                 <Redo2 className="w-4 h-4" />
@@ -2796,16 +2784,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
-                className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Zoom Out"
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
-              <span className="font-mono-num text-[11px] px-1.5 text-[var(--app-text)]">{zoomLevel}%</span>
+              <span className="tabular-metrics text-[11px] px-1 text-[var(--app-text)]">{zoomLevel}%</span>
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
-                className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Zoom In"
               >
                 <ZoomIn className="w-4 h-4" />
@@ -2816,7 +2804,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   setZoomLevel(100);
                   setPanOffset({ x: 0, y: 0 });
                 }}
-                className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center ml-0.5"
+                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Reset Posisi & Zoom"
               >
                 <RotateCcw className="w-4 h-4" />
@@ -2826,7 +2814,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Interactive Screen Stage Container */}
           <div
-            className="w-full overflow-hidden flex items-center justify-center p-2 sm:p-4 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative min-h-[380px] sm:min-h-[460px] select-none overscroll-y-contain"
+            className={`w-full overflow-hidden flex items-center justify-center p-2 sm:p-3 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative select-none overscroll-y-contain ${
+              isMonitorExpanded ? 'min-h-[380px] sm:min-h-[460px]' : 'min-h-[290px] sm:min-h-[400px] lg:min-h-[470px]'
+            }`}
             style={{
               touchAction: 'none',
               overscrollBehaviorY: 'contain',
@@ -2864,11 +2854,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
               }}
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
-              <div className="absolute inset-x-2 top-2 h-7 border border-dashed border-[var(--app-accent-border)] rounded flex items-center justify-center pointer-events-none">
-                <span className="text-[8px] font-mono text-[var(--app-accent)]/60">SAFE ZONE HEADER (STATUS BAR)</span>
+              <div className="absolute inset-x-2 top-2 h-6 border border-dashed border-[var(--app-accent-border)] rounded flex items-center justify-center pointer-events-none">
+                <span className="text-[8px] font-mono text-[var(--app-accent)]/60">SAFE ZONE HEADER</span>
               </div>
-              <div className="absolute inset-x-2 bottom-2 h-10 border border-dashed border-rose-500/30 rounded flex items-center justify-center pointer-events-none">
-                <span className="text-[8px] font-mono text-rose-400/60">SAFE ZONE FOOTER (CHAT / GIFTS AREA)</span>
+              <div className="absolute inset-x-2 bottom-2 h-8 border border-dashed border-rose-500/30 rounded flex items-center justify-center pointer-events-none">
+                <span className="text-[8px] font-mono text-rose-400/60">SAFE ZONE FOOTER</span>
               </div>
 
               {/* Elements Layer Rendering with UNIFIED POINTER EVENTS */}
@@ -2901,34 +2891,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         : 'hover:ring-1 hover:ring-[var(--app-accent)]/60'
                     }`}
                   >
-                    {/* Render Content */}
                     {renderElementContent(elem)}
 
-                    {/* Resize Handles on Selected Element (4 corners) */}
                     {isSelected && !elem.locked && !isElementLockedByGroup(elem.id) && (
                       <>
-                        {/* Bottom-Right Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-right')}
                           style={{ touchAction: 'none' }}
                           className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--app-accent)] border-2 border-white rounded-full cursor-se-resize shadow-md z-30"
                           title="Resize Sudut Kanan-Bawah"
                         />
-                        {/* Top-Right Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-right')}
                           style={{ touchAction: 'none' }}
                           className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-[var(--app-accent)] border border-white rounded-full cursor-ne-resize shadow-sm z-30"
                           title="Resize Sudut Kanan-Atas"
                         />
-                        {/* Bottom-Left Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-left')}
                           style={{ touchAction: 'none' }}
                           className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-[var(--app-accent)] border border-white rounded-full cursor-sw-resize shadow-sm z-30"
                           title="Resize Sudut Kiri-Bawah"
                         />
-                        {/* Top-Left Handle */}
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-left')}
                           style={{ touchAction: 'none' }}
@@ -2938,7 +2922,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </>
                     )}
 
-                    {/* Selected Badge */}
                     {isSelected && (
                       <div className="absolute -top-4 left-0 px-1.5 py-0.2 bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-mono text-[8px] rounded uppercase font-bold tracking-wider pointer-events-none">
                         {elem.name}
@@ -2998,27 +2981,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           </div>
 
-          {/* Quick Helper Legend */}
-          <div className="w-full flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--app-text-secondary)] px-1">
-            <span>Geser elemen bebas horizontal &amp; vertikal (mouse/sentuhan Android).</span>
-            <span className="font-mono-num text-[var(--app-accent-text)]">1080p Produksi</span>
+          <div className="w-full flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--app-text-muted)] px-1">
+            <span>Geser elemen bebas horizontal &amp; vertikal.</span>
+            <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">1080p Produksi</span>
           </div>
         </div>
 
         {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
-        <div className="lg:col-span-5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+        <div className="lg:col-span-5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl overflow-hidden flex flex-col">
           {/* Main Module Tabs (Properties, Elements, Sources, Presets, Media, Layers, Simulator, Marketplace) */}
           <div
-            className="flex overflow-x-auto no-scrollbar gap-1 p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-[11px] font-semibold select-none"
+            className="flex overflow-x-auto no-scrollbar gap-1 p-1.5 bg-[var(--app-surface-muted)]/70 border-b border-[var(--app-border)] text-[11px] font-semibold select-none shrink-0"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             <button
               type="button"
               onClick={() => setActiveSidePanel('properties')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'properties'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <Sliders className="w-3.5 h-3.5 shrink-0" />
@@ -3027,10 +3009,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('elements')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'elements'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <Plus className="w-3.5 h-3.5 shrink-0" />
@@ -3039,10 +3021,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('sources')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'sources'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <Box className="w-3.5 h-3.5 shrink-0" />
@@ -3051,10 +3033,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('presets')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'presets'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <FolderOpen className="w-3.5 h-3.5 shrink-0" />
@@ -3063,10 +3045,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('media')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'media'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <ImageIcon className="w-3.5 h-3.5 shrink-0" />
@@ -3075,10 +3057,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('layers')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'layers'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <Layers className="w-3.5 h-3.5 shrink-0" />
@@ -3087,10 +3069,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('simulator')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'simulator'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <Zap className="w-3.5 h-3.5 shrink-0" />
@@ -3099,10 +3081,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveSidePanel('marketplace')}
-              className={`min-h-[44px] shrink-0 px-3 min-w-[88px] rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[88px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
                 activeSidePanel === 'marketplace'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
               }`}
             >
               <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
@@ -3110,18 +3092,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </button>
           </div>
 
+          <div className="p-4 sm:p-5 flex-1">
           {/* TAB 1: CONTEXTUAL PROPERTIES PANEL */}
           {activeSidePanel === 'properties' && (
-            <div className="space-y-4">
+            <div className="divide-y divide-[var(--app-border)]">
               {selectedElement ? (
                 <>
-                  <div className="p-3 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] flex flex-wrap items-center justify-between gap-2">
+                  <div className="pb-3.5 flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-[var(--app-accent)] shrink-0" />
                         <span className="truncate">{selectedElement.name}</span>
                       </div>
-                      <div className="text-[10px] text-[var(--app-text-secondary)] font-mono-num mt-0.5">
+                      <div className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics mt-0.5">
                         Tipe: {selectedElement.type} · Layer #{selectedElement.layer}
                       </div>
                     </div>
@@ -3130,9 +3113,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => updateElementField(selectedElement.id, 'visible', !selectedElement.visible)}
-                        className={`min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors ${
+                        className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors ${
                           selectedElement.visible
-                            ? 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                            ? 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                             : 'bg-[var(--app-error-soft)] border-rose-500/35 text-[var(--app-error)]'
                         }`}
                         title={selectedElement.visible ? 'Sembunyikan' : 'Tampilkan'}
@@ -3142,10 +3125,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => updateElementField(selectedElement.id, 'locked', !selectedElement.locked)}
-                        className={`min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors ${
+                        className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors ${
                           selectedElement.locked
                             ? 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-warn)]'
-                            : 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                            : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                         }`}
                         title={selectedElement.locked ? 'Buka Kunci' : 'Kunci Posisi'}
                       >
@@ -3154,7 +3137,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDuplicate(selectedElement.id)}
-                        className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors"
+                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors"
                         title="Duplikasi Elemen"
                       >
                         <Copy className="w-4 h-4" />
@@ -3162,7 +3145,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDelete(selectedElement.id)}
-                        className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] hover:border-rose-500 flex items-center justify-center transition-colors"
+                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] hover:border-rose-500 flex items-center justify-center transition-colors"
                         title="Hapus Elemen"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -3171,15 +3154,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </div>
 
                   {/* Contextual Form Body strictly tailored to Selected Type */}
-                  <div className="space-y-4 max-h-[440px] overflow-y-auto pr-1">
+                  <div className="divide-y divide-[var(--app-border)] max-h-[460px] overflow-y-auto pr-1">
                     {/* Camera */}
                     {selectedElement.type === 'camera' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div className="py-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                             <Camera className="w-4 h-4" /> Sumber Kamera Siaran
                           </span>
-                          <span className="text-[10px] text-[var(--app-text-secondary)] font-mono-num">Multi-Camera Ready</span>
+                          <span className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">Multi-Camera Ready</span>
                         </div>
 
                         <div>
@@ -3193,19 +3176,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 handleToggleCameraForElement(selectedElement.id, facing);
                               }
                             }}
-                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           >
                             <option value="user">Kamera Depan (Facecam / Selfie)</option>
                             <option value="environment">Kamera Belakang (Handcam / Meja)</option>
                           </select>
                         </div>
 
-                        <div className="flex items-center justify-between gap-2 pt-2">
+                        <div className="flex items-center justify-between gap-2 pt-1">
                           <span className="text-xs text-[var(--app-text-secondary)]">Uji Live Feed Kamera:</span>
                           <button
                             type="button"
                             onClick={() => handleToggleCameraForElement(selectedElement.id, selectedElement.properties.facingMode)}
-                            className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${
                               activeCameraStreams[selectedElement.id]
                                 ? 'bg-rose-600 hover:bg-rose-500 text-white'
                                 : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
@@ -3216,14 +3199,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 pt-2">
+                        <div className="grid grid-cols-2 gap-3 pt-1">
                           <div>
                             <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Warna Border</label>
                             <input
                               type="color"
                               value={selectedElement.properties.borderColor || '#F2C230'}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'borderColor', e.target.value)}
-                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] cursor-pointer"
+                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
                             />
                           </div>
                           <div>
@@ -3232,7 +3215,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               type="number"
                               value={selectedElement.properties.borderRadius || 14}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'borderRadius', parseInt(e.target.value) || 0)}
-                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-mono-num focus:outline-none focus:border-[var(--app-accent)]"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
                             />
                           </div>
                         </div>
@@ -3241,7 +3224,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Screen Capture */}
                     {selectedElement.type === 'screen_capture' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-rose-500/35 space-y-3">
+                      <div className="py-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-[var(--app-error)] flex items-center gap-1.5">
                             <Monitor className="w-4 h-4" /> Tangkapan Layar HP (Game Capture)
@@ -3250,20 +3233,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
                           Menangkap feed game Android atau tampilan layar dengan MediaProjection 60 FPS.
                         </p>
-                        <div className="p-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[10px] text-[var(--app-text-secondary)] space-y-1">
+                        <div className="pl-3 border-l-2 border-rose-500/50 text-[11px] text-[var(--app-text-secondary)] space-y-1">
                           <div>
                             <strong className="text-[var(--app-error)]">Aturan Mode B RTMP:</strong> Layer Tangkapan Layar harus berada di lapisan paling bawah (Layer #1 / di bawah semua overlay).
                           </div>
                           <div>
-                            Crop Mode aktif: <span className="font-mono-num text-[var(--app-text)]">Fit</span> · Rotasi didukung: <span className="font-mono-num text-[var(--app-text)]">0° / 90° / 180° / 270°</span>.
+                            Crop Mode aktif: <span className="tabular-metrics text-[var(--app-text)] font-medium">Fit</span> · Rotasi didukung: <span className="tabular-metrics text-[var(--app-text)] font-medium">0° / 90° / 180° / 270°</span>.
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={handleToggleScreenCapture}
-                          className={`w-full min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
-                            screenCaptureStream ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-rose-600 hover:bg-rose-500 text-white'
-                          }`}
+                          className="btn-press w-full min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors bg-rose-600 hover:bg-rose-500 text-white"
                         >
                           <Monitor className="w-4 h-4" />
                           {screenCaptureStream ? 'Hentikan Screen Share' : 'Mulai Screen Share (getDisplayMedia)'}
@@ -3273,14 +3254,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Event Alert */}
                     {selectedElement.type === 'event_alert' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-amber-500/35 space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div className="py-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[var(--app-warn)] flex items-center gap-1.5">
                             <Bell className="w-4 h-4" /> Auto-Trigger: Alert Notifikasi
                           </span>
-                          <span className="px-2 py-0.5 rounded bg-[var(--app-warn-soft)] text-[var(--app-warn)] font-bold text-[9px]">
-                            Auto-Mapped
-                          </span>
+                          <span className="text-[10px] text-[var(--app-warn)] font-bold">Auto-Mapped</span>
                         </div>
 
                         <div>
@@ -3288,7 +3267,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <select
                             value={selectedElement.triggerConfig?.eventType || 'gift'}
                             onChange={(e) => updateElementTrigger(selectedElement.id, { eventType: e.target.value })}
-                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           >
                             <option value="gift">Gift / Hadiah Penonton (Default)</option>
                             <option value="follow">Follower Baru</option>
@@ -3303,14 +3282,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             type="text"
                             value={selectedElement.properties.alertTitle || 'GIFT RECEIVED!'}
                             onChange={(e) => updateElementProperty(selectedElement.id, 'alertTitle', e.target.value)}
-                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           />
                         </div>
 
                         <div>
                           <div className="flex items-center justify-between text-[11px] font-bold text-[var(--app-text-secondary)]">
                             <span>Durasi Muncul (Detik)</span>
-                            <span className="font-mono-num text-[var(--app-accent-text)]">
+                            <span className="tabular-metrics text-[var(--app-accent-text)]">
                               {selectedElement.triggerConfig?.durationSec || 5}s
                             </span>
                           </div>
@@ -3328,14 +3307,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Chat Message */}
                     {selectedElement.type === 'chat_message' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div className="py-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                             <MessageSquare className="w-4 h-4" /> Auto-Trigger: Live Chatbox
                           </span>
-                          <span className="px-2 py-0.5 rounded bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] font-bold text-[9px]">
-                            Live Feed
-                          </span>
+                          <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Live Feed</span>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
@@ -3347,7 +3324,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               max="10"
                               value={selectedElement.properties.maxMessages || 4}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'maxMessages', parseInt(e.target.value) || 4)}
-                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-mono-num"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics"
                             />
                           </div>
                           <div>
@@ -3358,7 +3335,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               max="100"
                               value={selectedElement.properties.bgOpacity || 85}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'bgOpacity', parseInt(e.target.value) || 85)}
-                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-mono-num"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics"
                             />
                           </div>
                         </div>
@@ -3368,10 +3345,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <button
                             type="button"
                             onClick={() => updateElementProperty(selectedElement.id, 'showBadges', !selectedElement.properties.showBadges)}
-                            className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
                               selectedElement.properties.showBadges !== false
                                 ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                                : 'bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
                             }`}
                           >
                             {selectedElement.properties.showBadges !== false ? 'Aktif' : 'Nonaktif'}
@@ -3382,7 +3359,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Image / Video / Media Replacement */}
                     {(selectedElement.type === 'image' || selectedElement.type === 'sticker' || selectedElement.type === 'video') && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-emerald-500/35 space-y-3">
+                      <div className="py-4 space-y-3">
                         <span className="text-xs font-bold text-[var(--app-ok)] flex items-center gap-1.5">
                           <ImageIcon className="w-4 h-4" /> Sumber Media (Lokal &amp; URL)
                         </span>
@@ -3402,14 +3379,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               }
                             }}
                             placeholder="https://... atau ganti dari tab Media"
-                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           />
                         </div>
 
                         <button
                           type="button"
                           onClick={() => setActiveSidePanel('media')}
-                          className="w-full min-h-[44px] bg-[var(--app-ok-soft)] hover:border-emerald-500 border border-emerald-500/35 text-[var(--app-ok)] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                          className="btn-press w-full min-h-[44px] bg-[var(--app-ok-soft)] hover:border-emerald-500 border border-emerald-500/35 text-[var(--app-ok)] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                         >
                           <FolderOpen className="w-4 h-4" /> Pilih dari Media Library Lokal
                         </button>
@@ -3418,26 +3395,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Song Request Widget Inspector */}
                     {selectedElement.type === 'song_request' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div className="py-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                             <ListMusic className="w-4 h-4" /> Song Request Live Display
                           </span>
-                          <span className="px-2 py-0.5 rounded bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] font-bold text-[9px]">
-                            Mode A Engine
-                          </span>
+                          <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Mode A Engine</span>
                         </div>
 
                         <p className="text-[11px] text-[var(--app-text-secondary)]">
                           Widget ini terhubung langsung ke subsistem Song Request Mode A (!play &amp; !next) dan status pemutaran sebenarnya.
                         </p>
 
-                        <div className="p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-between text-xs gap-2">
+                        <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-center justify-between text-xs gap-2">
                           <div className="min-w-0">
                             <div className="font-bold text-[var(--app-text)] truncate">
                               {srState.currentTrack?.title || 'Tidak ada lagu aktif'}
                             </div>
-                            <div className="text-[10px] text-[var(--app-accent-text)] truncate">
+                            <div className="text-[10px] text-[var(--app-accent-text)] truncate tabular-metrics">
                               {srState.currentTrack
                                 ? `Req: @${srState.currentTrack.requester} · ${srState.playbackStatus}`
                                 : `Antrean: ${srState.queue.length} lagu`}
@@ -3449,7 +3424,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               onClick={() => {
                                 void songRequestEngine.togglePlayPause();
                               }}
-                              className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-accent)] text-[var(--app-accent-ink)] flex items-center justify-center"
+                              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-accent)] text-[var(--app-accent-ink)] flex items-center justify-center"
                               title={srState.isPlaying ? 'Jeda' : 'Putar'}
                             >
                               {srState.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -3459,7 +3434,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               onClick={() => {
                                 void songRequestEngine.skipTrack('Streamer');
                               }}
-                              className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                               title="Skip Lagu (!next)"
                             >
                               <FastForward className="w-4 h-4" />
@@ -3478,10 +3453,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <button
                             type="button"
                             onClick={() => updateElementProperty(selectedElement.id, 'showRequester', !selectedElement.properties.showRequester)}
-                            className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold ${
+                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold ${
                               selectedElement.properties.showRequester !== false
                                 ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                                : 'bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
                             }`}
                           >
                             {selectedElement.properties.showRequester !== false ? 'Aktif' : 'Nonaktif'}
@@ -3492,14 +3467,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Lyrics Widget Inspector */}
                     {selectedElement.type === 'lyrics' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div className="py-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                             <Music className="w-4 h-4" /> Lyrics Display (Integrasi Terpisah)
                           </span>
-                          <span className="px-2 py-0.5 rounded bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] font-bold text-[9px]">
-                            Follows Track
-                          </span>
+                          <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Follows Track</span>
                         </div>
                         <p className="text-[11px] text-[var(--app-text-secondary)]">
                           Mengikuti lagu aktif dari Song Request / Local Audio ({srState.currentTrack?.title || manualAudioTitle || 'Belum ada lagu aktif'}) tanpa membuat lirik palsu.
@@ -3513,7 +3486,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             value={selectedElement.properties.lyricsText || ''}
                             onChange={(e) => updateElementProperty(selectedElement.id, 'lyricsText', e.target.value)}
                             placeholder="Kosongkan jika menggunakan integrasi sumber lirik terpisah..."
-                            className="w-full mt-1 px-3 py-2 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full mt-1 px-3 py-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           />
                         </div>
                       </div>
@@ -3521,7 +3494,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Dedicated Audio Manual Inspector */}
                     {selectedElement.type === 'audio' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-cyan-500/35 space-y-3.5">
+                      <div className="py-4 space-y-3.5">
                         {/* Hidden Native Audio File Input */}
                         <input
                           ref={audioFileInputRef}
@@ -3531,11 +3504,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           onChange={handleManualAudioFileSelect}
                         />
 
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
                             <Volume2 className="w-4 h-4" /> Audio Manual Player (BGM / SFX)
                           </span>
-                          <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 font-bold text-[9px] uppercase font-mono-num">
+                          <span className="text-[10px] text-cyan-400 font-bold uppercase tabular-metrics">
                             {selectedElement.properties.channel || 'bgm'}
                           </span>
                         </div>
@@ -3545,18 +3518,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         </p>
 
                         {/* 1. LOCAL AUDIO FILE PICKER */}
-                        <div className="p-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] space-y-2.5">
+                        <div className="space-y-2.5 pt-1">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
                               <FileAudio className="w-4 h-4 text-cyan-400" /> Sumber File Audio Lokal
                             </span>
-                            <span className="text-[9px] text-[var(--app-text-muted)]">MP3 / WAV / OGG / M4A / AAC</span>
+                            <span className="text-[10px] text-[var(--app-text-muted)] tabular-metrics">MP3 / WAV / OGG / M4A / AAC</span>
                           </div>
 
                           <button
                             type="button"
                             onClick={() => audioFileInputRef.current?.click()}
-                            className="w-full min-h-[44px] px-3 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center justify-center gap-2 transition shadow-sm"
+                            className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center justify-center gap-2 transition"
                           >
                             <Upload className="w-4 h-4" />
                             <span>Pilih File Audio dari Perangkat Android</span>
@@ -3573,10 +3546,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                   <div className="font-bold text-[var(--app-text)] truncate text-[11px]">
                                     {selectedElement.properties.localFileName}
                                   </div>
-                                  <div className="text-[9px] text-cyan-400 flex items-center gap-1 mt-0.5">
-                                    <span className="px-1.5 py-0.2 rounded bg-cyan-950/60 font-semibold">File Lokal Sesi</span>
+                                  <div className="text-[10px] text-cyan-400 flex items-center gap-1 mt-0.5 tabular-metrics">
+                                    <span className="font-semibold">File Lokal Sesi</span>
                                     {selectedElement.properties.localFileSize && (
-                                      <span className="text-[var(--app-text-secondary)] font-mono-num">
+                                      <span className="text-[var(--app-text-secondary)]">
                                         · {(selectedElement.properties.localFileSize / (1024 * 1024)).toFixed(2)} MB
                                       </span>
                                     )}
@@ -3595,14 +3568,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                   updateElementProperty(selectedElement.id, 'localFileName', '');
                                   updateElementProperty(selectedElement.id, 'audioSourceType', 'url');
                                 }}
-                                className="min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-error)] hover:bg-[var(--app-error-soft)] flex items-center justify-center transition"
+                                className="btn-press min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-error)] hover:bg-[var(--app-error-soft)] flex items-center justify-center transition"
                                 title="Hapus file dan beralih ke URL"
                               >
                                 <X className="w-4 h-4" />
                               </button>
                             </div>
                           ) : (
-                            <div className="text-[10px] text-[var(--app-text-secondary)]">
+                            <div className="text-[11px] text-[var(--app-text-secondary)]">
                               Belum ada file lokal dipilih untuk elemen ini. Anda dapat memilih file audio dari penyimpanan HP atau mengisi URL di bawah.
                             </div>
                           )}
@@ -3615,7 +3588,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               Atau Gunakan Tautan URL Audio Online
                             </label>
                             {selectedElement.properties.localFileName && (
-                              <span className="text-[9px] text-[var(--app-text-muted)]">(File lokal diprioritaskan)</span>
+                              <span className="text-[10px] text-[var(--app-text-muted)]">(File lokal diprioritaskan)</span>
                             )}
                           </div>
                           <div className="flex gap-2 mt-1">
@@ -3624,7 +3597,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               value={selectedElement.properties.audioUrl || ''}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'audioUrl', e.target.value)}
                               placeholder="https://... file MP3 / OGG"
-                              className="flex-1 min-h-[44px] px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                              className="flex-1 min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                             />
                             <button
                               type="button"
@@ -3637,7 +3610,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 updateElementProperty(selectedElement.id, 'localFileName', '');
                                 updateElementProperty(selectedElement.id, 'audioSourceType', 'url');
                               }}
-                              className="min-h-[44px] px-3 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-[11px] text-cyan-300 font-semibold rounded-xl shrink-0"
+                              className="btn-press min-h-[44px] px-3 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-[11px] text-cyan-300 font-semibold rounded-xl shrink-0"
                               title="Muat sample audio bebas royalti"
                             >
                               Sample BGM
@@ -3653,7 +3626,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             value={selectedElement.properties.title || ''}
                             onChange={(e) => updateElementProperty(selectedElement.id, 'title', e.target.value)}
                             placeholder="Contoh: Lo-Fi Chill Stream BGM"
-                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           />
                         </div>
 
@@ -3664,7 +3637,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <select
                               value={selectedElement.properties.channel || 'bgm'}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'channel', e.target.value)}
-                              className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-medium"
+                              className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-medium"
                             >
                               <option value="bgm">BGM (Musik Latar)</option>
                               <option value="sfx">SFX (Efek Suara)</option>
@@ -3673,7 +3646,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <div>
                             <div className="flex items-center justify-between">
                               <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Volume</label>
-                              <span className="text-[11px] font-mono-num text-cyan-400">
+                              <span className="text-[11px] tabular-metrics text-cyan-400 font-semibold">
                                 {selectedElement.properties.volume ?? 85}%
                               </span>
                             </div>
@@ -3709,10 +3682,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 audioEngine.setLoop(nextLoop);
                               }
                             }}
-                            className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition shrink-0 ${
+                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition shrink-0 ${
                               selectedElement.properties.loop !== false
                                 ? 'bg-cyan-600 text-white'
-                                : 'bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
                             }`}
                           >
                             {selectedElement.properties.loop !== false ? 'Aktif' : 'Nonaktif'}
@@ -3720,27 +3693,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         </div>
 
                         {/* Active Playback Status Indicator */}
-                        <div className="p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-xs flex items-center justify-between gap-2">
+                        <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <span className="text-[9px] uppercase tracking-wider text-[var(--app-text-muted)] font-semibold block">
+                            <span className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)] font-semibold block">
                               Sumber Aktif
                             </span>
                             <span className="font-bold text-[var(--app-text)] truncate block text-[11px] mt-0.5">
                               {selectedElement.properties.localFileName
-                                ? `📁 ${selectedElement.properties.localFileName}`
+                                ? selectedElement.properties.localFileName
                                 : selectedElement.properties.audioUrl
-                                ? `🌐 ${selectedElement.properties.audioUrl.slice(0, 35)}...`
-                                : '🎵 Sample BGM Bawaan'}
+                                ? `${selectedElement.properties.audioUrl.slice(0, 35)}...`
+                                : 'Sample BGM Bawaan'}
                             </span>
                           </div>
                           <div className="shrink-0">
                             {audioEngine.getState().currentTrackId === selectedElement.id && isTestingAudio ? (
-                              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-950/60 border border-cyan-500/35 text-cyan-300 text-[10px] font-bold">
+                              <span className="flex items-center gap-1.5 text-cyan-400 text-[11px] font-bold">
                                 <span className="w-2 h-2 rounded-full bg-cyan-400" />
                                 Memutar
                               </span>
                             ) : (
-                              <span className="px-2.5 py-1 rounded-md bg-[var(--app-surface-muted)] text-[var(--app-text-secondary)] text-[10px] font-semibold border border-[var(--app-border)]">
+                              <span className="text-[var(--app-text-secondary)] text-[11px] font-semibold">
                                 Standby
                               </span>
                             )}
@@ -3754,7 +3727,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <button
                               type="button"
                               onClick={handlePlayManualAudio}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition active:scale-95"
+                              className="btn-press min-h-[44px] px-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 transition"
                             >
                               {audioEngine.getState().currentTrackId === selectedElement.id && isTestingAudio ? (
                                 <>
@@ -3769,7 +3742,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <button
                               type="button"
                               onClick={handleStopManualAudio}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+                              className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-bold flex items-center gap-1.5 transition"
                               title="Hentikan dan reset posisi playback ke awal"
                             >
                               <Square className="w-3.5 h-3.5 fill-current" /> Stop
@@ -3781,7 +3754,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                     {/* Running Text */}
                     {selectedElement.type === 'running_text' && (
-                      <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
+                      <div className="py-4 space-y-3">
                         <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                           <Type className="w-4 h-4" /> Konten Teks Berjalan (Marquee)
                         </span>
@@ -3791,7 +3764,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             rows={2}
                             value={selectedElement.properties.text || ''}
                             onChange={(e) => updateElementProperty(selectedElement.id, 'text', e.target.value)}
-                            className="w-full mt-1 px-3 py-2 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="w-full mt-1 px-3 py-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -3803,7 +3776,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               max="10"
                               value={selectedElement.properties.speed || 4}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'speed', parseInt(e.target.value) || 4)}
-                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-mono-num"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics"
                             />
                           </div>
                           <div>
@@ -3812,7 +3785,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               type="color"
                               value={selectedElement.properties.textColor || '#F2C230'}
                               onChange={(e) => updateElementProperty(selectedElement.id, 'textColor', e.target.value)}
-                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] cursor-pointer"
+                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
                             />
                           </div>
                         </div>
@@ -3820,10 +3793,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     )}
 
                     {/* Common Geometry & Transform (Editable X, Y, Width, Height) */}
-                    <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
+                    <div className="py-4 space-y-3">
                       <div className="flex items-center justify-between text-xs font-bold text-[var(--app-text)]">
                         <span>Geometri &amp; Tata Letak Kanvas</span>
-                        <span className="text-[10px] text-[var(--app-accent-text)] font-mono-num">Bisa di luar batas layar</span>
+                        <span className="text-[10px] text-[var(--app-accent-text)] tabular-metrics">Bisa di luar batas layar</span>
                       </div>
 
                       {/* Position & Size */}
@@ -3834,7 +3807,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             type="number"
                             value={selectedElement.x}
                             onChange={(e) => updateElementField(selectedElement.id, 'x', parseFloat(e.target.value) || 0)}
-                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-center font-mono-num text-[var(--app-text)] text-xs"
+                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-center tabular-metrics text-[var(--app-text)] text-xs"
                           />
                         </div>
                         <div>
@@ -3843,7 +3816,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             type="number"
                             value={selectedElement.y}
                             onChange={(e) => updateElementField(selectedElement.id, 'y', parseFloat(e.target.value) || 0)}
-                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-center font-mono-num text-[var(--app-text)] text-xs"
+                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-center tabular-metrics text-[var(--app-text)] text-xs"
                           />
                         </div>
                         <div>
@@ -3854,7 +3827,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             min="2"
                             max="100"
                             onChange={(e) => updateElementField(selectedElement.id, 'width', parseFloat(e.target.value) || 10)}
-                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-center font-mono-num text-[var(--app-text)] text-xs"
+                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-center tabular-metrics text-[var(--app-text)] text-xs"
                           />
                         </div>
                         <div>
@@ -3865,7 +3838,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             min="2"
                             max="100"
                             onChange={(e) => updateElementField(selectedElement.id, 'height', parseFloat(e.target.value) || 5)}
-                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-center font-mono-num text-[var(--app-text)] text-xs"
+                            className="w-full min-h-[44px] mt-0.5 px-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-center tabular-metrics text-[var(--app-text)] text-xs"
                           />
                         </div>
                       </div>
@@ -3875,7 +3848,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <div>
                           <div className="flex items-center justify-between text-[10px] text-[var(--app-text-secondary)]">
                             <span>Opasitas</span>
-                            <span className="font-mono-num text-[var(--app-accent-text)]">{selectedElement.opacity}%</span>
+                            <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">{selectedElement.opacity}%</span>
                           </div>
                           <input
                             type="range"
@@ -3889,7 +3862,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         <div>
                           <div className="flex items-center justify-between text-[10px] text-[var(--app-text-secondary)]">
                             <span>Rotasi</span>
-                            <span className="font-mono-num text-[var(--app-accent-text)]">{selectedElement.rotation}°</span>
+                            <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">{selectedElement.rotation}°</span>
                           </div>
                           <input
                             type="range"
@@ -3904,21 +3877,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                       {/* Layer order buttons */}
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[var(--app-border)]">
-                        <span className="text-[11px] text-[var(--app-text-secondary)] font-mono-num">
+                        <span className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">
                           Urutan Lapisan (Layer #{selectedElement.layer})
                         </span>
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => handleMoveLayer(selectedElement.id, 'up')}
-                            className="min-h-[44px] px-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
+                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
                           >
                             Ke Atas
                           </button>
                           <button
                             type="button"
                             onClick={() => handleMoveLayer(selectedElement.id, 'down')}
-                            className="min-h-[44px] px-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
+                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
                           >
                             Ke Bawah
                           </button>
@@ -3928,7 +3901,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </div>
                 </>
               ) : (
-                <div className="p-8 text-center bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] space-y-2">
+                <div className="py-12 px-4 text-center space-y-2">
                   <Sliders className="w-8 h-8 text-[var(--app-text-muted)] mx-auto mb-1" />
                   <p className="text-xs font-semibold text-[var(--app-text)]">Tidak ada elemen yang dipilih</p>
                   <p className="text-[11px] text-[var(--app-text-secondary)]">
@@ -3941,12 +3914,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* TAB 2: ELEMENT LIBRARY */}
           {activeSidePanel === 'elements' && (
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
+            <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
               {/* Shortcut Banner to Full Sources Catalog */}
               <button
                 type="button"
                 onClick={() => setActiveSidePanel('sources')}
-                className="w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-[var(--app-accent-text)] text-xs font-bold flex items-center justify-between hover:border-[var(--app-accent)] transition-all shadow-sm group"
+                className="btn-press w-full min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-[var(--app-accent-text)] text-xs font-bold flex items-center justify-between hover:border-[var(--app-accent)] transition-all group"
               >
                 <div className="flex items-center gap-2">
                   <Box className="w-4 h-4 shrink-0" />
@@ -3956,7 +3929,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </button>
 
               <div>
-                <h3 className="text-xs font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <h3 className="text-[11px] font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Tv className="w-3.5 h-3.5 text-[var(--app-accent-text)]" />
                   Sumber Video (Multi-Kamera)
                 </h3>
@@ -3964,13 +3937,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('camera', 'Kamera Siaran')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all group"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all group"
                   >
                     <div className="flex items-center justify-between">
                       <Camera className="w-4 h-4 text-[var(--app-accent-text)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] text-[8px] font-bold rounded">
-                        Multi-Cam
-                      </span>
+                      <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Multi-Cam</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Kamera / Facecam</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Depan / belakang mandiri</span>
@@ -3979,13 +3950,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('screen_capture', 'Tangkapan Layar (Game)')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-rose-500/60 text-left flex flex-col gap-1 transition-all group"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-rose-500/60 text-left flex flex-col gap-1 transition-all group"
                   >
                     <div className="flex items-center justify-between">
                       <Monitor className="w-4 h-4 text-[var(--app-error)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-error-soft)] text-[var(--app-error)] text-[8px] font-bold rounded">
-                        60 FPS
-                      </span>
+                      <span className="text-[10px] text-[var(--app-error)] font-bold tabular-metrics">60 FPS</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Tangkapan Layar</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">MediaProjection game capture</span>
@@ -3994,7 +3963,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </div>
 
               <div>
-                <h3 className="text-xs font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <h3 className="text-[11px] font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Zap className="w-3.5 h-3.5 text-[var(--app-accent-text)]" />
                   Elemen Interaksi &amp; Auto-Trigger
                 </h3>
@@ -4002,13 +3971,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('event_alert', 'Alert Gift & Follow')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <Bell className="w-4 h-4 text-[var(--app-warn)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-warn-soft)] text-[var(--app-warn)] text-[8px] font-bold rounded">
-                        Auto Gift
-                      </span>
+                      <span className="text-[10px] text-[var(--app-warn)] font-bold">Auto Gift</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Alert Pop-up</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Hadiah mawar/paus &amp; follow</span>
@@ -4017,13 +3984,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('chat_message', 'Live Chatbox')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <MessageSquare className="w-4 h-4 text-[var(--app-accent-text)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] text-[8px] font-bold rounded">
-                        Auto Chat
-                      </span>
+                      <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Auto Chat</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Kotak Chat Live</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Komentar dengan VIP badge</span>
@@ -4032,13 +3997,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('combo_counter', 'Combo Gift Counter')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-orange-500/60 text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-orange-500/60 text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <Flame className="w-4 h-4 text-orange-400" />
-                      <span className="px-1.5 py-0.2 bg-orange-500/15 text-orange-400 text-[8px] font-bold rounded">
-                        Multiplier
-                      </span>
+                      <span className="text-[10px] text-orange-400 font-bold">Multiplier</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Combo Counter</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Multiplier gift penonton</span>
@@ -4047,13 +4010,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('counter', 'Penghitung Like')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-emerald-500/60 text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-emerald-500/60 text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <TrendingUp className="w-4 h-4 text-[var(--app-ok)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-ok-soft)] text-[var(--app-ok)] text-[8px] font-bold rounded">
-                        Auto Like
-                      </span>
+                      <span className="text-[10px] text-[var(--app-ok)] font-bold">Auto Like</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Goal / Tap Counter</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Hitungan like &amp; tap layar</span>
@@ -4062,13 +4023,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('song_request', 'Now Playing Song')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <ListMusic className="w-4 h-4 text-[var(--app-accent-text)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] text-[8px] font-bold rounded">
-                        Auto BGM
-                      </span>
+                      <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Auto BGM</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Song Request Widget</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Display judul &amp; requester</span>
@@ -4077,13 +4036,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('audio', 'Audio Manual (BGM)')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-cyan-500/60 text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-cyan-500/60 text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <Volume2 className="w-4 h-4 text-cyan-400" />
-                      <span className="px-1.5 py-0.2 bg-cyan-500/15 text-cyan-400 text-[8px] font-bold rounded">
-                        Manual BGM
-                      </span>
+                      <span className="text-[10px] text-cyan-400 font-bold">Manual BGM</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Audio Manual (BGM)</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Musik latar &amp; SFX independen</span>
@@ -4092,13 +4049,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('running_text', 'Running Text (Ticker)')}
-                    className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
+                    className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
                   >
                     <div className="flex items-center justify-between">
                       <Type className="w-4 h-4 text-[var(--app-accent-text)]" />
-                      <span className="px-1.5 py-0.2 bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] text-[8px] font-bold rounded">
-                        Marquee
-                      </span>
+                      <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Marquee</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Teks Berjalan</span>
                     <span className="text-[10px] text-[var(--app-text-secondary)]">Pengumuman &amp; link Saweria</span>
@@ -4107,7 +4062,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </div>
 
               <div>
-                <h3 className="text-xs font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <h3 className="text-[11px] font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <ImageIcon className="w-3.5 h-3.5 text-[var(--app-ok)]" />
                   Grafis Statis &amp; Video
                 </h3>
@@ -4115,24 +4070,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('image', 'Logo Siaran')}
-                    className="min-h-[56px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-emerald-500/60 text-left flex items-center gap-2"
+                    className="btn-press min-h-[56px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-emerald-500/60 text-left flex items-center gap-2 transition-all"
                   >
                     <ImageIcon className="w-4 h-4 text-[var(--app-ok)] shrink-0" />
                     <div>
                       <span className="font-semibold text-[var(--app-text)] block">Gambar / Logo</span>
-                      <span className="text-[9px] text-[var(--app-text-secondary)]">PNG transparan / sponsor</span>
+                      <span className="text-[10px] text-[var(--app-text-secondary)]">PNG transparan / sponsor</span>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleAddQuickElement('video', 'Video Background')}
-                    className="min-h-[56px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex items-center gap-2"
+                    className="btn-press min-h-[56px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex items-center gap-2 transition-all"
                   >
                     <Video className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
                     <div>
                       <span className="font-semibold text-[var(--app-text)] block">Video Loop</span>
-                      <span className="text-[9px] text-[var(--app-text-secondary)]">Background MP4/WebM</span>
+                      <span className="text-[10px] text-[var(--app-text-secondary)]">Background MP4/WebM</span>
                     </div>
                   </button>
                 </div>
@@ -4142,25 +4097,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* TAB: SOURCES CATALOG (INTEGRATED SOURCES LIBRARY) */}
           {activeSidePanel === 'sources' && (
-            <div className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
-              <div className="p-3 bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] rounded-xl text-xs text-[var(--app-text)] flex items-start gap-2.5">
-                <Box className="w-4 h-4 text-[var(--app-accent-text)] shrink-0 mt-0.5" />
-                <p>
-                  Pustaka 25 sumber overlay siaran terkurasi. Klik <strong>Tambah</strong> untuk memasukkan sumber langsung ke kanvas dengan ukuran dan auto-trigger yang sesuai.
-                </p>
+            <div className="space-y-3.5 max-h-[480px] overflow-y-auto pr-1">
+              <div className="pl-3 border-l-2 border-[var(--app-accent)] text-xs text-[var(--app-text-secondary)]">
+                Pustaka 25 sumber overlay siaran terkurasi. Klik <strong className="text-[var(--app-text)]">Tambah</strong> untuk memasukkan sumber ke kanvas.
               </div>
 
               {/* Category Filter & Search */}
               <div className="space-y-2">
-                <div className="flex gap-1.5 p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-xs">
+                <div className="flex gap-1 p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-xs">
                   {(['all', 'basic', 'dynamic'] as const).map((cat) => (
                     <button
                       key={cat}
                       type="button"
                       onClick={() => setSourceCategoryFilter(cat)}
-                      className={`flex-1 min-h-[44px] rounded-lg text-xs font-semibold capitalize transition-colors ${
+                      className={`btn-press flex-1 min-h-[44px] rounded-lg text-xs font-semibold capitalize tabular-metrics transition-colors ${
                         sourceCategoryFilter === cat
-                          ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
+                          ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
                           : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                       }`}
                     >
@@ -4182,11 +4134,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </div>
 
               {/* Source List */}
-              <div className="space-y-2">
+              <div className="divide-y divide-[var(--app-border)]">
                 {filteredSourcesList.map((src) => (
                   <div
                     key={src.name}
-                    className="p-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] rounded-xl transition-all flex items-center justify-between gap-2"
+                    className="py-2.5 flex items-center justify-between gap-2.5"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className="w-9 h-9 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0">
@@ -4195,18 +4147,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
                           <span className="truncate">{src.name}</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] font-normal shrink-0">
-                            {src.category === 'basic' ? 'Dasar' : 'Dinamis'}
+                          <span className="text-[10px] text-[var(--app-text-muted)] font-medium shrink-0">
+                            · {src.category === 'basic' ? 'Dasar' : 'Dinamis'}
                           </span>
                         </div>
-                        <p className="text-[10px] text-[var(--app-text-secondary)] truncate mt-0.5">{src.description}</p>
+                        <p className="text-[11px] text-[var(--app-text-secondary)] truncate mt-0.5">{src.description}</p>
                       </div>
                     </div>
 
                     <button
                       type="button"
                       onClick={() => handleAddQuickElement(src.type, src.name)}
-                      className="min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                      className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Tambah</span>
@@ -4219,21 +4171,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* TAB 3: ONE SHARED PRESET SYSTEM */}
           {activeSidePanel === 'presets' && (
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
+            <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <h3 className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
                     <FolderOpen className="w-4 h-4 text-[var(--app-accent-text)]" /> Pustaka Preset Bersama
                   </h3>
-                  <p className="text-[10px] text-[var(--app-text-secondary)]">
-                    Pilih preset untuk langsung diterapkan ke canvas atau simpan scene aktif
+                  <p className="text-[11px] text-[var(--app-text-secondary)]">
+                    Pilih preset untuk diterapkan ke canvas atau simpan scene aktif
                   </p>
                 </div>
                 <button
                   type="button"
                   disabled={isModeBMutationLocked}
                   onClick={() => setNewPresetModalOpen(true)}
-                  className="min-h-[44px] px-3 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  className="btn-press min-h-[44px] px-3.5 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" /> Baru
                 </button>
@@ -4246,7 +4198,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     key={cat}
                     type="button"
                     onClick={() => setPresetFilterCategory(cat)}
-                    className={`flex-1 min-h-[44px] rounded-lg transition-colors capitalize ${
+                    className={`btn-press flex-1 min-h-[44px] rounded-lg transition-colors capitalize ${
                       presetFilterCategory === cat
                         ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
                         : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
@@ -4258,17 +4210,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </div>
 
               {/* Presets List */}
-              <div className="space-y-2">
+              <div className="divide-y divide-[var(--app-border)]">
                 {filteredPresets.map((preset) => {
                   const isActive = preset.id === activePresetId;
 
                   return (
                     <div
                       key={preset.id}
-                      className={`p-3 rounded-xl border transition-all ${
-                        isActive
-                          ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] shadow-sm'
-                          : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] hover:border-[var(--app-border-strong)]'
+                      className={`py-3 transition-colors ${
+                        isActive ? 'pl-2.5 border-l-2 border-l-[var(--app-accent)]' : ''
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -4283,26 +4233,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                   if (e.key === 'Enter') handleSidebarSaveRename(preset.id);
                                   if (e.key === 'Escape') setEditingPresetIdInSidebar(null);
                                 }}
-                                className="flex-1 min-w-[120px] min-h-[44px] bg-[var(--app-surface)] border border-[var(--app-accent)] rounded-xl px-2.5 text-xs text-[var(--app-text)] focus:outline-none font-bold"
+                                className="flex-1 min-w-[120px] min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-accent)] rounded-xl px-2.5 text-xs text-[var(--app-text)] focus:outline-none font-bold"
                                 autoFocus
                               />
                               <button
                                 type="button"
                                 onClick={() => handleSidebarSaveRename(preset.id)}
-                                className="min-h-[44px] px-3 bg-[var(--app-accent)] text-[var(--app-accent-ink)] text-xs rounded-xl font-bold shrink-0"
+                                className="btn-press min-h-[44px] px-3 bg-[var(--app-accent)] text-[var(--app-accent-ink)] text-xs rounded-xl font-bold shrink-0"
                               >
                                 Simpan
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setEditingPresetIdInSidebar(null)}
-                                className="min-h-[44px] px-3 bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs rounded-xl shrink-0"
+                                className="btn-press min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs rounded-xl shrink-0"
                               >
                                 Batal
                               </button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1">
                               <span className="font-bold text-xs text-[var(--app-text)] truncate">{preset.name}</span>
                               <button
                                 type="button"
@@ -4315,19 +4265,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                              <span className="px-1.5 py-0.5 rounded bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] font-mono-num text-[9px] shrink-0">
-                                {preset.canvasOrientation}
-                              </span>
-                              {isActive && (
-                                <span className="px-1.5 py-0.5 rounded bg-[var(--app-ok-soft)] text-[var(--app-ok)] font-bold text-[8px] shrink-0">
-                                  Aktif
-                                </span>
-                              )}
                             </div>
                           )}
-                          <p className="text-[10px] text-[var(--app-text-secondary)] mt-0.5 line-clamp-1">{preset.description}</p>
-                          <div className="text-[9px] text-[var(--app-text-muted)] font-mono-num mt-0.5">
-                            {preset.elements.length} elemen visual tersimpan
+                          <p className="text-[11px] text-[var(--app-text-secondary)] line-clamp-1">{preset.description}</p>
+                          <div className="text-[10px] text-[var(--app-text-muted)] tabular-metrics mt-0.5 flex items-center gap-1.5">
+                            <span>{preset.canvasOrientation}</span>
+                            <span>·</span>
+                            <span>{preset.elements.length} elemen</span>
+                            {isActive && (
+                              <>
+                                <span>·</span>
+                                <span className="text-[var(--app-ok)] font-bold">Aktif</span>
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -4336,10 +4286,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <button
                               type="button"
                               onClick={() => onToggleFavoritePreset(preset.id)}
-                              className={`min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center ${
+                              className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center ${
                                 preset.isFavorite
                                   ? 'text-[var(--app-accent-text)] border-[var(--app-accent-border)] bg-[var(--app-accent-soft)]'
-                                  : 'text-[var(--app-text-muted)] border-[var(--app-border)] bg-[var(--app-surface)]'
+                                  : 'text-[var(--app-text-muted)] border-[var(--app-border)] bg-[var(--app-surface-muted)]'
                               }`}
                               title="Favorit"
                             >
@@ -4350,7 +4300,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             type="button"
                             disabled={isStrictModeBLocked || isModeBActionPending}
                             onClick={() => handleApplyPresetToScene(preset)}
-                            className="min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             Terapkan
                           </button>
@@ -4379,19 +4329,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 };
 
                 return (
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
+                  <div className="pt-4 border-t border-[var(--app-border)] space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-bold text-[var(--app-ok)]">
                         Pengaturan Mode B Preset Aktif
                       </span>
-                      <span className="text-[10px] font-mono-num text-[var(--app-text-secondary)] truncate max-w-[140px]">
+                      <span className="text-[11px] tabular-metrics text-[var(--app-text-secondary)] truncate max-w-[150px]">
                         {activePreset.name}
                       </span>
                     </div>
 
                     {/* Background Studio Media */}
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-[var(--app-text-secondary)] block">
+                      <label className="text-[11px] font-bold text-[var(--app-text-secondary)] block">
                         Background Studio (Opsional)
                       </label>
                       <select
@@ -4402,7 +4352,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             backgroundUri: e.target.value || undefined,
                           })
                         }
-                        className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
+                        className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
                       >
                         <option value="">Tanpa Background Studio</option>
                         {savedLocalVisualAssets.map((item) => {
@@ -4417,7 +4367,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </div>
 
                     {/* Layar Tunggu / Host Wait */}
-                    <div className="pt-2 border-t border-[var(--app-border)] space-y-2.5">
+                    <div className="pt-3 border-t border-[var(--app-border)] space-y-2.5">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <div className="text-[11px] font-bold text-[var(--app-text)]">Layar Tunggu (Screensaver)</div>
@@ -4433,10 +4383,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               screensaver: { ...screensaver, on: !screensaver.on },
                             })
                           }
-                          className={`min-h-[44px] px-3 rounded-xl text-[11px] font-bold transition-colors disabled:opacity-50 shrink-0 ${
+                          className={`btn-press min-h-[44px] px-3 rounded-xl text-[11px] font-bold transition-colors disabled:opacity-50 shrink-0 ${
                             screensaver.on
                               ? 'bg-emerald-600 text-white'
-                              : 'bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                              : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
                           }`}
                         >
                           {screensaver.on ? 'Siap Pakai' : 'Standby'}
@@ -4457,7 +4407,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             })
                           }
                           placeholder={MODE_B_SCREENSAVER_DEFAULT_TEXT}
-                          className="w-full min-h-[44px] px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
+                          className="w-full min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
                         />
                       </div>
 
@@ -4478,7 +4428,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 },
                               })
                             }
-                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
+                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
                           >
                             <option value="image">Gambar (PNG/JPG/GIF)</option>
                             <option value="video">Video MP4</option>
@@ -4496,7 +4446,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 screensaver: { ...screensaver, media: e.target.value },
                               })
                             }
-                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
+                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
                           >
                             <option value="">Teks saja</option>
                             {compatibleScreensaverAssets.map((item) => {
@@ -4547,7 +4497,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 },
                               })
                             }
-                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
+                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
                           >
                             <option value="fade">Fade (300ms)</option>
                             <option value="cut">Cut (Instan)</option>
@@ -4571,7 +4521,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 },
                               })
                             }
-                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
+                            className="w-full min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] disabled:opacity-50"
                           >
                             <option value="fade">Fade (300ms)</option>
                             <option value="cut">Cut (Instan)</option>
@@ -4585,7 +4535,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
               {/* Modal Save Scene as New Preset */}
               {newPresetModalOpen && (
-                <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] space-y-3">
+                <div className="anim-pop-in p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] space-y-3">
                   <div className="text-xs font-bold text-[var(--app-accent-text)]">Simpan Scene Sebagai Preset Baru</div>
                   <div>
                     <label className="text-[10px] text-[var(--app-text-secondary)]">Nama Preset</label>
@@ -4611,7 +4561,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setNewPresetModalOpen(false)}
-                      className="min-h-[44px] px-3.5 bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] rounded-xl text-xs font-semibold"
+                      className="btn-press min-h-[44px] px-3.5 bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] rounded-xl text-xs font-semibold"
                     >
                       Batal
                     </button>
@@ -4637,7 +4587,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           setNewPresetModalOpen(false);
                         }
                       }}
-                      className="min-h-[44px] px-4 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold"
+                      className="btn-press min-h-[44px] px-4 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold"
                     >
                       Simpan
                     </button>
@@ -4649,13 +4599,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* TAB 4: MEDIA LIBRARY & LOCAL IMPORT */}
           {activeSidePanel === 'media' && (
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
+            <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
               <div>
                 <h3 className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
                   <ImageIcon className="w-4 h-4 text-[var(--app-ok)]" /> Pustaka Media Lokal &amp; Import
                 </h3>
-                <p className="text-[10px] text-[var(--app-text-secondary)]">
-                  Pilih file gambar atau video langsung dari galeri Android atau masukkan URL
+                <p className="text-[11px] text-[var(--app-text-secondary)]">
+                  Pilih file gambar atau video dari galeri Android atau masukkan URL
                 </p>
               </div>
 
@@ -4680,21 +4630,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <button
                   type="button"
                   onClick={() => imageInputRef.current?.click()}
-                  className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-emerald-500/60 text-left flex flex-col gap-1 transition-all"
+                  className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-emerald-500/60 text-left flex flex-col gap-1 transition-all"
                 >
                   <Upload className="w-4 h-4 text-[var(--app-ok)]" />
                   <span className="font-bold text-xs text-[var(--app-text)]">Import Gambar HP</span>
-                  <span className="text-[9px] text-[var(--app-text-secondary)]">Galeri / PNG / JPG / WebP</span>
+                  <span className="text-[10px] text-[var(--app-text-secondary)]">Galeri / PNG / JPG / WebP</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => videoInputRef.current?.click()}
-                  className="min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
+                  className="btn-press min-h-[76px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-left flex flex-col gap-1 transition-all"
                 >
                   <Film className="w-4 h-4 text-[var(--app-accent-text)]" />
                   <span className="font-bold text-xs text-[var(--app-text)]">Import Video HP</span>
-                  <span className="text-[9px] text-[var(--app-text-secondary)]">MP4 / WebM lokal</span>
+                  <span className="text-[10px] text-[var(--app-text-secondary)]">MP4 / WebM lokal</span>
                 </button>
               </div>
 
@@ -4713,15 +4663,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
               )}
 
               {/* URL Manual Input Alternative */}
-              <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2">
-                <label className="text-[10px] font-bold text-[var(--app-text-secondary)]">Atau Gunakan Tautan URL Media</label>
+              <div className="space-y-1.5 pt-1">
+                <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Atau Gunakan Tautan URL Media</label>
                 <div className="flex gap-2">
                   <input
                     type="url"
                     value={manualMediaUrlInput}
                     onChange={(e) => setManualMediaUrlInput(e.target.value)}
                     placeholder="https://.../gambar.png"
-                    className="flex-1 min-h-[44px] px-3 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                    className="flex-1 min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                   />
                   <button
                     type="button"
@@ -4742,7 +4692,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         setManualMediaUrlInput('');
                       }
                     }}
-                    className="min-h-[44px] px-3.5 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold shrink-0"
+                    className="btn-press min-h-[44px] px-3.5 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold shrink-0"
                   >
                     Tambah
                   </button>
@@ -4751,9 +4701,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
               {/* Media Preview Box */}
               {previewMediaUrl && (
-                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-emerald-500/35 space-y-2">
+                <div className="pt-3 border-t border-[var(--app-border)] space-y-2">
                   <div className="text-[11px] font-bold text-[var(--app-ok)]">Pratinjau Media Baru:</div>
-                  <div className="w-full h-32 rounded-lg bg-black/70 flex items-center justify-center overflow-hidden border border-[var(--app-border)]">
+                  <div className="w-full h-32 rounded-xl bg-black/70 flex items-center justify-center overflow-hidden border border-[var(--app-border)]">
                     {previewMediaType === 'image' ? (
                       <img src={previewMediaUrl} alt="Preview" className="max-h-full max-w-full object-contain" />
                     ) : (
@@ -4774,7 +4724,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           addedAt: Date.now(),
                         });
                       }}
-                      className="flex-1 min-h-[44px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="btn-press flex-1 min-h-[44px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-4 h-4" /> Pasang Sebagai Elemen Baru
                     </button>
@@ -4783,7 +4733,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         type="button"
                         disabled={isStrictModeBLocked}
                         onClick={() => handleApplyMediaToSelectedElement(previewMediaUrl, previewAssetId)}
-                        className="min-h-[44px] px-3 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="btn-press min-h-[44px] px-3 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Terapkan ke elemen yang sedang dipilih di canvas"
                       >
                         Ganti Elemen Terpilih
@@ -4794,74 +4744,76 @@ export const StudioView: React.FC<StudioViewProps> = ({
               )}
 
               {/* Media Items Catalog */}
-              <div className="space-y-2">
-                <div className="text-[10px] font-bold text-[var(--app-text-secondary)] uppercase tracking-wider">
+              <div className="pt-3 border-t border-[var(--app-border)]">
+                <div className="text-[11px] font-bold text-[var(--app-text-secondary)] uppercase tracking-wider mb-1.5 tabular-metrics">
                   Daftar Media Tersimpan ({mediaLibrary.length})
                 </div>
-                {mediaLibrary.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-center justify-between gap-3"
-                  >
-                    <div className="w-10 h-10 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden shrink-0 flex items-center justify-center">
-                      {item.type === 'image' ? (
-                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <Film className="w-5 h-5 text-[var(--app-accent-text)]" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-bold text-[var(--app-text)] truncate">{item.name}</div>
-                      <div className="text-[9px] text-[var(--app-text-secondary)] capitalize">
-                        {item.assetId ? `${item.type} lokal tersimpan` : `${item.type} URL`}
+                <div className="divide-y divide-[var(--app-border)]">
+                  {mediaLibrary.map((item) => (
+                    <div
+                      key={item.id}
+                      className="py-2.5 flex items-center justify-between gap-3"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] overflow-hidden shrink-0 flex items-center justify-center">
+                        {item.type === 'image' ? (
+                          <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Film className="w-5 h-5 text-[var(--app-accent-text)]" />
+                        )}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPreviewMediaUrl(item.url);
-                          setPreviewMediaType(item.type);
-                          setPreviewAssetId(item.assetId);
-                        }}
-                        className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center text-xs"
-                        title="Lihat Pratinjau"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isStrictModeBLocked}
-                        onClick={() => handleAddMediaToCanvas(item)}
-                        className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] flex items-center justify-center text-xs disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="Tambahkan ke Kanvas"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                      {item.assetId && (
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-[var(--app-text)] truncate">{item.name}</div>
+                        <div className="text-[10px] text-[var(--app-text-secondary)] capitalize">
+                          {item.assetId ? `${item.type} lokal tersimpan` : `${item.type} URL`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewMediaUrl(item.url);
+                            setPreviewMediaType(item.type);
+                            setPreviewAssetId(item.assetId);
+                          }}
+                          className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center text-xs"
+                          title="Lihat Pratinjau"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                         <button
                           type="button"
                           disabled={isStrictModeBLocked}
-                          onClick={() => void handleDeleteLocalMediaAsset(item)}
-                          className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] flex items-center justify-center text-xs disabled:opacity-40 disabled:cursor-not-allowed"
-                          title="Hapus Asset Lokal"
+                          onClick={() => handleAddMediaToCanvas(item)}
+                          className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] flex items-center justify-center text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Tambahkan ke Kanvas"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Plus className="w-4 h-4" />
                         </button>
-                      )}
+                        {item.assetId && (
+                          <button
+                            type="button"
+                            disabled={isStrictModeBLocked}
+                            onClick={() => void handleDeleteLocalMediaAsset(item)}
+                            className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] flex items-center justify-center text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Hapus Asset Lokal"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {/* TAB 5: LAYERS LIST — element groups and super-groups */}
           {activeSidePanel === 'layers' && (
-            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-              <div className="flex items-center justify-between text-xs text-[var(--app-text-secondary)] pb-1">
-                <span>Lapisan &amp; Grup Kanvas</span>
-                <span className="font-mono-num text-[var(--app-accent-text)]">{elements.length} elemen</span>
+            <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
+              <div className="flex items-center justify-between text-xs text-[var(--app-text-secondary)]">
+                <span className="font-semibold">Lapisan &amp; Grup Kanvas</span>
+                <span className="tabular-metrics text-[var(--app-accent-text)] font-bold">{elements.length} elemen</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -4869,7 +4821,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   type="button"
                   disabled={isStrictModeBLocked || !onUpdateActivePreset || selectedLayerElementIds.length < 2}
                   onClick={handleCreatePresetGroup}
-                  className="min-h-[44px] px-2 rounded-xl border border-[var(--app-accent-border)] bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn-press min-h-[44px] px-2 rounded-xl border border-[var(--app-accent-border)] bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Layers className="w-3.5 h-3.5 inline mr-1" /> Buat Grup ({selectedLayerElementIds.length})
                 </button>
@@ -4877,140 +4829,143 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   type="button"
                   disabled={isStrictModeBLocked || !onUpdateActivePreset || selectedLayerGroupIds.length < 2}
                   onClick={handleCreatePresetSuperGroup}
-                  className="min-h-[44px] px-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-muted)] text-[var(--app-text)] text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn-press min-h-[44px] px-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-muted)] text-[var(--app-text)] text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Box className="w-3.5 h-3.5 inline mr-1" /> Supergroup ({selectedLayerGroupIds.length})
                 </button>
               </div>
 
               {!activePreset && (
-                <div className="p-2.5 rounded-xl bg-[var(--app-warn-soft)] border border-amber-500/35 text-[10px] text-[var(--app-warn)]">
+                <div className="p-2.5 rounded-xl bg-[var(--app-warn-soft)] border border-amber-500/35 text-[11px] text-[var(--app-warn)]">
                   Pilih preset aktif untuk mengelola struktur grup.
                 </div>
               )}
 
               {activeSuperGroups.length > 0 && (
-                <section className="space-y-2">
-                  <div className="text-[10px] uppercase tracking-wider text-[var(--app-accent-text)] font-bold">Supergroups</div>
-                  {activeSuperGroups.map((superGroup) => {
-                    const childGroups = activeGroups.filter((group) => superGroup.groupIds.includes(group.id));
-                    return (
-                      <div key={superGroup.id} className="p-2.5 rounded-xl border border-[var(--app-accent-border)] bg-[var(--app-accent-soft)] space-y-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="min-w-0 flex-1 text-xs font-bold text-[var(--app-text)] truncate">{superGroup.name}</span>
-                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetSuperGroupVisibility(superGroup.id, !superGroup.visible)} className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] flex items-center justify-center disabled:opacity-40" title={superGroup.visible ? 'Sembunyikan supergroup' : 'Tampilkan supergroup'}>
-                            {superGroup.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                          </button>
-                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetSuperGroupLocked(superGroup.id, !superGroup.locked)} className={`min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center disabled:opacity-40 ${superGroup.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)]'}`} title={superGroup.locked ? 'Buka kunci supergroup' : 'Kunci supergroup'}>
-                            {superGroup.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                          </button>
-                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleUngroupPresetSuperGroup(superGroup.id)} className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-error)] flex items-center justify-center disabled:opacity-40" title="Lepas supergroup">
-                            <X className="w-4 h-4" />
-                          </button>
+                <section className="pt-3 border-t border-[var(--app-border)] space-y-2">
+                  <div className="text-[11px] uppercase tracking-wider text-[var(--app-accent-text)] font-bold">Supergroups</div>
+                  <div className="divide-y divide-[var(--app-border)]">
+                    {activeSuperGroups.map((superGroup) => {
+                      const childGroups = activeGroups.filter((group) => superGroup.groupIds.includes(group.id));
+                      return (
+                        <div key={superGroup.id} className="py-2.5 space-y-1.5 pl-2.5 border-l-2 border-l-[var(--app-accent)]">
+                          <div className="flex items-center gap-1.5">
+                            <span className="min-w-0 flex-1 text-xs font-bold text-[var(--app-text)] truncate">{superGroup.name}</span>
+                            <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetSuperGroupVisibility(superGroup.id, !superGroup.visible)} className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] flex items-center justify-center disabled:opacity-40" title={superGroup.visible ? 'Sembunyikan supergroup' : 'Tampilkan supergroup'}>
+                              {superGroup.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                            </button>
+                            <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetSuperGroupLocked(superGroup.id, !superGroup.locked)} className={`btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-center justify-center disabled:opacity-40 ${superGroup.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)]'}`} title={superGroup.locked ? 'Buka kunci supergroup' : 'Kunci supergroup'}>
+                              {superGroup.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                            </button>
+                            <button type="button" disabled={isStrictModeBLocked} onClick={() => handleUngroupPresetSuperGroup(superGroup.id)} className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-error)] flex items-center justify-center disabled:opacity-40" title="Lepas supergroup">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">
+                            {childGroups.length > 0
+                              ? childGroups.map((group) => `${group.name} (${group.elementIds.length})`).join(' · ')
+                              : 'Tidak ada grup anak'}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {childGroups.map((group) => (
-                            <span key={group.id} className="px-2 py-1 rounded-md bg-[var(--app-surface)] border border-[var(--app-border)] text-[9px] text-[var(--app-text-secondary)]">
-                              {group.name} · {group.elementIds.length}
-                            </span>
-                          ))}
-                          {childGroups.length === 0 && <span className="text-[10px] text-[var(--app-text-muted)]">Tidak ada grup anak</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </section>
               )}
 
               {activeGroups.length > 0 && (
-                <section className="space-y-2">
-                  <div className="text-[10px] uppercase tracking-wider text-[var(--app-accent-text)] font-bold">Groups</div>
-                  {activeGroups.map((group) => {
-                    const childElements = group.elementIds.map((id) => elements.find((element) => element.id === id)).filter((element): element is StudioElement => Boolean(element));
-                    const isSelectedForSuperGroup = selectedLayerGroupIds.includes(group.id);
-                    return (
-                      <div key={group.id} className="rounded-xl border border-[var(--app-accent-border)] bg-[var(--app-surface-muted)] overflow-hidden">
-                        <div className="p-2.5 flex items-center gap-1.5">
-                          <input
-                            type="checkbox"
-                            checked={isSelectedForSuperGroup}
-                            onChange={() => toggleLayerGroupSelection(group.id)}
-                            aria-label={`Pilih ${group.name} untuk supergroup`}
-                            className="w-4 h-4 accent-[var(--app-accent)] shrink-0"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedGroupId(group.id); setSelectedId(null); }}
-                            className={`min-w-0 min-h-[44px] flex-1 text-left rounded-lg px-2 py-1 ${selectedGroupId === group.id ? 'bg-[var(--app-accent-soft)] ring-1 ring-[var(--app-accent-border)]' : 'hover:bg-[var(--app-surface)]'}`}
-                            title="Pilih grup di canvas untuk memindahkan atau mengubah ukurannya"
-                          >
-                            <span className={`block text-xs font-bold truncate ${selectedGroupId === group.id ? 'text-[var(--app-accent-text)]' : 'text-[var(--app-text)]'}`}>{group.name}</span>
-                            <span className="block text-[9px] text-[var(--app-text-secondary)]">{childElements.length} elemen · {group.elementIds.length} referensi</span>
-                          </button>
-                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetGroupVisibility(group.id, !group.visible)} className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] flex items-center justify-center disabled:opacity-40" title={group.visible ? 'Sembunyikan grup' : 'Tampilkan grup'}>
-                            {group.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                          </button>
-                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetGroupLocked(group.id, !group.locked)} className={`min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center disabled:opacity-40 ${group.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)]'}`} title={group.locked ? 'Buka kunci grup' : 'Kunci grup'}>
-                            {group.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                          </button>
-                          <button type="button" disabled={isStrictModeBLocked} onClick={() => handleUngroupPresetGroup(group.id)} className="min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-error)] flex items-center justify-center disabled:opacity-40" title="Ungroup, elemen tetap ada">
-                            <X className="w-4 h-4" />
-                          </button>
+                <section className="pt-3 border-t border-[var(--app-border)] space-y-2">
+                  <div className="text-[11px] uppercase tracking-wider text-[var(--app-accent-text)] font-bold">Groups</div>
+                  <div className="space-y-2.5">
+                    {activeGroups.map((group) => {
+                      const childElements = group.elementIds.map((id) => elements.find((element) => element.id === id)).filter((element): element is StudioElement => Boolean(element));
+                      const isSelectedForSuperGroup = selectedLayerGroupIds.includes(group.id);
+                      return (
+                        <div key={group.id} className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-muted)]/60 overflow-hidden">
+                          <div className="p-2 flex items-center gap-1.5">
+                            <input
+                              type="checkbox"
+                              checked={isSelectedForSuperGroup}
+                              onChange={() => toggleLayerGroupSelection(group.id)}
+                              aria-label={`Pilih ${group.name} untuk supergroup`}
+                              className="w-4 h-4 accent-[var(--app-accent)] shrink-0 ml-1"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedGroupId(group.id); setSelectedId(null); }}
+                              className={`min-w-0 min-h-[44px] flex-1 text-left rounded-lg px-2 py-1 transition-colors ${selectedGroupId === group.id ? 'bg-[var(--app-accent-soft)] ring-1 ring-[var(--app-accent-border)]' : 'hover:bg-[var(--app-surface)]'}`}
+                              title="Pilih grup di canvas untuk memindahkan atau mengubah ukurannya"
+                            >
+                              <span className={`block text-xs font-bold truncate ${selectedGroupId === group.id ? 'text-[var(--app-accent-text)]' : 'text-[var(--app-text)]'}`}>{group.name}</span>
+                              <span className="block text-[10px] text-[var(--app-text-secondary)] tabular-metrics">{childElements.length} elemen · {group.elementIds.length} referensi</span>
+                            </button>
+                            <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetGroupVisibility(group.id, !group.visible)} className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] flex items-center justify-center disabled:opacity-40" title={group.visible ? 'Sembunyikan grup' : 'Tampilkan grup'}>
+                              {group.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                            </button>
+                            <button type="button" disabled={isStrictModeBLocked} onClick={() => handleSetGroupLocked(group.id, !group.locked)} className={`btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center disabled:opacity-40 ${group.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)]'}`} title={group.locked ? 'Buka kunci grup' : 'Kunci grup'}>
+                              {group.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                            </button>
+                            <button type="button" disabled={isStrictModeBLocked} onClick={() => handleUngroupPresetGroup(group.id)} className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-error)] flex items-center justify-center disabled:opacity-40" title="Ungroup, elemen tetap ada">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="border-t border-[var(--app-border)] px-2.5 py-1 divide-y divide-[var(--app-border)]">
+                            {childElements.map((elem) => (
+                              <div key={elem.id} className="flex items-center gap-2 py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLayerElementIds.includes(elem.id)}
+                                  onChange={() => toggleLayerElementSelection(elem.id)}
+                                  aria-label={`Pilih elemen ${elem.name}`}
+                                  className="w-4 h-4 accent-[var(--app-accent)] shrink-0"
+                                />
+                                <button type="button" onClick={() => { setSelectedGroupId(null); setSelectedId(elem.id); setActiveSidePanel('properties'); }} className="min-w-0 min-h-[44px] flex-1 text-left flex flex-col justify-center">
+                                  <span className="block text-[11px] font-medium text-[var(--app-text)] truncate">{elem.name}</span>
+                                  <span className="block text-[10px] text-[var(--app-text-secondary)] tabular-metrics">Layer #{elem.layer} · {elem.type}</span>
+                                </button>
+                              </div>
+                            ))}
+                            {childElements.length === 0 && <div className="text-[11px] text-[var(--app-warn)] py-2">Referensi elemen tidak tersedia</div>}
+                          </div>
                         </div>
-                        <div className="border-t border-[var(--app-border)] px-2 py-1.5 space-y-1">
-                          {childElements.map((elem) => (
-                            <div key={elem.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-[var(--app-surface)]">
-                              <input
-                                type="checkbox"
-                                checked={selectedLayerElementIds.includes(elem.id)}
-                                onChange={() => toggleLayerElementSelection(elem.id)}
-                                aria-label={`Pilih elemen ${elem.name}`}
-                                className="w-4 h-4 accent-[var(--app-accent)] shrink-0"
-                              />
-                              <button type="button" onClick={() => { setSelectedGroupId(null); setSelectedId(elem.id); setActiveSidePanel('properties'); }} className="min-w-0 min-h-[36px] flex-1 text-left">
-                                <span className="block text-[10px] text-[var(--app-text)] truncate">{elem.name}</span>
-                                <span className="block text-[9px] text-[var(--app-text-secondary)] font-mono-num">Layer #{elem.layer} · {elem.type}</span>
-                              </button>
-                            </div>
-                          ))}
-                          {childElements.length === 0 && <div className="text-[10px] text-[var(--app-warn)] px-1 py-1">Referensi elemen tidak tersedia</div>}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </section>
               )}
 
-              <section className="space-y-2">
-                <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-secondary)] font-bold">Elemen Lepas</div>
+              <section className="pt-3 border-t border-[var(--app-border)] space-y-2">
+                <div className="text-[11px] uppercase tracking-wider text-[var(--app-text-secondary)] font-bold">Elemen Lepas</div>
                 {elements.filter((elem) => !activeGroups.some((group) => group.elementIds.includes(elem.id))).length === 0 ? (
-                  <div className="p-3 text-center text-[10px] text-[var(--app-text-muted)] bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)]">Semua elemen sudah berada dalam grup.</div>
+                  <div className="py-4 text-center text-[11px] text-[var(--app-text-muted)]">Semua elemen sudah berada dalam grup.</div>
                 ) : (
-                  elements.filter((elem) => !activeGroups.some((group) => group.elementIds.includes(elem.id))).map((elem) => {
-                    const isSelected = selectedId === elem.id;
-                    const isLayerSelected = selectedLayerElementIds.includes(elem.id);
-                    return (
-                      <div key={elem.id} className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${isSelected ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)]' : 'bg-[var(--app-surface-muted)] border-[var(--app-border)]'}`}>
-                        <input
-                          type="checkbox"
-                          checked={isLayerSelected}
-                          onChange={() => toggleLayerElementSelection(elem.id)}
-                          aria-label={`Pilih elemen ${elem.name} untuk grup`}
-                          className="w-4 h-4 accent-[var(--app-accent)] shrink-0"
-                        />
-                        <button type="button" onClick={() => { setSelectedGroupId(null); setSelectedId(elem.id); setActiveSidePanel('properties'); }} className="min-w-0 min-h-[44px] flex-1 text-left">
-                          <span className="block text-xs font-bold text-[var(--app-text)] truncate">{elem.name}</span>
-                          <span className="block text-[10px] text-[var(--app-text-secondary)] font-mono-num">Layer #{elem.layer} · {elem.type}</span>
-                        </button>
-                        <button type="button" onClick={() => updateElementField(elem.id, 'visible', !elem.visible)} className="min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center" title={elem.visible ? 'Sembunyikan' : 'Tampilkan'}>
-                          {elem.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                        </button>
-                        <button type="button" onClick={() => updateElementField(elem.id, 'locked', !elem.locked)} className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center ${elem.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'}`} title={elem.locked ? 'Buka kunci' : 'Kunci'}>
-                          {elem.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    );
-                  })
+                  <div className="divide-y divide-[var(--app-border)]">
+                    {elements.filter((elem) => !activeGroups.some((group) => group.elementIds.includes(elem.id))).map((elem) => {
+                      const isSelected = selectedId === elem.id;
+                      const isLayerSelected = selectedLayerElementIds.includes(elem.id);
+                      return (
+                        <div key={elem.id} className={`py-2 flex items-center justify-between gap-2 ${isSelected ? 'pl-2.5 border-l-2 border-l-[var(--app-accent)]' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={isLayerSelected}
+                            onChange={() => toggleLayerElementSelection(elem.id)}
+                            aria-label={`Pilih elemen ${elem.name} untuk grup`}
+                            className="w-4 h-4 accent-[var(--app-accent)] shrink-0"
+                          />
+                          <button type="button" onClick={() => { setSelectedGroupId(null); setSelectedId(elem.id); setActiveSidePanel('properties'); }} className="min-w-0 min-h-[44px] flex-1 text-left">
+                            <span className="block text-xs font-bold text-[var(--app-text)] truncate">{elem.name}</span>
+                            <span className="block text-[10px] text-[var(--app-text-secondary)] tabular-metrics">Layer #{elem.layer} · {elem.type}</span>
+                          </button>
+                          <button type="button" onClick={() => updateElementField(elem.id, 'visible', !elem.visible)} className="btn-press min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center" title={elem.visible ? 'Sembunyikan' : 'Tampilkan'}>
+                            {elem.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                          </button>
+                          <button type="button" onClick={() => updateElementField(elem.id, 'locked', !elem.locked)} className={`btn-press min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center ${elem.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'}`} title={elem.locked ? 'Buka kunci' : 'Kunci'}>
+                            {elem.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </section>
             </div>
@@ -5018,13 +4973,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* TAB 6: PREVIEW & 7-STAGE TEST SIMULATOR */}
           {activeSidePanel === 'simulator' && (
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
-              <div className="p-3 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-xs text-[var(--app-text)] flex items-start gap-2.5">
-                <Zap className="w-4 h-4 text-[var(--app-accent-text)] shrink-0 mt-0.5" />
-                <p>
-                  Uji respon elemen canvas langsung dengan simulasi interaktif. Semua event ditandai secara jujur sebagai{' '}
-                  <span className="font-mono-num text-[var(--app-accent-text)] font-bold">[SIMULASI]</span> agar terpisah dari event LIVE asli.
-                </p>
+            <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
+              <div className="pl-3 border-l-2 border-[var(--app-accent)] text-xs text-[var(--app-text-secondary)]">
+                Uji respon elemen canvas langsung dengan simulasi interaktif. Semua event ditandai secara jujur sebagai{' '}
+                <span className="tabular-metrics text-[var(--app-accent-text)] font-bold">[SIMULASI]</span> agar terpisah dari event LIVE asli.
               </div>
 
               {/* Event Simulator Grid */}
@@ -5032,59 +4984,59 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <button
                   type="button"
                   onClick={() => triggerSimulation('gift', 'RizkyKing', 'mengirim Paus Biru (2.150 Koin)!', 2150)}
-                  className="w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold flex items-center justify-between shadow-sm transition-all"
+                  className="btn-press w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold flex items-center justify-between transition-all"
                 >
                   <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4" />
+                    <Sparkles className="w-4 h-4 shrink-0" />
                     <span>[SIMULASI] Gift Paus (2.150 Koin)</span>
                   </div>
-                  <span className="text-[10px] bg-black/15 px-2 py-0.5 rounded font-semibold">Pemicu Alert</span>
+                  <span className="text-[11px] font-semibold opacity-80 shrink-0">Pemicu Alert</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => triggerSimulation('follow', 'Fajar_Streamer', 'mulai mengikuti siaran!')}
-                  className="w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-[var(--app-text)] text-xs font-bold flex items-center justify-between transition-all"
+                  className="btn-press w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-[var(--app-text)] text-xs font-bold flex items-center justify-between transition-all"
                 >
                   <div className="flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-[var(--app-accent-text)]" />
+                    <Bell className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
                     <span>[SIMULASI] Follower Baru (@Fajar_Streamer)</span>
                   </div>
-                  <span className="text-[10px] bg-[var(--app-accent-soft)] px-2 py-0.5 rounded text-[var(--app-accent-text)]">Follow</span>
+                  <span className="text-[11px] text-[var(--app-accent-text)] font-semibold shrink-0">Follow</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => triggerSimulation('like', 'Viewer_Tap', 'mengetuk layar', 10)}
-                  className="w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-emerald-500/35 hover:border-emerald-500 text-[var(--app-text)] text-xs font-bold flex items-center justify-between transition-all"
+                  className="btn-press w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-emerald-500/35 hover:border-emerald-500 text-[var(--app-text)] text-xs font-bold flex items-center justify-between transition-all"
                 >
                   <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-[var(--app-ok)]" />
+                    <TrendingUp className="w-4 h-4 text-[var(--app-ok)] shrink-0" />
                     <span>[SIMULASI] Tap Layar / Like (+10 Likes)</span>
                   </div>
-                  <span className="text-[10px] bg-[var(--app-ok-soft)] px-2 py-0.5 rounded text-[var(--app-ok)]">Like</span>
+                  <span className="text-[11px] text-[var(--app-ok)] font-semibold shrink-0">Like</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => triggerSimulation('chat', 'Budi_Gamer', 'Keren bang, setting overlaynya rapi banget! 🔥')}
-                  className="w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-bold flex items-center justify-between transition-all"
+                  className="btn-press w-full min-h-[44px] p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-bold flex items-center justify-between transition-all"
                 >
                   <div className="flex items-center gap-2">
-                    <MessageSquare className="w-4 h-4 text-[var(--app-accent-text)]" />
+                    <MessageSquare className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
                     <span>[SIMULASI] Komentar Live Chat</span>
                   </div>
-                  <span className="text-[10px] bg-[var(--app-surface)] border border-[var(--app-border)] px-2 py-0.5 rounded text-[var(--app-text-secondary)]">Chat</span>
+                  <span className="text-[11px] text-[var(--app-text-secondary)] font-semibold shrink-0">Chat</span>
                 </button>
               </div>
 
               {/* 7-STAGE SONG REQUEST TEST WORKFLOW (COMPACT DIAGNOSTIC TRIGGER) */}
-              <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2.5">
-                <div className="flex items-center justify-between">
+              <div className="pt-4 border-t border-[var(--app-border)] space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                     <Music className="w-4 h-4" /> Uji Alur Song Request
                   </div>
-                  <span className="px-2 py-0.5 rounded bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] font-mono-num text-[9px]">
+                  <span className="text-[10px] text-[var(--app-accent-text)] tabular-metrics font-bold">
                     7-Stage Pipeline
                   </span>
                 </div>
@@ -5093,39 +5045,34 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   Diagnostik lengkap pemisahan audio lokal, antrean penonton, TTS announcer, dan kepatuhan hukum YouTube ToS.
                 </p>
 
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsSongTestModalOpen(true)}
-                    className="w-full min-h-[44px] px-3 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-sm"
-                  >
-                    <Sliders className="w-3.5 h-3.5" />
-                    <span>Buka Diagnostik Pipeline</span>
-                    {activeTestPipeline && (
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono-num font-bold ${
-                          activeTestPipeline.overallSuccess
-                            ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-700'
-                            : 'bg-rose-950/90 text-rose-300 border border-rose-700'
-                        }`}
-                      >
-                        {activeTestPipeline.overallSuccess ? '7 TAHAP OK' : 'GAGAL'}
-                      </span>
-                    )}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSongTestModalOpen(true)}
+                  className="btn-press w-full min-h-[44px] px-3 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Buka Diagnostik Pipeline</span>
+                  {activeTestPipeline && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded tabular-metrics font-bold ${
+                        activeTestPipeline.overallSuccess
+                          ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-700'
+                          : 'bg-rose-950/90 text-rose-300 border border-rose-700'
+                      }`}
+                    >
+                      {activeTestPipeline.overallSuccess ? '7 TAHAP OK' : 'GAGAL'}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
           )}
 
           {/* TAB 8: MARKETPLACE OVERLAYS & SCENE PACKS */}
           {activeSidePanel === 'marketplace' && (
-            <div className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
-              <div className="p-3 bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] rounded-xl text-xs text-[var(--app-text)] flex items-start gap-2.5">
-                <ShoppingBag className="w-4 h-4 text-[var(--app-accent-text)] shrink-0 mt-0.5" />
-                <p>
-                  Katalog pack overlay, alert, dan widget siap pakai. Klik <strong>Pasang</strong> untuk menerapkan elemen desain langsung ke kanvas siaran Anda.
-                </p>
+            <div className="space-y-3.5 max-h-[480px] overflow-y-auto pr-1">
+              <div className="pl-3 border-l-2 border-[var(--app-accent)] text-xs text-[var(--app-text-secondary)]">
+                Katalog pack overlay, alert, dan widget siap pakai. Klik <strong className="text-[var(--app-text)]">Pasang</strong> untuk menerapkan ke kanvas.
               </div>
 
               {/* Category Filter & Search */}
@@ -5136,9 +5083,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       key={cat}
                       type="button"
                       onClick={() => setMarketplaceCategoryFilter(cat)}
-                      className={`shrink-0 min-h-[44px] px-3 rounded-lg font-semibold capitalize transition-colors ${
+                      className={`btn-press shrink-0 min-h-[44px] px-3 rounded-lg font-semibold capitalize transition-colors ${
                         marketplaceCategoryFilter === cat
-                          ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold shadow-sm'
+                          ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
                           : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                       }`}
                     >
@@ -5160,46 +5107,43 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </div>
 
               {/* Items List */}
-              <div className="space-y-2.5">
+              <div className="divide-y divide-[var(--app-border)]">
                 {filteredMarketplaceList.map((item) => (
                   <div
                     key={item.id}
-                    className="p-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] rounded-xl transition-all space-y-2"
+                    className="py-3 flex items-start justify-between gap-2.5"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-xs font-bold text-[var(--app-text)] flex flex-wrap items-center gap-1.5">
-                          <span>{item.name}</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] font-mono-num">
-                            {item.category}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-[var(--app-text-secondary)] mt-0.5 line-clamp-2">{item.description}</p>
-                        <div className="text-[9px] text-[var(--app-text-muted)] mt-1 flex items-center gap-2 font-mono-num">
-                          <span>Oleh {item.author}</span>
-                          <span>·</span>
-                          <span className="text-[var(--app-accent-text)] flex items-center gap-0.5">
-                            ★ {item.rating}
-                          </span>
-                          <span>·</span>
-                          <span>{item.elementsPayload.length} Elemen</span>
-                        </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-[var(--app-text)] flex flex-wrap items-center gap-1.5">
+                        <span>{item.name}</span>
+                        <span className="text-[10px] text-[var(--app-accent-text)] font-semibold uppercase">
+                          · {item.category}
+                        </span>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleInstallMarketplacePack(item)}
-                        className="min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold flex items-center gap-1 shrink-0 transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Pasang</span>
-                      </button>
+                      <p className="text-[11px] text-[var(--app-text-secondary)] mt-0.5 line-clamp-2">{item.description}</p>
+                      <div className="text-[10px] text-[var(--app-text-muted)] mt-1 flex items-center gap-1.5 tabular-metrics">
+                        <span>Oleh {item.author}</span>
+                        <span>·</span>
+                        <span className="text-[var(--app-accent-text)]">★ {item.rating}</span>
+                        <span>·</span>
+                        <span>{item.elementsPayload.length} Elemen</span>
+                      </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleInstallMarketplacePack(item)}
+                      className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold flex items-center gap-1 shrink-0 transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Pasang</span>
+                    </button>
                   </div>
                 ))}
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -5210,7 +5154,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           onClick={() => setIsSongTestModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg bg-[var(--app-surface-elevated)] border border-[var(--app-border)] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
+            className="anim-pop-in w-full max-w-lg bg-[var(--app-surface-elevated)] border border-[var(--app-border)] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -5223,13 +5167,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <h3 className="text-sm font-display font-bold text-[var(--app-text)] flex items-center gap-2">
                     Diagnostik Pipeline Song Request
                   </h3>
-                  <p className="text-[10px] text-[var(--app-text-secondary)]">Pengujian 7-Tahap Alur &amp; Kepatuhan Layanan</p>
+                  <p className="text-[11px] text-[var(--app-text-secondary)]">Pengujian 7-Tahap Alur &amp; Kepatuhan Layanan</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsSongTestModalOpen(false)}
-                className="min-h-[44px] min-w-[44px] -mr-2 rounded-xl bg-[var(--app-surface-muted)] hover:border-[var(--app-border-strong)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors"
+                className="btn-press min-h-[44px] min-w-[44px] -mr-2 rounded-xl bg-[var(--app-surface-muted)] hover:border-[var(--app-border-strong)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors"
                 title="Tutup Diagnostik"
               >
                 <X className="w-4 h-4" />
@@ -5248,7 +5192,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <button
                 type="button"
                 onClick={handleRun7StageSongTest}
-                className="min-h-[44px] px-4 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold shrink-0 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                className="btn-press min-h-[44px] px-4 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold shrink-0 flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Play className="w-3.5 h-3.5" />
                 <span>Jalankan Uji 7 Tahap</span>
@@ -5256,13 +5200,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
 
             {/* Scrollable Pipeline Stage Results */}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[140px]">
+            <div className="flex-1 overflow-y-auto pr-1 min-h-[140px]">
               {activeTestPipeline ? (
-                <>
-                  <div className="flex items-center justify-between text-[11px] pb-1.5 border-b border-[var(--app-border)]">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-[11px] pb-2 border-b border-[var(--app-border)]">
                     <span className="font-bold text-[var(--app-text)]">Hasil Uji: {activeTestPipeline.command}</span>
                     <span
-                      className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold tabular-metrics ${
                         activeTestPipeline.overallSuccess
                           ? 'bg-[var(--app-ok-soft)] text-[var(--app-ok)] border border-emerald-500/35'
                           : 'bg-[var(--app-error-soft)] text-[var(--app-error)] border border-rose-500/35'
@@ -5272,45 +5216,47 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </span>
                   </div>
 
-                  {Object.values(activeTestPipeline.stages).map((stage) => (
-                    <div
-                      key={stage.stageNumber}
-                      className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[10px] space-y-0.5"
-                    >
-                      <div className="flex items-center justify-between font-bold">
-                        <span className="text-[var(--app-text)]">
-                          Tahap {stage.stageNumber}: {stage.name}
-                        </span>
-                        <span
-                          className={
-                            stage.status === 'success'
-                              ? 'text-[var(--app-ok)] font-mono-num'
-                              : stage.status === 'warning'
-                              ? 'text-[var(--app-warn)] font-mono-num'
-                              : 'text-[var(--app-error)] font-mono-num'
-                          }
-                        >
-                          {stage.status.toUpperCase()}
-                        </span>
+                  <div className="divide-y divide-[var(--app-border)]">
+                    {Object.values(activeTestPipeline.stages).map((stage) => (
+                      <div
+                        key={stage.stageNumber}
+                        className="py-2.5 text-[11px] space-y-0.5"
+                      >
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-[var(--app-text)]">
+                            Tahap {stage.stageNumber}: {stage.name}
+                          </span>
+                          <span
+                            className={`tabular-metrics ${
+                              stage.status === 'success'
+                                ? 'text-[var(--app-ok)]'
+                                : stage.status === 'warning'
+                                ? 'text-[var(--app-warn)]'
+                                : 'text-[var(--app-error)]'
+                            }`}
+                          >
+                            {stage.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="text-[var(--app-text-secondary)]">{stage.summary}</div>
+                        <div className="text-[10px] text-[var(--app-text-muted)] tabular-metrics truncate">{stage.technicalDetail}</div>
                       </div>
-                      <div className="text-[var(--app-text-secondary)]">{stage.summary}</div>
-                      <div className="text-[9px] text-[var(--app-text-muted)] font-mono-num truncate">{stage.technicalDetail}</div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
 
                   {/* YouTube ToS Compliance Notice */}
-                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[10px] text-[var(--app-text-secondary)] leading-relaxed flex items-start gap-2">
+                  <div className="pt-3 border-t border-[var(--app-border)] text-[11px] text-[var(--app-text-secondary)] leading-relaxed flex items-start gap-2">
                     <ShieldCheck className="w-4 h-4 text-[var(--app-accent-text)] shrink-0 mt-0.5" />
                     <span>
                       <strong className="text-[var(--app-text)]">Kepatuhan Hukum YouTube:</strong> Pemisahan audio dari video tanpa layar melanggar Ketentuan Layanan YouTube. SYNTXRR STREAM menggunakan file audio lokal streamer dan sumber bebas royalti untuk routing audio streaming yang sah.
                     </span>
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="p-8 text-center text-[var(--app-text-secondary)] text-xs flex flex-col items-center justify-center space-y-2">
                   <Music className="w-8 h-8 text-[var(--app-text-muted)] mb-1" />
                   <p className="font-medium text-[var(--app-text)]">Belum ada hasil pengujian pipeline</p>
-                  <p className="text-[10px] text-[var(--app-text-secondary)] max-w-xs">
+                  <p className="text-[11px] text-[var(--app-text-secondary)] max-w-xs">
                     Ketik judul lagu di atas dan klik &ldquo;Jalankan Uji 7 Tahap&rdquo; untuk memeriksa setiap tahap alur Song Request.
                   </p>
                 </div>
@@ -5322,7 +5268,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsSongTestModalOpen(false)}
-                className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-text)] transition-colors"
+                className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-text)] transition-colors"
               >
                 Tutup
               </button>

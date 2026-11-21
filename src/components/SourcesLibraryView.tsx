@@ -35,7 +35,6 @@ import {
   Radio,
   Check,
   Eye,
-  Info,
 } from 'lucide-react';
 
 interface SourceDefinition {
@@ -492,60 +491,49 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 pb-6">
+    <div className="space-y-4 pb-6">
       {toastMessage && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-[var(--app-surface-elevated)] border border-[var(--app-accent-border)] text-[var(--app-text)] px-4 py-2 rounded-xl shadow-[var(--app-shadow)] flex items-center gap-2.5 text-xs sm:text-sm font-medium max-w-[92vw]"
+          className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-[var(--app-surface-elevated)] border border-[var(--app-accent-border)] text-[var(--app-text)] px-4 py-2 rounded-xl shadow-[var(--app-shadow)] flex items-center gap-2.5 text-xs font-medium max-w-[92vw] anim-pop-in"
         >
           <Check className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
           <span>{toastMessage}</span>
           <button
             type="button"
             onClick={onNavigateToStudio}
-            className="min-h-[36px] px-2.5 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs text-[var(--app-accent-ink)] font-bold shrink-0"
+            className="btn-press min-h-[36px] px-2.5 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs text-[var(--app-accent-ink)] font-bold shrink-0"
           >
             Buka Studio
           </button>
         </div>
       )}
 
-      {/* Header */}
-      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--app-text-muted)]">
-              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
-                Pustaka Komponen Resmi
-              </span>
-              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
-                /
-              </span>
-              <span className="font-mono-num">
-                {SOURCE_CATALOG.length} Sumber (11 Dasar + 15 Dinamis)
-              </span>
-            </div>
-            <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight mt-0.5">
-              Pustaka Sumber Siaran (Sources)
+      {/* Compact Header & Filter Strip */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-baseline gap-2.5 min-w-0">
+            <h1 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] tracking-tight truncate">
+              Pustaka Sumber Siaran
             </h1>
-            <p className="text-xs sm:text-sm text-[var(--app-text-muted)] mt-1 max-w-2xl leading-relaxed">
-              Pilih elemen visual dasar maupun widget dinamis untuk disusun langsung ke kanvas Studio.
-            </p>
+            <span className="text-xs text-[var(--app-text-muted)] tabular-metrics whitespace-nowrap">
+              {SOURCE_CATALOG.length} Sumber
+            </span>
           </div>
 
           <button
             type="button"
             onClick={onNavigateToStudio}
-            className="min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-2 transition-colors self-start md:self-auto shrink-0"
+            className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Layers className="w-4 h-4 text-[var(--app-accent-text)]" />
-            <span>Buka Studio Canvas</span>
+            <span>Studio Canvas</span>
           </button>
         </div>
 
-        <div className="pt-3 border-t border-[var(--app-border)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+        <div className="pt-2.5 border-t border-[var(--app-border)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] overflow-x-auto no-scrollbar">
             {(
               [
                 { id: 'all', label: `Semua (${SOURCE_CATALOG.length})` },
@@ -557,10 +545,10 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`min-h-[44px] px-3.5 rounded-xl text-xs font-bold border whitespace-nowrap transition-colors ${
+                className={`btn-press min-h-[44px] px-3 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                   activeTab === tab.id
-                    ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                 }`}
               >
                 {tab.label}
@@ -569,22 +557,22 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
           </div>
 
           <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 text-[var(--app-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-[var(--app-text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari nama sumber atau fungsi..."
+              placeholder="Cari nama sumber..."
               aria-label="Cari sumber siaran"
-              className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl pl-10 pr-3.5 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none"
+              className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl pl-9 pr-3 text-xs text-[var(--app-text)] placeholder-[var(--app-text-muted)] focus:outline-none"
             />
           </div>
         </div>
       </header>
 
       {/* Main Split Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-3">
           {filteredSources.map((src) => {
             const statusConfig = STATUS_DEFINITIONS[src.status];
             const isSelected = selectedSource?.type === src.type;
@@ -592,7 +580,7 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
             return (
               <div
                 key={src.type}
-                className={`rounded-2xl border transition-colors flex flex-col justify-between p-4 ${
+                className={`rounded-2xl border transition-colors flex flex-col justify-between overflow-hidden ${
                   isSelected
                     ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)]'
                     : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)]'
@@ -602,42 +590,39 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
                   type="button"
                   onClick={() => setSelectedSource(src)}
                   aria-pressed={isSelected}
-                  className="w-full text-left space-y-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] rounded-xl"
+                  className="w-full p-4 text-left space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)]"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] shrink-0">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] shrink-0">
                       {src.icon}
                     </div>
-                    <span
-                      className="px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0"
-                      style={{
-                        backgroundColor: `${statusConfig.color}18`,
-                        borderColor: `${statusConfig.color}42`,
-                        color: statusConfig.color,
-                      }}
-                    >
-                      {statusConfig.label}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="font-display text-sm font-bold text-[var(--app-text)] truncate">
+                        {src.name}
+                      </h2>
+                      <div className="flex items-center gap-1.5 text-[11px] text-[var(--app-text-muted)] mt-0.5">
+                        <span>{src.category === 'basic' ? 'Dasar' : 'Dinamis'}</span>
+                        <span aria-hidden="true">·</span>
+                        <span style={{ color: statusConfig.color }} className="font-semibold">
+                          {statusConfig.label}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
-                      {src.name}
-                    </h2>
-                    <p className="text-xs text-[var(--app-text-muted)] line-clamp-2 leading-relaxed mt-1">
-                      {src.description}
-                    </p>
-                  </div>
+                  <p className="text-xs text-[var(--app-text-muted)] line-clamp-2 leading-relaxed">
+                    {src.description}
+                  </p>
                 </button>
 
-                <div className="mt-4 pt-3 border-t border-[var(--app-border)] flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-                    {src.category === 'basic' ? 'Basic Source' : 'Dynamic Widget'}
+                <div className="px-4 py-2.5 bg-[var(--app-surface-muted)] border-t border-[var(--app-border)] flex items-center justify-between gap-2">
+                  <span className="text-[11px] tabular-metrics text-[var(--app-text-muted)]">
+                    {src.defaultDimensions.width}% × {src.defaultDimensions.height}%
                   </span>
                   <button
                     type="button"
                     onClick={() => handleInstallToStudio(src)}
-                    className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-1.5 transition-colors"
+                    className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-1.5"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Pasang</span>
@@ -658,80 +643,61 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
           )}
         </div>
 
-        {/* Sticky Inspector Preview */}
-        <aside className="lg:col-span-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 lg:sticky lg:top-20">
+        {/* Sticky Single-Surface Inspector */}
+        <aside className="lg:col-span-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] lg:sticky lg:top-20 divide-y divide-[var(--app-border)]">
           {selectedSource ? (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] shrink-0">
-                    {selectedSource.icon}
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-display text-base font-bold text-[var(--app-text)] truncate">
-                      {selectedSource.name}
-                    </h3>
-                    <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-                      ID: {selectedSource.type}
+            <>
+              <div className="p-4 flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] shrink-0">
+                  {selectedSource.icon}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-base font-bold text-[var(--app-text)] truncate">
+                    {selectedSource.name}
+                  </h3>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--app-text-muted)] tabular-metrics mt-0.5">
+                    <span>{selectedSource.type}</span>
+                    <span aria-hidden="true">·</span>
+                    <span
+                      className="font-semibold"
+                      style={{ color: STATUS_DEFINITIONS[selectedSource.status].color }}
+                    >
+                      {STATUS_DEFINITIONS[selectedSource.status].label}
                     </span>
                   </div>
                 </div>
-
-                <span
-                  className="px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0"
-                  style={{
-                    backgroundColor: `${STATUS_DEFINITIONS[selectedSource.status].color}18`,
-                    borderColor: `${STATUS_DEFINITIONS[selectedSource.status].color}42`,
-                    color: STATUS_DEFINITIONS[selectedSource.status].color,
-                  }}
-                >
-                  {STATUS_DEFINITIONS[selectedSource.status].label}
-                </span>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-1">
-                <div className="text-[10px] font-bold text-[var(--app-accent-text)] uppercase tracking-wider flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5" />
-                  <span>Deskripsi Fungsional</span>
-                </div>
+              <div className="p-4 space-y-1.5">
+                <div className="text-xs font-semibold text-[var(--app-text)]">Deskripsi</div>
                 <p className="text-xs text-[var(--app-text-secondary)] leading-relaxed">
                   {selectedSource.description}
                 </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs space-y-0.5">
-                <span className="font-semibold text-[var(--app-text)] block">
-                  {STATUS_DEFINITIONS[selectedSource.status].label}
-                </span>
-                <span className="text-[var(--app-text-muted)] text-[11px] leading-relaxed block">
+                <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed pt-1">
                   {STATUS_DEFINITIONS[selectedSource.status].description}
-                </span>
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
-                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
-                  <span className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)] block">
-                    Lebar Default
-                  </span>
-                  <span className="font-mono-num text-[var(--app-text)] font-bold mt-0.5 block">
+              <div className="grid grid-cols-2 divide-x divide-[var(--app-border)] bg-[var(--app-surface-muted)]">
+                <div className="p-3.5">
+                  <span className="text-[11px] text-[var(--app-text-muted)] block">Lebar Default</span>
+                  <span className="tabular-metrics text-sm text-[var(--app-text)] font-bold mt-0.5 block">
                     {selectedSource.defaultDimensions.width}%
                   </span>
                 </div>
-                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
-                  <span className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)] block">
-                    Tinggi Default
-                  </span>
-                  <span className="font-mono-num text-[var(--app-text)] font-bold mt-0.5 block">
+                <div className="p-3.5">
+                  <span className="text-[11px] text-[var(--app-text-muted)] block">Tinggi Default</span>
+                  <span className="tabular-metrics text-sm text-[var(--app-text)] font-bold mt-0.5 block">
                     {selectedSource.defaultDimensions.height}%
                   </span>
                 </div>
               </div>
 
-              <div className="pt-1 space-y-2">
+              <div className="p-4 space-y-2">
                 <button
                   type="button"
                   onClick={() => handleInstallToStudio(selectedSource)}
-                  className="w-full min-h-[44px] rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center justify-center gap-2 transition-colors"
+                  className="btn-press w-full min-h-[44px] rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center justify-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Pasang ke Studio Canvas</span>
@@ -740,15 +706,15 @@ export const SourcesLibraryView: React.FC<SourcesLibraryViewProps> = ({
                 <button
                   type="button"
                   onClick={onNavigateToStudio}
-                  className="w-full min-h-[44px] rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors"
+                  className="btn-press w-full min-h-[44px] rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center justify-center gap-1.5"
                 >
                   <Eye className="w-4 h-4 text-[var(--app-accent-text)]" />
-                  <span>Lihat Studio Canvas ({installedCount} ditambahkan)</span>
+                  <span>Lihat Studio Canvas ({installedCount} dipasang)</span>
                 </button>
               </div>
-            </div>
+            </>
           ) : (
-            <div className="text-center py-8 text-[var(--app-text-muted)] text-xs">
+            <div className="p-8 text-center text-[var(--app-text-muted)] text-xs">
               Pilih salah satu sumber untuk melihat detail parameter.
             </div>
           )}

@@ -2787,11 +2787,11 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-3.5 pt-4 pb-24 sm:px-6 sm:pt-6 lg:px-8 xl:pb-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-2.5 pt-2.5 pb-20 sm:px-6 sm:pt-5 lg:px-8 xl:pb-8">
         {modeBNoticeBanner && (
           <div
             role="status"
-            className="mb-4 p-3 rounded-xl border text-xs flex items-center justify-between gap-3"
+            className="mb-3 p-2.5 sm:p-3 rounded-xl border text-xs flex items-center justify-between gap-3 anim-pop-in"
             style={{
               backgroundColor: 'var(--app-warn-soft)',
               borderColor: 'color-mix(in srgb, var(--app-warn) 45%, transparent)',
@@ -2802,181 +2802,186 @@ export default function App() {
             <button
               type="button"
               onClick={() => setModeBNoticeBanner(null)}
-              className="min-h-[44px] min-w-[44px] px-3 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] shrink-0 transition-colors"
+              className="btn-press min-h-[44px] min-w-[44px] px-3 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] shrink-0"
             >
               Tutup
             </button>
           </div>
         )}
 
-        {activeNav === 'dashboard' && (
-          <DashboardView
-            settings={settings}
-            activePreset={activePreset}
-            integrations={integrations}
-            tiktokAccount={tiktokAccount}
-            tiktokStatus={tiktokStatus}
-            companionRunning={companionRunning}
-            modeASessionMode={modeASessionMode}
-            modeBStatus={modeBStatus}
-            isModeBActionPending={isModeBActionPending}
-            modeBNotificationWarning={modeBNotificationWarning}
-            onStartModeBStream={handleStartModeBStream}
-            onStopModeBStream={handleStopModeBStream}
-            onRequestModeBReshare={handleRequestModeBReshare}
-            onToggleModeBHostWait={handleToggleModeBHostWait}
-            onUpdateSettings={handleUpdateSettings}
-            onStartModeAWithConnection={handleStartModeAWithConnection}
-            onStartModeAWithoutConnection={handleStartModeAWithoutConnection}
-            onStopModeASession={handleStopModeASession}
-            onOpenTikTokConnection={handleOpenTikTokConnection}
-            onSelectMode={handleSelectMode}
-            onNavigate={handleNavigate}
-            onOpenModeModal={() => setIsModeModalOpen(true)}
-          />
-        )}
+        <div
+          key={`${activeNav}:${legacySubview || 'root'}`}
+          className="anim-view-enter"
+        >
+          {activeNav === 'dashboard' && (
+            <DashboardView
+              settings={settings}
+              activePreset={activePreset}
+              integrations={integrations}
+              tiktokAccount={tiktokAccount}
+              tiktokStatus={tiktokStatus}
+              companionRunning={companionRunning}
+              modeASessionMode={modeASessionMode}
+              modeBStatus={modeBStatus}
+              isModeBActionPending={isModeBActionPending}
+              modeBNotificationWarning={modeBNotificationWarning}
+              onStartModeBStream={handleStartModeBStream}
+              onStopModeBStream={handleStopModeBStream}
+              onRequestModeBReshare={handleRequestModeBReshare}
+              onToggleModeBHostWait={handleToggleModeBHostWait}
+              onUpdateSettings={handleUpdateSettings}
+              onStartModeAWithConnection={handleStartModeAWithConnection}
+              onStartModeAWithoutConnection={handleStartModeAWithoutConnection}
+              onStopModeASession={handleStopModeASession}
+              onOpenTikTokConnection={handleOpenTikTokConnection}
+              onSelectMode={handleSelectMode}
+              onNavigate={handleNavigate}
+              onOpenModeModal={() => setIsModeModalOpen(true)}
+            />
+          )}
 
-        {activeNav === 'studio' && legacySubview === 'sources' && (
-          <SourcesLibraryView
-            onAddElementToStudio={handleAddSingleElementToStudio}
-            onNavigateToStudio={() => handleNavigate('studio')}
-          />
-        )}
+          {activeNav === 'studio' && legacySubview === 'sources' && (
+            <SourcesLibraryView
+              onAddElementToStudio={handleAddSingleElementToStudio}
+              onNavigateToStudio={() => handleNavigate('studio')}
+            />
+          )}
 
-        {activeNav === 'studio' && legacySubview === 'presets' && (
-          <PresetManagerView
-            presets={presets}
-            activePresetId={activePresetId}
-            onSelectPreset={handleSelectPreset}
-            onCreatePreset={handleCreatePreset}
-            onCanImportPreset={guardModeBStructuralPresetAction}
-            onDuplicatePreset={handleDuplicatePreset}
-            onDeletePreset={handleDeletePreset}
-            onRenamePreset={handleRenamePreset}
-            onToggleFavorite={handleToggleFavoritePreset}
-            onNavigateToStudio={() => handleNavigate('studio')}
-          />
-        )}
+          {activeNav === 'studio' && legacySubview === 'presets' && (
+            <PresetManagerView
+              presets={presets}
+              activePresetId={activePresetId}
+              onSelectPreset={handleSelectPreset}
+              onCreatePreset={handleCreatePreset}
+              onCanImportPreset={guardModeBStructuralPresetAction}
+              onDuplicatePreset={handleDuplicatePreset}
+              onDeletePreset={handleDeletePreset}
+              onRenamePreset={handleRenamePreset}
+              onToggleFavorite={handleToggleFavoritePreset}
+              onNavigateToStudio={() => handleNavigate('studio')}
+            />
+          )}
 
-        {activeNav === 'studio' && legacySubview === 'marketplace' && (
-          <MarketplaceView
-            items={marketplaceItems}
-            onInstallElements={handleInstallMarketplaceElements}
-            onNavigateToStudio={() => handleNavigate('studio')}
-          />
-        )}
+          {activeNav === 'studio' && legacySubview === 'marketplace' && (
+            <MarketplaceView
+              items={marketplaceItems}
+              onInstallElements={handleInstallMarketplaceElements}
+              onNavigateToStudio={() => handleNavigate('studio')}
+            />
+          )}
 
-        {activeNav === 'studio' && legacySubview === null && (
-          <StudioView
-            elements={studioElements}
-            canvasOrientation={settings.canvasOrientation}
-            onChangeOrientation={handleOrientationChange}
-            onUpdateElements={handleUpdateStudioElements}
-            onSaveAsPreset={handleSaveCanvasAsPreset}
-            presets={presets}
-            activePresetId={activePresetId}
-            activePreset={activePreset}
-            onUpdateActivePreset={handleUpdateActivePresetMetadata}
-            onSelectPreset={handleSelectPreset}
-            onCreatePreset={handleCreatePreset}
-            onDuplicatePreset={handleDuplicatePreset}
-            onDeletePreset={handleDeletePreset}
-            onToggleFavoritePreset={handleToggleFavoritePreset}
-            onRenamePreset={handleRenamePreset}
-            marketplaceItems={marketplaceItems}
-            onInstallMarketplaceElements={handleInstallMarketplaceElements}
-            isModeBSelected={isModeBSelected}
-            modeBStatus={modeBStatus}
-            isModeBMutationLocked={isModeBMutationLocked}
-            isModeBActionPending={isModeBActionPending}
-            onApplyLiveSceneToModeB={handleApplyLiveSceneToModeB}
-            onUpdatePresetModeBSettings={handleUpdatePresetModeBSettings}
-          />
-        )}
+          {activeNav === 'studio' && legacySubview === null && (
+            <StudioView
+              elements={studioElements}
+              canvasOrientation={settings.canvasOrientation}
+              onChangeOrientation={handleOrientationChange}
+              onUpdateElements={handleUpdateStudioElements}
+              onSaveAsPreset={handleSaveCanvasAsPreset}
+              presets={presets}
+              activePresetId={activePresetId}
+              activePreset={activePreset}
+              onUpdateActivePreset={handleUpdateActivePresetMetadata}
+              onSelectPreset={handleSelectPreset}
+              onCreatePreset={handleCreatePreset}
+              onDuplicatePreset={handleDuplicatePreset}
+              onDeletePreset={handleDeletePreset}
+              onToggleFavoritePreset={handleToggleFavoritePreset}
+              onRenamePreset={handleRenamePreset}
+              marketplaceItems={marketplaceItems}
+              onInstallMarketplaceElements={handleInstallMarketplaceElements}
+              isModeBSelected={isModeBSelected}
+              modeBStatus={modeBStatus}
+              isModeBMutationLocked={isModeBMutationLocked}
+              isModeBActionPending={isModeBActionPending}
+              onApplyLiveSceneToModeB={handleApplyLiveSceneToModeB}
+              onUpdatePresetModeBSettings={handleUpdatePresetModeBSettings}
+            />
+          )}
 
-        {activeNav === 'live_center' && legacySubview === 'music' && (
-          <MusicCenterView
-            // Stage 1 Backwards Compatible Props
-            songRequests={songRequests}
-            nowPlayingSong={effectiveNowPlayingSong}
-            isPlaying={effectiveIsPlayingMusic}
-            onTogglePlay={handleTogglePlayMusic}
-            onNextTrack={handleNextTrack}
-            onPrevTrack={handlePrevTrack}
-            onAddSongRequest={handleAddSongRequest}
-            onDeleteRequest={handleDeleteSongRequest}
-            onLoadPresetPack={handleLoadPresetPack}
-            onSetNowPlaying={handleSetNowPlaying}
-            // Stage 2 Upgraded Props
-            unifiedQueue={combinedUnifiedQueue}
-            onUpdateUnifiedQueue={handleUpdateUnifiedQueue}
-            localTracksMeta={localTracksMeta}
-            localFilesMap={localFilesMap}
-            onAddLocalFiles={handleAddLocalFiles}
-            onRemoveLocalTrack={handleRemoveLocalTrack}
-            settings={settings}
-            onNavigateToSettings={() => handleNavigate('settings')}
-            onUpdateSpotifyToken={handleUpdateSpotifyToken}
-            songRequestState={srState}
-          />
-        )}
+          {activeNav === 'live_center' && legacySubview === 'music' && (
+            <MusicCenterView
+              // Stage 1 Backwards Compatible Props
+              songRequests={songRequests}
+              nowPlayingSong={effectiveNowPlayingSong}
+              isPlaying={effectiveIsPlayingMusic}
+              onTogglePlay={handleTogglePlayMusic}
+              onNextTrack={handleNextTrack}
+              onPrevTrack={handlePrevTrack}
+              onAddSongRequest={handleAddSongRequest}
+              onDeleteRequest={handleDeleteSongRequest}
+              onLoadPresetPack={handleLoadPresetPack}
+              onSetNowPlaying={handleSetNowPlaying}
+              // Stage 2 Upgraded Props
+              unifiedQueue={combinedUnifiedQueue}
+              onUpdateUnifiedQueue={handleUpdateUnifiedQueue}
+              localTracksMeta={localTracksMeta}
+              localFilesMap={localFilesMap}
+              onAddLocalFiles={handleAddLocalFiles}
+              onRemoveLocalTrack={handleRemoveLocalTrack}
+              settings={settings}
+              onNavigateToSettings={() => handleNavigate('settings')}
+              onUpdateSpotifyToken={handleUpdateSpotifyToken}
+              songRequestState={srState}
+            />
+          )}
 
-        {activeNav === 'live_center' && legacySubview === null && (
-          <LiveCenterView
-            ttsConfig={ttsConfig}
-            onUpdateTTSConfig={handleUpdateTTSConfig}
-            soundboardItems={soundboardItems}
-            onSoundboardItemsChange={async (items) => {
-              setSoundboardItems(items);
-              await StorageService.saveSoundboard(items);
-            }}
-          />
-        )}
+          {activeNav === 'live_center' && legacySubview === null && (
+            <LiveCenterView
+              ttsConfig={ttsConfig}
+              onUpdateTTSConfig={handleUpdateTTSConfig}
+              soundboardItems={soundboardItems}
+              onSoundboardItemsChange={async (items) => {
+                setSoundboardItems(items);
+                await StorageService.saveSoundboard(items);
+              }}
+            />
+          )}
 
-        {activeNav === 'integrations' && (
-          <IntegrationsView
-            integrations={integrations}
-            onUpdateIntegrations={handleUpdateIntegrations}
-            settings={settings}
-            onUpdateSettings={handleUpdateSettings}
-            tiktokStatus={tiktokStatus}
-            tiktokAccount={tiktokAccount}
-            companionRunning={companionRunning}
-            modeASessionMode={modeASessionMode}
-            openTikTokSettingsNonce={openTikTokSettingsNonce}
-            onSaveTikTokTargetUsername={handleSaveTikTokTargetUsername}
-            onLoginTikTok={handleLoginTikTok}
-            onUnlinkTikTok={handleUnlinkTikTok}
-            onUpdateTikTokConnectionPrefs={handleUpdateTikTokConnectionPrefs}
-            onConnectTikTok={handleConnectTikTok}
-            onDisconnectTikTok={handleDisconnectTikTok}
-          />
-        )}
+          {activeNav === 'integrations' && (
+            <IntegrationsView
+              integrations={integrations}
+              onUpdateIntegrations={handleUpdateIntegrations}
+              settings={settings}
+              onUpdateSettings={handleUpdateSettings}
+              tiktokStatus={tiktokStatus}
+              tiktokAccount={tiktokAccount}
+              companionRunning={companionRunning}
+              modeASessionMode={modeASessionMode}
+              openTikTokSettingsNonce={openTikTokSettingsNonce}
+              onSaveTikTokTargetUsername={handleSaveTikTokTargetUsername}
+              onLoginTikTok={handleLoginTikTok}
+              onUnlinkTikTok={handleUnlinkTikTok}
+              onUpdateTikTokConnectionPrefs={handleUpdateTikTokConnectionPrefs}
+              onConnectTikTok={handleConnectTikTok}
+              onDisconnectTikTok={handleDisconnectTikTok}
+            />
+          )}
 
-        {activeNav === 'settings' && (
-          <SettingsView
-            settings={settings}
-            onUpdateSettings={handleUpdateSettings}
-            onExportData={handleExportData}
-            onImportData={handleImportData}
-            onResetDefaults={handleResetDefaults}
-          />
-        )}
+          {activeNav === 'settings' && (
+            <SettingsView
+              settings={settings}
+              onUpdateSettings={handleUpdateSettings}
+              onExportData={handleExportData}
+              onImportData={handleImportData}
+              onResetDefaults={handleResetDefaults}
+            />
+          )}
 
-        {activeNav === 'remote_deck' && (
-          <StreamDeckView
-            settings={settings}
-            activePreset={activePreset}
-            presets={presets}
-            operatingMode={settings.operatingMode}
-            onSelectPreset={handleSelectPreset}
-            onSelectMode={handleSelectMode}
-            onTriggerEvent={handleSimulateEventFromDeck}
-            onPlaySound={handlePlaySoundFromDeck}
-            onToggleMusic={handleTogglePlayMusic}
-            onSkipMusic={handleNextTrack}
-          />
-        )}
+          {activeNav === 'remote_deck' && (
+            <StreamDeckView
+              settings={settings}
+              activePreset={activePreset}
+              presets={presets}
+              operatingMode={settings.operatingMode}
+              onSelectPreset={handleSelectPreset}
+              onSelectMode={handleSelectMode}
+              onTriggerEvent={handleSimulateEventFromDeck}
+              onPlaySound={handlePlaySoundFromDeck}
+              onToggleMusic={handleTogglePlayMusic}
+              onSkipMusic={handleNextTrack}
+            />
+          )}
+        </div>
       </main>
 
       {/* Mobile Bottom Navigation Bar */}

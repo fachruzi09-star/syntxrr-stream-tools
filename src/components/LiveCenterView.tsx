@@ -26,6 +26,7 @@ import {
   Star,
   Zap,
   Upload,
+  X,
 } from 'lucide-react';
 
 interface LiveCenterViewProps {
@@ -49,6 +50,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     'Terima kasih atas gift mawar merah dan dukungannya!'
   );
   const [lastTriggered, setLastTriggered] = useState<string | null>(null);
+  const [mobileFeedOpen, setMobileFeedOpen] = useState(false);
 
   useEffect(() => {
     setEvents(streamEventBus.getHistory());
@@ -77,7 +79,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
 
     streamEventBus.emit(newEvent);
     setLastTriggered(`${type.toUpperCase()} · ${detail}`);
-    window.setTimeout(() => setLastTriggered(null), 3000);
+    window.setTimeout(() => setLastTriggered(null), 2600);
   };
 
   const handleTestTTS = () => {
@@ -177,110 +179,198 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   };
 
   const customSounds = soundboardItems.filter((item) => item.id.startsWith('sb_custom_'));
+  const latestEvent = events[0] || null;
+
+  const renderEventFeedList = () => (
+    <div className="space-y-2">
+      {events.map((evt) => {
+        let accentTone = 'text-sky-300';
+        let Icon = MessageSquare;
+
+        if (evt.type === 'gift') {
+          accentTone = 'text-[var(--app-accent-text)]';
+          Icon = Gift;
+        } else if (evt.type === 'donation') {
+          accentTone = 'text-emerald-300';
+          Icon = DollarSign;
+        } else if (evt.type === 'like') {
+          accentTone = 'text-rose-300';
+          Icon = Heart;
+        } else if (evt.type === 'follow') {
+          accentTone = 'text-cyan-300';
+          Icon = UserPlus;
+        } else if (evt.type === 'share') {
+          accentTone = 'text-[var(--app-accent-text)]';
+          Icon = Share2;
+        }
+
+        return (
+          <div
+            key={evt.id}
+            className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-start gap-2.5"
+          >
+            <div
+              className={`w-7 h-7 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center shrink-0 ${accentTone}`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[var(--app-text)] truncate">
+                  {evt.username}
+                </span>
+                <span className="text-[10px] text-[var(--app-text-muted)] font-mono-num shrink-0">
+                  {new Date(evt.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  })}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-[var(--app-text-secondary)] mt-0.5 leading-snug break-words">
+                {evt.detail}
+              </p>
+
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] font-mono-num text-[var(--app-text-muted)]">
+                <span className={`font-bold uppercase ${accentTone}`}>{evt.type}</span>
+                {evt.isSimulation && (
+                  <>
+                    <span>·</span>
+                    <span>Simulasi</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {events.length === 0 && (
+        <div className="flex flex-col items-center justify-center text-center text-[var(--app-text-muted)] py-10 px-4">
+          <Bell className="w-7 h-7 mb-2 opacity-30" />
+          <p className="text-xs font-semibold text-[var(--app-text-secondary)]">
+            Belum ada event tercatat
+          </p>
+          <p className="text-[11px] mt-1 leading-relaxed">
+            Tekan salah satu pad di Simulator Event untuk melihat respons real-time.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 
   return (
-    <div className="space-y-5 pb-6">
-      {/* D+ Broadcast Console Header */}
-      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--app-text-muted)]">
-              <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
-                D+ Live Interaction Console
-              </span>
-              <span aria-hidden="true" className="text-[var(--app-border-strong)]">
-                /
-              </span>
-              <span>Event Bus &amp; Audio Cue Station</span>
-            </div>
-            <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight mt-0.5">
-              Live Center &amp; Simulator Interaksi
-            </h1>
-            <p className="text-xs sm:text-sm text-[var(--app-text-muted)] mt-1 max-w-2xl leading-relaxed">
-              Uji coba respons overlay, antrean Text-to-Speech (TTS), dan efek soundboard secara real-time tanpa mengganggu sesi siaran aktif.
-            </p>
-          </div>
-
-          <div
-            className="min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-2 self-start md:self-auto shrink-0"
-            style={{
-              backgroundColor: 'var(--app-ok-soft)',
-              borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
-              color: 'var(--app-ok)',
-            }}
-          >
-            <Zap className="w-3.5 h-3.5 shrink-0" />
-            <span>Event Engine Siap</span>
-            <span className="text-[var(--app-border-strong)]">·</span>
-            <span className="font-mono-num">{events.length}</span>
-          </div>
+    <div className="space-y-3 sm:space-y-4 pb-2">
+      {/* Compact Broadcast Console Top Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <Zap className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+          <h1 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] tracking-tight truncate">
+            Live Ops &amp; Simulator
+          </h1>
+          <span className="font-mono-num text-[11px] px-2 py-0.5 rounded-md bg-[var(--app-ok-soft)] text-[var(--app-ok)] font-bold shrink-0">
+            {events.length}
+          </span>
         </div>
 
-        {/* Segmented Console Mode Tabs */}
-        <div
-          role="tablist"
-          aria-label="Konsol Live Center"
-          className="flex flex-wrap gap-2 pt-3 border-t border-[var(--app-border)]"
+        <button
+          type="button"
+          onClick={() => setMobileFeedOpen(true)}
+          className="btn-press lg:hidden min-h-[44px] px-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 shrink-0"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'simulator'}
-            onClick={() => setActiveTab('simulator')}
-            className={`min-h-[44px] px-4 rounded-xl text-xs font-bold border transition-colors inline-flex items-center gap-2 ${
-              activeTab === 'simulator'
-                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 shrink-0" />
-            <span>Simulator Event ({events.length})</span>
-          </button>
+          <Bell className="w-3.5 h-3.5 text-[var(--app-accent-text)]" />
+          <span>Feed ({events.length})</span>
+        </button>
+      </div>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'tts'}
-            onClick={() => setActiveTab('tts')}
-            className={`min-h-[44px] px-4 rounded-xl text-xs font-bold border transition-colors inline-flex items-center gap-2 ${
-              activeTab === 'tts'
-                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
-            }`}
-          >
-            <Mic className="w-4 h-4 shrink-0" />
-            <span>Text-to-Speech</span>
-          </button>
+      {/* Segmented Console Mode Tabs */}
+      <div
+        role="tablist"
+        aria-label="Konsol Live Center"
+        className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'simulator'}
+          onClick={() => setActiveTab('simulator')}
+          className={`btn-press min-h-[44px] px-2 rounded-[9px] text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'simulator'
+              ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+              : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Simulator</span>
+        </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'soundboard'}
-            onClick={() => setActiveTab('soundboard')}
-            className={`min-h-[44px] px-4 rounded-xl text-xs font-bold border transition-colors inline-flex items-center gap-2 ${
-              activeTab === 'soundboard'
-                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
-            }`}
-          >
-            <Volume2 className="w-4 h-4 shrink-0" />
-            <span>Soundboard Cues ({customSounds.length + 6})</span>
-          </button>
-        </div>
-      </header>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'tts'}
+          onClick={() => setActiveTab('tts')}
+          className={`btn-press min-h-[44px] px-2 rounded-[9px] text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'tts'
+              ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+              : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+          }`}
+        >
+          <Mic className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Voice TTS</span>
+        </button>
 
-      {/* Main Split Architecture: Trigger / Audio Deck (8 cols) + Live Feed Timeline (4 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-8 space-y-4 min-w-0">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'soundboard'}
+          onClick={() => setActiveTab('soundboard')}
+          className={`btn-press min-h-[44px] px-2 rounded-[9px] text-xs font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'soundboard'
+              ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+              : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+          }`}
+        >
+          <Volume2 className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Soundboard ({customSounds.length + 6})</span>
+        </button>
+      </div>
+
+      {/* Mobile 1-Line Live Event Ticker (so users see emitted events immediately above the fold) */}
+      {latestEvent && (
+        <button
+          type="button"
+          onClick={() => setMobileFeedOpen(true)}
+          className="btn-press lg:hidden w-full px-3 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-between gap-2 text-left text-xs"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] font-mono-num uppercase font-bold text-[var(--app-accent-text)] shrink-0">
+              {latestEvent.type}
+            </span>
+            <span className="font-semibold text-[var(--app-text)] shrink-0 truncate max-w-[90px]">
+              {latestEvent.username}
+            </span>
+            <span className="text-[var(--app-text-muted)] truncate">{latestEvent.detail}</span>
+          </div>
+          <span className="text-[10px] font-mono-num text-[var(--app-text-muted)] shrink-0">
+            Lihat
+          </span>
+        </button>
+      )}
+
+      {/* Main Split: Control Deck (8 cols) + Sticky Live Event Feed (4 cols Desktop) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div key={activeTab} className="anim-tab-panel lg:col-span-8 space-y-3.5 min-w-0">
           {/* TAB 1: TACTILE SIMULATOR TRIGGER PAD */}
           {activeTab === 'simulator' && (
-            <div className="space-y-4">
-              {/* Actor & Payload Input Strip */}
-              <div className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 grid grid-cols-1 sm:grid-cols-12 gap-3">
-                <div className="sm:col-span-4 space-y-1.5">
+            <div className="space-y-3.5">
+              {/* Compact Actor & Payload Bar */}
+              <div className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3 grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <div className="sm:col-span-4 space-y-1">
                   <label
                     htmlFor="sim-actor-name"
-                    className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-muted)]"
+                    className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--app-text-muted)]"
                   >
                     User Penonton
                   </label>
@@ -292,10 +382,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                     className="w-full min-h-[44px] bg-[var(--app-surface-muted)] border border-[var(--app-border)] focus:border-[var(--app-accent)] rounded-xl px-3 text-xs text-[var(--app-text)] focus:outline-none"
                   />
                 </div>
-                <div className="sm:col-span-8 space-y-1.5">
+                <div className="sm:col-span-8 space-y-1">
                   <label
                     htmlFor="sim-actor-detail"
-                    className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-muted)]"
+                    className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--app-text-muted)]"
                   >
                     Pesan Chat / Catatan Donasi
                   </label>
@@ -309,19 +399,19 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 </div>
               </div>
 
-              {/* 8 Tactile Broadcast Trigger Keypads */}
-              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--app-border)]">
+              {/* 8 Tactile Trigger Pads */}
+              <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)]">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
                     <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
-                      Matriks Uji Pemicu Interaksi (1-Tap)
+                      Pemicu Interaksi 1-Tap
                     </h2>
                   </div>
                   {lastTriggered && (
                     <span
                       role="status"
-                      className="text-[11px] font-mono-num px-2.5 py-1 rounded-lg border truncate max-w-full"
+                      className="anim-pop-in text-[11px] font-mono-num px-2 py-0.5 rounded-lg border truncate max-w-full"
                       style={{
                         backgroundColor: 'var(--app-ok-soft)',
                         borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
@@ -333,31 +423,31 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <button
                     type="button"
                     onClick={() => triggerEvent('chat', customDetail || 'Halo semuanya, salam kenal!')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/25 flex items-center justify-center text-sky-300">
-                      <MessageSquare className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-sky-500/10 border border-sky-500/25 flex items-center justify-center text-sky-300">
+                      <MessageSquare className="w-3.5 h-3.5" />
                     </div>
                     <div>
                       <div className="text-xs font-bold text-[var(--app-text)]">Chat Komentar</div>
-                      <div className="text-[10px] text-[var(--app-text-muted)]">Teks &amp; Antrean TTS</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">Teks &amp; TTS</div>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => triggerEvent('gift', 'mengirim 5x Mawar Merah 🌹', 5, 'Mawar')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-rose-300">
-                      <Gift className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-rose-300">
+                      <Gift className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-[var(--app-text)]">Gift Mawar (5x)</div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Gift Mawar 5x</div>
                       <div className="text-[10px] text-[var(--app-text-muted)]">TikTok Gift</div>
                     </div>
                   </button>
@@ -365,27 +455,27 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   <button
                     type="button"
                     onClick={() => triggerEvent('gift', 'mengirim Paus Biru Sultan 🐋🔥', 1000, 'Koin')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)]">
-                      <Gift className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)]">
+                      <Gift className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-[var(--app-text)]">Gift Paus Sultan</div>
-                      <div className="text-[10px] text-[var(--app-text-muted)]">Mega Alert 1000 Koin</div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Paus Sultan</div>
+                      <div className="text-[10px] text-[var(--app-text-muted)]">1000 Koin Alert</div>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => triggerEvent('like', 'mengetuk layar 100x ❤️')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-pink-500/10 border border-pink-500/25 flex items-center justify-center text-pink-300">
-                      <Heart className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-pink-500/10 border border-pink-500/25 flex items-center justify-center text-pink-300">
+                      <Heart className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-[var(--app-text)]">Tap Layar (Like)</div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Tap Like</div>
                       <div className="text-[10px] text-[var(--app-text-muted)]">Combo 100 Likes</div>
                     </div>
                   </button>
@@ -393,10 +483,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   <button
                     type="button"
                     onClick={() => triggerEvent('follow', 'mulai mengikuti siaran kamu!')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-300">
-                      <UserPlus className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-300">
+                      <UserPlus className="w-3.5 h-3.5" />
                     </div>
                     <div>
                       <div className="text-xs font-bold text-[var(--app-text)]">Follow Baru</div>
@@ -407,10 +497,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   <button
                     type="button"
                     onClick={() => triggerEvent('share', 'membagikan siaran ke 10 teman!')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)]">
-                      <Share2 className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)]">
+                      <Share2 className="w-3.5 h-3.5" />
                     </div>
                     <div>
                       <div className="text-xs font-bold text-[var(--app-text)]">Share Live</div>
@@ -428,10 +518,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                         'Rp'
                       )
                     }
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-300">
-                      <DollarSign className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-300">
+                      <DollarSign className="w-3.5 h-3.5" />
                     </div>
                     <div>
                       <div className="text-xs font-bold text-[var(--app-text)]">Donasi Saweria</div>
@@ -442,13 +532,13 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   <button
                     type="button"
                     onClick={() => triggerEvent('viewer', 'Siaran mencapai 1.500 penonton aktif!')}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-center text-cyan-300">
-                      <Users className="w-4 h-4" />
+                    <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-center text-cyan-300">
+                      <Users className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-[var(--app-text)]">Peak Penonton</div>
+                      <div className="text-xs font-bold text-[var(--app-text)]">Peak Viewers</div>
                       <div className="text-[10px] text-[var(--app-text-muted)]">1.500 Viewers</div>
                     </div>
                   </button>
@@ -459,18 +549,18 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
 
           {/* TAB 2: TEXT-TO-SPEECH VOICE ENGINE */}
           {activeTab === 'tts' && (
-            <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-5">
+            <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-5 space-y-4">
               <div className="flex items-center justify-between gap-3 pb-3 border-b border-[var(--app-border)]">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-9 h-9 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0">
                     <Mic className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
-                      Text-to-Speech (TTS Bahasa Indonesia)
+                    <h2 className="font-display text-sm font-bold text-[var(--app-text)] truncate">
+                      Text-to-Speech (TTS Indonesia)
                     </h2>
-                    <p className="text-[11px] text-[var(--app-text-muted)]">
-                      Pembacaan otomatis donasi, gift, dan komentar masuk
+                    <p className="text-[11px] text-[var(--app-text-muted)] truncate">
+                      Pembacaan otomatis donasi, gift &amp; chat
                     </p>
                   </div>
                 </div>
@@ -485,7 +575,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                     onUpdateTTSConfig(updated);
                     ttsService.updateConfig(updated);
                   }}
-                  className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl shrink-0"
+                  className="btn-press min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl shrink-0"
                 >
                   <span
                     className={`relative w-11 h-6 rounded-full border transition-colors ${
@@ -505,13 +595,12 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 </button>
               </div>
 
-              {/* Filter Kategori Bacaan */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-3 gap-2">
                 {(
                   [
-                    { key: 'readDonations', label: 'Baca Donasi', val: ttsConfig.readDonations },
-                    { key: 'readGifts', label: 'Baca Gift TikTok', val: ttsConfig.readGifts },
-                    { key: 'readComments', label: 'Baca Chat Penonton', val: ttsConfig.readComments },
+                    { key: 'readDonations', label: 'Donasi', val: ttsConfig.readDonations },
+                    { key: 'readGifts', label: 'Gift', val: ttsConfig.readGifts },
+                    { key: 'readComments', label: 'Chat', val: ttsConfig.readComments },
                   ] as const
                 ).map((item) => (
                   <button
@@ -524,15 +613,15 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                       onUpdateTTSConfig(updated);
                       ttsService.updateConfig(updated);
                     }}
-                    className={`min-h-[46px] px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold transition-colors ${
+                    className={`btn-press min-h-[44px] px-3 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold ${
                       item.val
                         ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
                         : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
                     }`}
                   >
-                    <span>{item.label}</span>
+                    <span className="truncate">{item.label}</span>
                     <span
-                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                      className={`w-2 h-2 rounded-full shrink-0 ${
                         item.val ? 'bg-[var(--app-accent)]' : 'bg-[var(--app-border-strong)]'
                       }`}
                     />
@@ -540,13 +629,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 ))}
               </div>
 
-              {/* Sliders: Volume, Speed, Pitch */}
-              <div className="space-y-4 pt-1">
-                <div className="space-y-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
+                <div className="space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-[var(--app-text-secondary)]">
-                      Volume Suara TTS
-                    </span>
+                    <span className="font-semibold text-[var(--app-text-secondary)]">Volume</span>
                     <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
                       {Math.round(
                         Math.max(0, Math.min(1, Number.isFinite(ttsConfig.volume) ? ttsConfig.volume : 0.9)) *
@@ -575,11 +661,9 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-[var(--app-text-secondary)]">
-                      Kecepatan Bicara (Speed)
-                    </span>
+                    <span className="font-semibold text-[var(--app-text-secondary)]">Speed</span>
                     <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
                       {ttsConfig.rate}x
                     </span>
@@ -599,11 +683,9 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-[var(--app-text-secondary)]">
-                      Nada Suara (Pitch)
-                    </span>
+                    <span className="font-semibold text-[var(--app-text-secondary)]">Pitch</span>
                     <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
                       {ttsConfig.pitch}x
                     </span>
@@ -624,8 +706,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 </div>
               </div>
 
-              {/* Voice Test Strip */}
-              <div className="pt-3 border-t border-[var(--app-border)] flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <div className="pt-3 border-t border-[var(--app-border)] flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
                   type="text"
                   value={testVoiceText}
@@ -637,7 +718,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 <button
                   type="button"
                   onClick={handleTestTTS}
-                  className="min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center justify-center gap-2 shrink-0 transition-colors"
+                  className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center justify-center gap-2 shrink-0"
                 >
                   <Play className="w-4 h-4 shrink-0" />
                   <span>Uji Suara</span>
@@ -648,19 +729,16 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
 
           {/* TAB 3: SOUNDBOARD CUES */}
           {activeTab === 'soundboard' && (
-            <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--app-border)]">
-                <div>
-                  <h2 className="font-display text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
-                    <Volume2 className="w-4 h-4 text-[var(--app-accent-text)]" />
-                    <span>Soundboard Efek Suara &amp; Custom SFX</span>
+            <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3.5 sm:p-5 space-y-3.5">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-[var(--app-border)]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Volume2 className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                  <h2 className="font-display text-sm font-bold text-[var(--app-text)] truncate">
+                    Soundboard &amp; Custom SFX
                   </h2>
-                  <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
-                    Efek prosedural bawaan dan file audio pendek yang disimpan persisten di perangkat.
-                  </p>
                 </div>
-                <label className="min-h-[44px] shrink-0 px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-2 transition-colors self-start sm:self-auto">
-                  <Upload className="w-4 h-4 shrink-0" />
+                <label className="btn-press min-h-[44px] shrink-0 px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
                   <span>Impor Audio</span>
                   <input
                     type="file"
@@ -675,7 +753,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 {(
                   [
                     { id: 'horn', name: 'Air Horn Blast', type: 'horn', desc: 'Terompet hype' },
@@ -690,10 +768,10 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                     key={sfx.id}
                     type="button"
                     onClick={() => handlePlaySoundboard(sfx.type)}
-                    className="min-h-[96px] p-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] transition-colors flex flex-col items-start justify-between text-left group active:scale-[0.98]"
+                    className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left group"
                   >
-                    <div className="w-9 h-9 rounded-full bg-[var(--app-surface-elevated)] border border-[var(--app-border)] group-hover:bg-[var(--app-accent)] group-hover:border-[var(--app-accent)] group-hover:text-[var(--app-accent-ink)] text-[var(--app-text)] flex items-center justify-center transition-colors">
-                      <Play className="w-4 h-4 ml-0.5" />
+                    <div className="w-8 h-8 rounded-full bg-[var(--app-surface-elevated)] border border-[var(--app-border)] group-hover:bg-[var(--app-accent)] group-hover:border-[var(--app-accent)] group-hover:text-[var(--app-accent-ink)] text-[var(--app-text)] flex items-center justify-center transition-colors">
+                      <Play className="w-3.5 h-3.5 ml-0.5" />
                     </div>
                     <div>
                       <div className="text-xs font-bold text-[var(--app-text)]">{sfx.name}</div>
@@ -704,36 +782,36 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
               </div>
 
               {customSounds.length > 0 && (
-                <div className="pt-4 border-t border-[var(--app-border)] space-y-2.5">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                <div className="pt-3 border-t border-[var(--app-border)] space-y-2">
+                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
                     Audio Kustom Tersimpan ({customSounds.length})
                   </h3>
-                  <div className="space-y-2">
+                  <div className="divide-y divide-[var(--app-border)] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
                     {customSounds.map((item) => (
                       <div
                         key={item.id}
-                        className="flex flex-wrap sm:flex-nowrap items-center gap-2 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] p-2.5"
+                        className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2"
                       >
                         <button
                           type="button"
                           onClick={() => handlePlaySoundboard(item)}
-                          className="flex-1 min-w-0 min-h-[44px] px-2 flex items-center gap-2.5 text-left text-[var(--app-text)] hover:text-[var(--app-accent-text)] transition-colors rounded-lg"
+                          className="btn-press flex-1 min-w-0 min-h-[44px] px-2 flex items-center gap-2 text-left text-[var(--app-text)] hover:text-[var(--app-accent-text)] rounded-lg"
                           aria-label={`Putar ${item.name}`}
                         >
-                          <Play className="w-4 h-4 shrink-0 text-[var(--app-accent-text)]" />
+                          <Play className="w-3.5 h-3.5 shrink-0 text-[var(--app-accent-text)]" />
                           <span className="text-xs font-semibold truncate">{item.name}</span>
                           <span className="text-[10px] font-mono-num text-[var(--app-text-muted)] shrink-0">
                             {item.durationSec}s
                           </span>
                         </button>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
                             onClick={() =>
                               void updateImportedSound(item, { isFavorite: !item.isFavorite })
                             }
-                            className={`min-w-[44px] min-h-[44px] rounded-xl border flex items-center justify-center transition-colors ${
+                            className={`btn-press min-w-[44px] min-h-[44px] rounded-xl border flex items-center justify-center ${
                               item.isFavorite
                                 ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
                                 : 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
@@ -757,7 +835,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                                   : { isQuickSlot: false, quickSlotKey: undefined }
                               );
                             }}
-                            className="min-h-[44px] bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl px-2.5 text-xs font-mono-num text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            className="min-h-[44px] bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl px-2 text-xs font-mono-num text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
                             aria-label={`Quick Slot untuk ${item.name}`}
                           >
                             <option value="">Slot</option>
@@ -771,7 +849,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                           <button
                             type="button"
                             onClick={() => void handleDeleteSound(item)}
-                            className="min-w-[44px] min-h-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-rose-400 hover:border-rose-500/40 flex items-center justify-center transition-colors"
+                            className="btn-press min-w-[44px] min-h-[44px] rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-rose-400 hover:border-rose-500/40 flex items-center justify-center"
                             aria-label={`Hapus ${item.name}`}
                           >
                             <Trash2 className="w-4 h-4" />
@@ -786,9 +864,9 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
           )}
         </div>
 
-        {/* Right Sticky Column: Live Event Timeline Feed */}
-        <aside className="lg:col-span-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 sm:p-5 flex flex-col h-[520px] lg:sticky lg:top-20">
-          <div className="flex items-center justify-between pb-3 border-b border-[var(--app-border)] gap-2">
+        {/* Desktop Sticky Column: Live Event Timeline Feed */}
+        <aside className="hidden lg:flex lg:col-span-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-4 flex-col h-[500px] sticky top-16">
+          <div className="flex items-center justify-between pb-2.5 border-b border-[var(--app-border)] gap-2">
             <div className="flex items-center gap-2">
               <Bell className="w-4 h-4 text-[var(--app-accent-text)]" />
               <h2 className="font-display text-sm font-bold text-[var(--app-text)]">
@@ -798,7 +876,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
             <button
               type="button"
               onClick={handleClearHistory}
-              className="min-h-[44px] px-3 rounded-xl text-xs font-semibold text-[var(--app-text-muted)] hover:text-rose-400 hover:bg-[var(--app-surface-muted)] inline-flex items-center gap-1.5 transition-colors"
+              className="btn-press min-h-[36px] px-2.5 rounded-lg text-xs font-semibold text-[var(--app-text-muted)] hover:text-rose-400 hover:bg-[var(--app-surface-muted)] inline-flex items-center gap-1"
               title="Bersihkan riwayat event"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -806,85 +884,52 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-2.5 py-3 pr-1">
-            {events.map((evt) => {
-              let accentTone = 'text-sky-300';
-              let Icon = MessageSquare;
-
-              if (evt.type === 'gift') {
-                accentTone = 'text-[var(--app-accent-text)]';
-                Icon = Gift;
-              } else if (evt.type === 'donation') {
-                accentTone = 'text-emerald-300';
-                Icon = DollarSign;
-              } else if (evt.type === 'like') {
-                accentTone = 'text-rose-300';
-                Icon = Heart;
-              } else if (evt.type === 'follow') {
-                accentTone = 'text-cyan-300';
-                Icon = UserPlus;
-              } else if (evt.type === 'share') {
-                accentTone = 'text-[var(--app-accent-text)]';
-                Icon = Share2;
-              }
-
-              return (
-                <div
-                  key={evt.id}
-                  className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-start gap-2.5"
-                >
-                  <div
-                    className={`w-8 h-8 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center shrink-0 ${accentTone}`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-[var(--app-text)] truncate">
-                        {evt.username}
-                      </span>
-                      <span className="text-[10px] text-[var(--app-text-muted)] font-mono-num shrink-0">
-                        {new Date(evt.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })}
-                      </span>
-                    </div>
-
-                    <p className="text-[11px] text-[var(--app-text-secondary)] mt-0.5 leading-snug break-words">
-                      {evt.detail}
-                    </p>
-
-                    <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-mono-num text-[var(--app-text-muted)]">
-                      <span className={`font-bold uppercase ${accentTone}`}>{evt.type}</span>
-                      {evt.isSimulation && (
-                        <>
-                          <span>·</span>
-                          <span>Simulasi</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {events.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-center text-[var(--app-text-muted)] py-12 px-4">
-                <Bell className="w-8 h-8 mb-2 opacity-30" />
-                <p className="text-xs font-semibold text-[var(--app-text-secondary)]">
-                  Belum ada event tercatat
-                </p>
-                <p className="text-[11px] mt-1 leading-relaxed">
-                  Tekan salah satu pad di Simulator Event untuk melihat respons real-time di lini masa ini.
-                </p>
-              </div>
-            )}
-          </div>
+          <div className="flex-1 overflow-y-auto pt-3 pr-1">{renderEventFeedList()}</div>
         </aside>
       </div>
+
+      {/* Mobile Live Event Feed Sheet */}
+      {mobileFeedOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="lg:hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-end justify-center p-2.5"
+          onClick={() => setMobileFeedOpen(false)}
+        >
+          <div
+            className="anim-sheet-up w-full max-w-md rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border-strong)] p-4 space-y-3 max-h-[80vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)] shrink-0">
+              <div className="flex items-center gap-2 text-sm font-bold text-[var(--app-text)] font-display">
+                <Bell className="w-4 h-4 text-[var(--app-accent-text)]" />
+                <span>Live Event Feed ({events.length})</span>
+              </div>
+              <div className="flex items-center gap-1">
+                {events.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearHistory}
+                    className="btn-press min-h-[44px] px-2.5 rounded-xl text-xs font-semibold text-rose-400"
+                  >
+                    Bersihkan
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMobileFeedOpen(false)}
+                  className="btn-press min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)]"
+                  aria-label="Tutup feed"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-0.5">{renderEventFeedList()}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

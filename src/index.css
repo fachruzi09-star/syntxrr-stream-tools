@@ -341,5 +341,101 @@ body {
 }
 
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 16px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* ==========================================================================
+   D+ FLAGSHIP MOTION SYSTEM & TACTILE INSTRUMENT UTILITIES
+   Compositor-only (transform + opacity), <= 200ms, reduced-motion safe
+   ========================================================================== */
+@keyframes dplusEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes dplusPop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dplusSheetUp {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.anim-view-enter {
+  animation: dplusEnter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.anim-tab-panel {
+  animation: dplusEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.anim-sheet-up {
+  animation: dplusSheetUp 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.anim-pop-in {
+  animation: dplusPop 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.btn-press {
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.btn-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.tabular-metrics {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-view-enter,
+  .anim-tab-panel,
+  .anim-sheet-up,
+  .anim-pop-in,
+  .animate-bar-1,
+  .animate-bar-2,
+  .animate-bar-3,
+  .animate-bar-4,
+  .animate-bar-5 {
+    animation: none !important;
+  }
+
+  .btn-press,
+  .btn-press:active:not(:disabled) {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+

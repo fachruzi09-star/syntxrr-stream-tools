@@ -36,7 +36,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeNav, onNavigate }) =
       aria-label="Navigasi bawah mobile"
       className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--app-surface)]/95 backdrop-blur-lg border-t border-[var(--app-border)] pb-safe shadow-[0_-10px_28px_-14px_rgba(0,0,0,0.62)]"
     >
-      <div className="grid grid-cols-6 items-center h-14 px-1 max-w-xl mx-auto">
+      <div className="grid grid-cols-6 items-center h-[52px] px-1 max-w-xl mx-auto">
         {primaryTabs.map((item) => {
           const Icon = item.icon;
           const isActive = activeNav === item.id;
@@ -47,7 +47,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeNav, onNavigate }) =
               type="button"
               onClick={() => onNavigate(item.id)}
               aria-current={isActive ? 'page' : undefined}
-              className={`relative flex flex-col items-center justify-center w-full min-h-[44px] min-w-[44px] py-1 px-0.5 rounded-[9px] transition-colors ${
+              className={`btn-press relative flex flex-col items-center justify-center w-full min-h-[44px] min-w-[44px] py-0.5 px-0.5 rounded-[9px] ${
                 isActive
                   ? 'text-[var(--app-accent-text)]'
                   : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
@@ -56,22 +56,22 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeNav, onNavigate }) =
               {isActive && (
                 <span
                   aria-hidden="true"
-                  className="absolute top-0 w-6 h-[2.5px] rounded-full bg-[var(--app-accent)]"
+                  className="absolute top-0 w-7 h-[2px] rounded-full bg-[var(--app-accent)]"
                 />
               )}
               <div
-                className={`flex items-center justify-center w-8 h-6 rounded-md transition-colors ${
+                className={`flex items-center justify-center w-8 h-5 rounded-md transition-colors ${
                   isActive ? 'bg-[var(--app-accent-soft)]' : 'bg-transparent'
                 }`}
               >
                 <Icon
-                  className={`w-[17px] h-[17px] transition-transform duration-150 ${
+                  className={`w-4 h-4 transition-transform duration-150 ${
                     isActive ? 'scale-105 text-[var(--app-accent-text)] stroke-[2.2]' : 'stroke-[1.8]'
                   }`}
                 />
               </div>
               <span
-                className={`text-[10px] leading-tight tracking-tight mt-0.5 truncate max-w-full text-center ${
+                className={`text-[10px] leading-tight tracking-tight mt-0.5 truncate max-w-full text-center whitespace-nowrap ${
                   isActive ? 'font-bold text-[var(--app-accent-text)]' : 'font-medium'
                 }`}
               >

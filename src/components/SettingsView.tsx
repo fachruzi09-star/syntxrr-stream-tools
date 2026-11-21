@@ -64,7 +64,6 @@ import { useTranslation } from '../i18n/I18nContext';
 
 /* ============================================================================
  * STATUS BADGES
- * Setiap fitur wajib menyatakan status sebenarnya. Tidak ada klaim palsu.
  * ========================================================================== */
 
 type UiStatus =
@@ -149,46 +148,44 @@ const StatusBadge: React.FC<{ status: UiStatus }> = ({ status }) => {
 };
 
 /* ============================================================================
- * D+ CONTROL DESIGN SYSTEM PRIMITIVES
+ * D+ DENSE CONSOLE PRIMITIVES (Single-surface hairline design, zero box bloat)
  * ========================================================================== */
 
-const Section: React.FC<{
+const ConsolePanel: React.FC<{
   icon: React.ElementType;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ icon: Icon, title, subtitle, action, children }) => {
-  return (
-    <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden">
-      <div className="px-4 sm:px-5 py-3.5 bg-[var(--app-surface-muted)] border-b border-[var(--app-border)] flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-start gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-[var(--app-surface-elevated)] border border-[var(--app-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0 mt-0.5">
-            <Icon className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] tracking-tight leading-snug">
-              {title}
-            </h2>
-            <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed mt-0.5">
+}> = ({ icon: Icon, title, subtitle, action, children }) => (
+  <section className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden">
+    <div className="px-3.5 sm:px-5 py-2.5 bg-[var(--app-surface-muted)] border-b border-[var(--app-border)] flex items-center justify-between gap-2.5">
+      <div className="flex items-center gap-2 min-w-0">
+        <Icon className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+        <div className="min-w-0">
+          <h2 className="font-display text-sm font-bold text-[var(--app-text)] tracking-tight truncate">
+            {title}
+          </h2>
+          {subtitle && (
+            <p className="hidden sm:block text-[11px] text-[var(--app-text-muted)] truncate">
               {subtitle}
             </p>
-          </div>
+          )}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
       </div>
-      <div className="p-4 sm:p-5 space-y-4">{children}</div>
-    </section>
-  );
-};
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+    <div className="p-3.5 sm:p-5 divide-y divide-[var(--app-border)]">{children}</div>
+  </section>
+);
 
-const FieldRow: React.FC<{
+const DenseRow: React.FC<{
   title: string;
   description?: string;
   status?: UiStatus;
   children?: React.ReactNode;
 }> = ({ title, description, status, children }) => (
-  <div className="p-3.5 sm:p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
+  <div className="py-3.5 first:pt-0 last:pb-0 space-y-2.5">
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <div className="text-xs font-semibold text-[var(--app-text)] leading-snug">{title}</div>
@@ -215,7 +212,7 @@ const Toggle: React.FC<{ checked: boolean; onChange: (value: boolean) => void; l
     aria-checked={checked}
     aria-label={label}
     onClick={() => onChange(!checked)}
-    className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)]"
+    className="btn-press min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-xl shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)]"
   >
     <span
       className={`relative w-11 h-6 rounded-full border transition-colors ${
@@ -253,7 +250,7 @@ function Segmented<T extends string | number>({
   columns?: string;
 }) {
   return (
-    <div className={`grid gap-2 ${columns}`}>
+    <div className={`grid gap-1.5 ${columns}`}>
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -262,10 +259,10 @@ function Segmented<T extends string | number>({
             type="button"
             onClick={() => onChange(option.value)}
             aria-pressed={active}
-            className={`min-h-[46px] py-2 px-2.5 rounded-xl text-xs font-semibold transition-colors flex flex-col items-center justify-center gap-0.5 border min-w-0 ${
+            className={`btn-press min-h-[44px] py-1.5 px-2 rounded-xl text-xs font-semibold flex flex-col items-center justify-center gap-0.5 border min-w-0 ${
               active
                 ? 'bg-[var(--app-surface-elevated)] text-[var(--app-text)] border-[var(--app-accent-border)] shadow-sm'
-                : 'bg-[var(--app-surface)] text-[var(--app-text-muted)] border-[var(--app-border)] hover:text-[var(--app-text-secondary)] hover:border-[var(--app-border-strong)]'
+                : 'bg-[var(--app-surface-muted)] text-[var(--app-text-muted)] border-[var(--app-border)] hover:text-[var(--app-text-secondary)] hover:border-[var(--app-border-strong)]'
             }`}
           >
             <span
@@ -296,10 +293,10 @@ const SliderRow: React.FC<{
   suffix?: string;
   onChange: (value: number) => void;
 }> = ({ label, value, min, max, step, suffix, onChange }) => (
-  <div className="space-y-2">
+  <div className="space-y-1.5">
     <div className="flex items-center justify-between gap-2 text-xs">
-      <label className="text-[var(--app-text-secondary)] font-medium">{label}</label>
-      <span className="font-mono-num font-bold text-[var(--app-accent-text)]">
+      <label className="text-[var(--app-text-secondary)] font-medium truncate">{label}</label>
+      <span className="font-mono-num font-bold text-[var(--app-accent-text)] shrink-0">
         {value}
         {suffix ? ` ${suffix}` : ''}
       </span>
@@ -401,7 +398,6 @@ function formatBytes(bytes: number): string {
 }
 
 const APP_VERSION = '1.0.0';
-/** Versi dokumen spesifikasi Settings — bukan versi aplikasi. */
 const SETTINGS_SPEC_VERSION = '4.0.0';
 
 const OSS_COMPONENTS = [
@@ -414,10 +410,6 @@ const OSS_COMPONENTS = [
   { name: 'Express', license: 'MIT' },
   { name: '@google/genai', license: 'Apache-2.0' },
 ];
-
-/* ============================================================================
- * COMPONENT
- * ========================================================================== */
 
 type SaveStatusKind = 'pending' | 'success' | 'error';
 
@@ -447,20 +439,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Persistensi status hanya ditampilkan setelah penulisan selesai.
   const latestSettingsRef = useRef(settings);
   const statusTimerRef = useRef<number | null>(null);
   const saveRequestIdRef = useRef(0);
   const isMountedRef = useRef(true);
 
-  // Category selection: starts directly on General configuration workspace
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>('general');
 
-  // Device performance test
   const [deviceTest, setDeviceTest] = useState<DeviceTestResult | null>(null);
   const [deviceTestRunning, setDeviceTestRunning] = useState(false);
 
-  // Microphone
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [micTestActive, setMicTestActive] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
@@ -469,21 +457,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const micCtxRef = useRef<AudioContext | null>(null);
   const micRafRef = useRef<number | null>(null);
 
-  // System
   const [permissionState, setPermissionState] = useState<Record<string, string>>({});
   const [permissionBusy, setPermissionBusy] = useState<string | null>(null);
   const [overlayGranted, setOverlayGranted] = useState<boolean | null>(null);
   const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number } | null>(null);
   const [cacheMessage, setCacheMessage] = useState<string | null>(null);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState<string | null>(null);
-
-  // Floating HUD
   const [hudMessage, setHudMessage] = useState<string | null>(null);
 
-  /**
-   * Terapkan perubahan ukuran/opacity/sisi ke bubble native yang SEDANG tampil.
-   * Tidak ada hide/show: native memakai updateViewLayout pada view yang sama.
-   */
   const hudAppearanceSignatureRef = useRef<string>('');
   useEffect(() => {
     const sizeDp = settings.hudButtonSize ?? 48;
@@ -554,8 +535,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     latestSettingsRef.current = updated;
     void persistSettings(updated);
   };
-
-  /* ------------------------------------------------------------------ MIC */
 
   const stopMicTest = useCallback(() => {
     if (micRafRef.current !== null) {
@@ -656,8 +635,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       stopMicTest();
     }
   };
-
-  /* ----------------------------------------------------------- PERMISSIONS */
 
   const refreshPermissions = useCallback(async () => {
     const next: Record<string, string> = {};
@@ -779,7 +756,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       try {
         await Notification.requestPermission();
       } catch {
-        /* diabaikan: status akan dibaca ulang di bawah */
+        /* ignore */
       }
       await refreshPermissions();
     } finally {
@@ -804,8 +781,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const result = await requestOverlayPermission();
     setOverlayGranted(!!result?.granted);
   };
-
-  /* --------------------------------------------------------------- STORAGE */
 
   const refreshStorage = useCallback(async () => {
     try {
@@ -849,8 +824,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  /* ---------------------------------------------------------- DEVICE TEST */
-
   const runDeviceTest = () => {
     setDeviceTestRunning(true);
     try {
@@ -869,7 +842,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           if (typeof maxTex === 'number') maxTextureSize = maxTex;
         }
       } catch {
-        /* WebGL tidak tersedia — dibiarkan null, bukan ditebak */
+        /* WebGL unavailable */
       }
 
       const cores =
@@ -911,8 +884,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       videoBitrateKbps: deviceTest.recommendedBitrateKbps,
     });
   };
-
-  /* ------------------------------------------------------------- BACKUP */
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -956,8 +927,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
     reader.readAsText(file);
   };
-
-  /* --------------------------------------------------------- DIAGNOSTICS */
 
   const diagnosticsLines = [
     `${isEnglish ? 'Application' : 'Aplikasi'}: SYNTXRR STREAM ${APP_VERSION}`,
@@ -1038,8 +1007,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  /* ------------------------------------------------------ DERIVED METRICS */
-
   const warnings = computeWarnings(settings, isEnglish);
   const rtmpValidation = validateModeBRtmpConfig(settings.rtmpServer, settings.streamKey);
   const currentAudioSource: ModeBAudioSource =
@@ -1049,40 +1016,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const activeModeShort =
     settings.operatingMode === 'MODE_B_STREAMING_ENCODER'
-      ? 'Mode B · Encoder RTMP'
-      : 'Mode A · TikTok Companion';
+      ? 'Mode B · Encoder'
+      : 'Mode A · Companion';
 
   const hudPanelMenus: Array<{ id: string; name: string; detail: string; status: UiStatus }> = [
     {
       id: 'chat',
       name: '1. Chat',
       detail: isEnglish
-        ? 'Chat, gifts, likes, and follows with pause/latest controls.'
-        : 'Chat, gift, like, dan follow dengan kontrol jeda/terbaru.',
+        ? 'Chat, gifts, likes & follows with pause/latest controls.'
+        : 'Chat, gift, like & follow dengan jeda/terbaru.',
       status: 'not_connected',
     },
     {
       id: 'soundboard',
       name: '2. Soundboard',
       detail: isEnglish
-        ? 'Favorite sounds from Studio, one at a time, plus soundboard and TTS volume.'
-        : 'Suara favorit dari Studio, satu per satu, plus volume soundboard dan TTS.',
+        ? 'Favorite Studio sounds + soundboard and TTS volume.'
+        : 'Suara favorit Studio + volume soundboard & TTS.',
       status: 'pending',
     },
     {
       id: 'music',
       name: '3. Music',
       detail: isEnglish
-        ? 'Now playing, play/pause, next (streamer only), mute, volume, and queue.'
-        : 'Lagu aktif, play/pause, next (hanya streamer), mute, volume, dan antrean.',
+        ? 'Now playing, play/pause, next, mute, volume & queue.'
+        : 'Lagu aktif, play/pause, next, mute & antrean.',
       status: 'pending',
     },
     {
       id: 'mixer',
       name: '4. Audio Mixer',
       detail: isEnglish
-        ? 'Microphone mute and real input level for the SYNTXRR audio path.'
-        : 'Mute mikrofon dan level input nyata untuk jalur audio SYNTXRR.',
+        ? 'Microphone mute and real input level for SYNTXRR.'
+        : 'Mute mikrofon dan level input nyata SYNTXRR.',
       status: 'pending',
     },
   ];
@@ -1100,27 +1067,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       icon: SlidersHorizontal,
       shortTitle: isEnglish ? 'General' : 'Umum',
       title: t('settings.secA.title', 'Umum (General)'),
-      description: isEnglish
-        ? 'Language, haptics & safety'
-        : 'Bahasa, getar & konfirmasi',
+      description: isEnglish ? 'Language, haptics & safety' : 'Bahasa, getar & konfirmasi',
       liveSummary: `${(settings.language ?? 'id-ID') === 'en-US' ? 'English' : 'Indonesia'} · ${
         settings.hapticFeedback
           ? isEnglish
-            ? 'Haptics On'
-            : 'Getar Aktif'
+            ? 'Haptic On'
+            : 'Getar On'
           : isEnglish
-          ? 'Haptics Off'
-          : 'Getar Nonaktif'
+          ? 'Haptic Off'
+          : 'Getar Off'
       }`,
     },
     {
       id: 'audio',
       icon: Mic,
-      shortTitle: isEnglish ? 'Audio & Mic' : 'Audio & Mik',
+      shortTitle: isEnglish ? 'Audio' : 'Audio',
       title: t('settings.secB.title', 'Audio & Mikrofon'),
-      description: isEnglish
-        ? 'Input device, live meter, DSP'
-        : 'Input, meter tes, gain & DSP',
+      description: isEnglish ? 'Input device, live meter, DSP' : 'Input, meter tes & DSP',
       liveSummary: `${settings.micGain ?? 100}% gain · ${
         [settings.noiseSuppression, settings.micEchoCancellation, settings.micAutoGainControl].filter(
           Boolean
@@ -1130,88 +1093,62 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     {
       id: 'hud',
       icon: PanelRight,
-      shortTitle: 'Floating HUD',
+      shortTitle: 'HUD',
       title: t('settings.secC.title', 'Floating HUD'),
-      description: isEnglish
-        ? 'Bubble geometry & panel menus'
-        : 'Ukuran bubble, posisi & panel',
-      liveSummary: `${settings.hudEnabled ? (isEnglish ? 'Enabled' : 'Aktif') : isEnglish ? 'Off' : 'Nonaktif'} · ${
-        settings.hudButtonSize ?? 48
-      }dp · ${settings.hudOpacity ?? 92}%`,
+      description: isEnglish ? 'Bubble geometry & panel menus' : 'Bubble, posisi & panel',
+      liveSummary: `${settings.hudButtonSize ?? 48}dp · ${settings.hudOpacity ?? 92}%`,
     },
     {
       id: 'performance',
       icon: Monitor,
-      shortTitle: isEnglish ? 'Graphics & RTMP' : 'Grafis & RTMP',
+      shortTitle: isEnglish ? 'Graphics' : 'Grafis',
       title: t('settings.secD.title', 'Grafis & Performa Perangkat'),
-      description: isEnglish
-        ? 'Benchmark, profile, bitrate, RTMP'
-        : 'Uji perangkat, profil & RTMP',
-      liveSummary: `${settings.targetResolution} · ${settings.frameRate} FPS · ${settings.videoBitrateKbps} Kbps`,
+      description: isEnglish ? 'Benchmark, profile, bitrate, RTMP' : 'Uji, bitrate & RTMP',
+      liveSummary: `${settings.targetResolution} · ${settings.frameRate}fps`,
     },
     {
       id: 'system',
       icon: Lock,
       shortTitle: isEnglish ? 'System' : 'Sistem',
       title: t('settings.secE.title', 'Sistem (System)'),
-      description: isEnglish
-        ? 'Permissions, storage, diagnostics'
-        : 'Izin, cache, diagnostik & cadangan',
+      description: isEnglish ? 'Permissions, storage & backup' : 'Izin, cache & cadangan',
       liveSummary: storageInfo
-        ? `${formatBytes(storageInfo.usage)} ${isEnglish ? 'used' : 'terpakai'}`
+        ? formatBytes(storageInfo.usage)
         : isEnglish
-        ? 'Permissions & backup'
-        : 'Izin & cadangan JSON',
+        ? 'Permissions'
+        : 'Izin & JSON',
     },
     {
       id: 'about',
       icon: Info,
-      shortTitle: isEnglish ? 'About & Support' : 'Tentang',
+      shortTitle: isEnglish ? 'About' : 'Tentang',
       title: isEnglish ? 'About & Support SYNTXRR' : 'Tentang & Dukungan SYNTXRR',
-      description: isEnglish
-        ? 'Build info, licenses & support'
-        : 'Versi, lisensi & dukungan resmi',
-      liveSummary: `v${APP_VERSION} · ${
-        nativeAndroid ? 'Android APK' : 'Web Runtime'
-      }`,
+      description: isEnglish ? 'Build info, licenses & support' : 'Versi, lisensi & info',
+      liveSummary: `v${APP_VERSION}`,
     },
   ];
 
   const activeCategoryMeta = categories.find((c) => c.id === activeCategory) ?? null;
 
-  /* --------------------------------------------------------------- RENDER */
-
   return (
-    <div className="space-y-4 sm:space-y-5 pb-2">
-      {/* Top Console Identity & Save Persistence Feedback */}
-      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-3 border-b border-[var(--app-border)]">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-[var(--app-text-muted)]">
-            <span className="uppercase tracking-[0.12em] font-semibold text-[var(--app-accent-text)]">
-              D+ System Configuration Center
-            </span>
-            <span aria-hidden="true" className="text-[var(--app-border-strong)]">
-              /
-            </span>
-            <span className="font-mono-num text-[var(--app-text-secondary)]">
-              {activeModeShort}
-            </span>
-          </div>
-          <h1 className="font-display text-2xl sm:text-[28px] font-bold text-[var(--app-text)] tracking-tight mt-0.5 truncate">
-            {t('settings.title', 'Pengaturan Studio (Settings)')}
+    <div className="space-y-3 sm:space-y-4 pb-2">
+      {/* Compact Console Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] tracking-tight truncate">
+            {t('settings.title', 'Pengaturan Studio')}
           </h1>
-          <p className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-relaxed">
-            {isEnglish
-              ? 'Select a category from the configuration rail to inspect and tune studio, audio, HUD, encoder, and system controls.'
-              : 'Pilih kategori dari rel konfigurasi untuk mengatur studio, mikrofon, Floating HUD, encoder RTMP, dan diagnostik sistem.'}
-          </p>
+          <span className="text-[var(--app-border-strong)]" aria-hidden="true">/</span>
+          <span className="font-mono-num text-[11px] text-[var(--app-accent-text)] font-semibold whitespace-nowrap">
+            {activeModeShort}
+          </span>
         </div>
 
         {saveStatus && (
           <span
             role="status"
             aria-live="polite"
-            className="min-h-[36px] text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-2 self-start sm:self-auto border shrink-0"
+            className="anim-pop-in min-h-[32px] text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1.5 border shrink-0"
             style={
               saveStatus.kind === 'success'
                 ? {
@@ -1233,53 +1170,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             }
           >
             {saveStatus.kind === 'success' ? (
-              <Check className="w-4 h-4 shrink-0" />
+              <Check className="w-3.5 h-3.5 shrink-0" />
             ) : saveStatus.kind === 'error' ? (
-              <ShieldAlert className="w-4 h-4 shrink-0" />
+              <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
             ) : (
-              <Database className="w-4 h-4 shrink-0" />
+              <Database className="w-3.5 h-3.5 shrink-0" />
             )}
-            <span>{saveStatus.message}</span>
+            <span className="truncate max-w-[200px] sm:max-w-none">{saveStatus.message}</span>
           </span>
         )}
-      </header>
+      </div>
 
-      {/* Mobile Horizontal Scrolling Category Rail (< lg) */}
+      {/* Mobile Instant 3x2 Category Matrix (< lg, zero horizontal clipping) */}
       <nav
         aria-label={isEnglish ? 'Settings categories' : 'Kategori pengaturan'}
-        className="lg:hidden -mx-1 px-1 overflow-x-auto"
+        className="lg:hidden grid grid-cols-3 gap-1.5"
       >
-        <div className="flex items-center gap-2 pb-1 min-w-max">
-          {categories.map((cat) => {
-            const Icon = cat.icon;
-            const active = activeCategory === cat.id;
-            return (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setActiveCategory(cat.id)}
-                aria-current={active ? 'page' : undefined}
-                className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-2 transition-colors ${
-                  active
-                    ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)] font-bold'
-                    : 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                }`}
-              >
+        {categories.map((cat) => {
+          const Icon = cat.icon;
+          const active = activeCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setActiveCategory(cat.id)}
+              aria-current={active ? 'page' : undefined}
+              className={`btn-press min-h-[48px] px-2 py-1.5 rounded-xl border text-left flex flex-col justify-between gap-0.5 min-w-0 ${
+                active
+                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
+                  : 'bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+              }`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
                 <Icon className="w-3.5 h-3.5 shrink-0" />
-                <span>{cat.shortTitle}</span>
-              </button>
-            );
-          })}
-        </div>
+                <span className={`text-[11px] truncate ${active ? 'font-bold' : 'font-semibold'}`}>
+                  {cat.shortTitle}
+                </span>
+              </div>
+              <span className="text-[9px] font-mono-num text-[var(--app-text-muted)] truncate">
+                {cat.liveSummary}
+              </span>
+            </button>
+          );
+        })}
       </nav>
 
-      {/* Two-Column Split Console on Desktop/Tablet (lg+) & Single Column on Android */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* A. LEFT CONFIGURATION RAIL (Permanent Vertical Rail on lg+) */}
-        <aside className="hidden lg:block lg:col-span-4 sticky top-20 space-y-2">
+      {/* Desktop Two-Column Split (lg+) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        {/* Left Navigation Rail (lg+) */}
+        <aside className="hidden lg:block lg:col-span-4 sticky top-16">
           <nav
             aria-label={isEnglish ? 'Configuration navigation rail' : 'Rel navigasi konfigurasi'}
-            className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-2 space-y-1"
+            className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-1.5 space-y-1"
             style={{ boxShadow: 'var(--app-shadow)' }}
           >
             {categories.map((cat) => {
@@ -1291,7 +1233,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   type="button"
                   onClick={() => setActiveCategory(cat.id)}
                   aria-current={active ? 'page' : undefined}
-                  className={`w-full min-h-[52px] px-3 py-2.5 rounded-xl border text-left flex items-center gap-3 transition-colors ${
+                  className={`btn-press w-full min-h-[48px] px-3 py-2 rounded-xl border text-left flex items-center gap-3 ${
                     active
                       ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
                       : 'bg-transparent border-transparent text-[var(--app-text-secondary)] hover:bg-[var(--app-surface-muted)] hover:text-[var(--app-text)]'
@@ -1314,14 +1256,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     >
                       {cat.shortTitle}
                     </div>
-                    <div className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">
+                    <div className="text-[11px] text-[var(--app-text-muted)] truncate">
                       {cat.description}
                     </div>
                   </div>
                   {active ? (
                     <span
                       aria-hidden="true"
-                      className="w-1.5 h-6 rounded-full bg-[var(--app-accent)] shrink-0"
+                      className="w-1.5 h-5 rounded-full bg-[var(--app-accent)] shrink-0"
                     />
                   ) : (
                     <ChevronRight className="w-3.5 h-3.5 text-[var(--app-text-muted)] shrink-0" />
@@ -1332,280 +1274,253 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </nav>
         </aside>
 
-        {/* B. MAIN CONFIGURATION WORKSPACE */}
-        <div className="lg:col-span-8 space-y-4 sm:space-y-5 min-w-0">
-          {/* Active Category Workspace Context Strip */}
+        {/* Active Configuration Workspace */}
+        <div
+          key={activeCategory}
+          className="anim-tab-panel lg:col-span-8 space-y-3.5 min-w-0"
+        >
           {activeCategoryMeta && (
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
+            <div className="hidden lg:flex items-center justify-between gap-2 px-4 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-1.5 h-4 rounded-full bg-[var(--app-accent)] shrink-0" aria-hidden="true" />
                 <span className="font-display text-xs font-bold text-[var(--app-text)] truncate">
                   {activeCategoryMeta.title}
                 </span>
               </div>
-              <div className="text-[11px] font-mono-num text-[var(--app-text-muted)] truncate">
+              <span className="text-[11px] font-mono-num text-[var(--app-text-muted)] shrink-0">
                 {activeCategoryMeta.liveSummary}
-              </div>
+              </span>
             </div>
           )}
 
-          {/* ================================ 1. GENERAL ================================ */}
+          {/* ============================ 1. GENERAL ============================ */}
           {activeCategory === 'general' && (
-            <div className="space-y-4">
-              <Section
-                icon={SlidersHorizontal}
-                title={t('settings.secA.title', 'Umum (General)')}
-                subtitle={t(
-                  'settings.secA.subtitle',
-                  'Bahasa antarmuka, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran'
+            <ConsolePanel
+              icon={SlidersHorizontal}
+              title={t('settings.secA.title', 'Umum (General)')}
+              subtitle={t(
+                'settings.secA.subtitle',
+                'Bahasa antarmuka, umpan balik getar, dan konfirmasi sebelum mengakhiri siaran'
+              )}
+            >
+              <DenseRow
+                title={t('settings.language.title', 'Bahasa Antarmuka')}
+                description={t(
+                  'settings.language.desc',
+                  'Pilih bahasa tampilan. Bahasa Indonesia dan English didukung penuh.'
                 )}
+                status="functional"
               >
-                <FieldRow
-                  title={t('settings.language.title', 'Bahasa Antarmuka')}
-                  description={t(
-                    'settings.language.desc',
-                    'Pilih bahasa tampilan. Bahasa Indonesia dan English didukung penuh di seluruh antarmuka.'
-                  )}
-                  status="functional"
-                >
-                  <Segmented<AppLanguage>
-                    options={[
-                      { value: 'id-ID', label: 'Indonesia', hint: 'id-ID' },
-                      { value: 'en-US', label: 'English', hint: 'en-US' },
-                    ]}
-                    columns="grid-cols-2"
-                    value={(settings.language ?? 'id-ID') as AppLanguage}
-                    onChange={(value) => handleUpdate('language', value)}
-                  />
-                </FieldRow>
+                <Segmented<AppLanguage>
+                  options={[
+                    { value: 'id-ID', label: 'Indonesia', hint: 'id-ID' },
+                    { value: 'en-US', label: 'English', hint: 'en-US' },
+                  ]}
+                  columns="grid-cols-2"
+                  value={(settings.language ?? 'id-ID') as AppLanguage}
+                  onChange={(value) => handleUpdate('language', value)}
+                />
+              </DenseRow>
 
-                <div className="pt-1 border-t border-[var(--app-border)] space-y-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
-                    {isEnglish ? 'Interaction & Broadcast Safeguards' : 'Interaksi & Pengamanan Siaran'}
+              <DenseRow
+                title={t('settings.haptic.title', 'Umpan Balik Getar (Haptic Feedback)')}
+                description={t(
+                  'settings.haptic.desc',
+                  'Getaran singkat saat navigasi dan kontrol ditekan. Bergantung dukungan WebView/izin VIBRATE.'
+                )}
+                status={isHapticSupported() ? 'functional' : 'not_supported'}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-mono-num text-[var(--app-text-secondary)]">
+                    {settings.hapticFeedback
+                      ? t('status.active', 'Aktif')
+                      : t('status.inactive', 'Nonaktif')}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isHapticSupported()) {
+                          showSaveStatus(
+                            t(
+                              'settings.haptic.unsupported',
+                              'Perangkat ini tidak mendukung getar melalui WebView'
+                            ),
+                            'error'
+                          );
+                          return;
+                        }
+                        const ok = vibrateNow('medium');
+                        showSaveStatus(
+                          ok
+                            ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat')
+                            : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
+                          ok ? 'success' : 'error'
+                        );
+                      }}
+                      className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)]"
+                    >
+                      {t('settings.haptic.test', 'Uji Getar')}
+                    </button>
+                    <Toggle
+                      label={t('settings.haptic.title', 'Umpan balik getar')}
+                      checked={!!settings.hapticFeedback}
+                      onChange={(value) => handleUpdate('hapticFeedback', value)}
+                    />
                   </div>
-
-                  <FieldRow
-                    title={t('settings.haptic.title', 'Umpan Balik Getar (Haptic Feedback)')}
-                    description={t(
-                      'settings.haptic.desc',
-                      'Getaran singkat saat navigasi utama dan kontrol penting ditekan. Bergantung pada dukungan WebView/perangkat dan izin VIBRATE.'
-                    )}
-                    status={isHapticSupported() ? 'functional' : 'not_supported'}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span className="text-[11px] font-mono-num text-[var(--app-text-secondary)]">
-                        {settings.hapticFeedback
-                          ? t('status.active', 'Aktif')
-                          : t('status.inactive', 'Nonaktif')}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isHapticSupported()) {
-                              showSaveStatus(
-                                t(
-                                  'settings.haptic.unsupported',
-                                  'Perangkat ini tidak mendukung getar melalui WebView'
-                                ),
-                                'error'
-                              );
-                              return;
-                            }
-                            const ok = vibrateNow('medium');
-                            showSaveStatus(
-                              ok
-                                ? t('settings.haptic.success', 'Getar uji dikirim ke perangkat')
-                                : t('settings.haptic.fail', 'Perangkat menolak permintaan getar'),
-                              ok ? 'success' : 'error'
-                            );
-                          }}
-                          className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] transition-colors"
-                        >
-                          {t('settings.haptic.test', 'Uji Getar')}
-                        </button>
-                        <Toggle
-                          label={t('settings.haptic.title', 'Umpan balik getar')}
-                          checked={!!settings.hapticFeedback}
-                          onChange={(value) => handleUpdate('hapticFeedback', value)}
-                        />
-                      </div>
-                    </div>
-                  </FieldRow>
-
-                  <FieldRow
-                    title={t('settings.confirmEnd.title', 'Konfirmasi Sebelum Mengakhiri LIVE')}
-                    description={t(
-                      'settings.confirmEnd.desc',
-                      'Meminta konfirmasi terlebih dahulu saat tombol Hentikan Siaran Mode B ditekan ketika LIVE berlangsung. Pada Mode A, aplikasi TikTok resmi tetap mengontrol akhir sesi LIVE TikTok.'
-                    )}
-                    status="functional"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[11px] text-[var(--app-text-secondary)]">
-                        {settings.confirmBeforeEndLive
-                          ? t('settings.confirmEnd.active', 'Minta konfirmasi')
-                          : t('settings.confirmEnd.inactive', 'Akhiri langsung')}
-                      </span>
-                      <Toggle
-                        label={t('settings.confirmEnd.title', 'Konfirmasi sebelum mengakhiri LIVE')}
-                        checked={!!settings.confirmBeforeEndLive}
-                        onChange={(value) => handleUpdate('confirmBeforeEndLive', value)}
-                      />
-                    </div>
-                  </FieldRow>
                 </div>
-              </Section>
-            </div>
+              </DenseRow>
+
+              <DenseRow
+                title={t('settings.confirmEnd.title', 'Konfirmasi Sebelum Mengakhiri LIVE')}
+                description={t(
+                  'settings.confirmEnd.desc',
+                  'Minta konfirmasi saat tombol Hentikan Siaran Mode B ditekan. Pada Mode A, aplikasi TikTok resmi mengontrol akhir sesi LIVE.'
+                )}
+                status="functional"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-[var(--app-text-secondary)]">
+                    {settings.confirmBeforeEndLive
+                      ? t('settings.confirmEnd.active', 'Minta konfirmasi')
+                      : t('settings.confirmEnd.inactive', 'Akhiri langsung')}
+                  </span>
+                  <Toggle
+                    label={t('settings.confirmEnd.title', 'Konfirmasi sebelum mengakhiri LIVE')}
+                    checked={!!settings.confirmBeforeEndLive}
+                    onChange={(value) => handleUpdate('confirmBeforeEndLive', value)}
+                  />
+                </div>
+              </DenseRow>
+            </ConsolePanel>
           )}
 
-          {/* ========================= 2. AUDIO & MICROPHONE ========================= */}
+          {/* ======================= 2. AUDIO & MICROPHONE ======================= */}
           {activeCategory === 'audio' && (
-            <div className="space-y-4">
-              {/* Featured Live Mic Test Meter Console */}
-              <section
-                className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden"
-                style={{ boxShadow: 'var(--app-shadow)' }}
+            <div className="space-y-3.5">
+              <ConsolePanel
+                icon={Mic}
+                title={t('settings.micTest.title', 'Tes Mikrofon')}
+                subtitle={t(
+                  'settings.micTest.desc',
+                  'Meter level nyata dari getUserMedia + AnalyserNode.'
+                )}
+                action={<StatusBadge status="functional" />}
               >
-                <div className="px-4 sm:px-5 py-3.5 bg-[var(--app-surface-muted)] border-b border-[var(--app-border)] flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] flex items-center justify-center text-[var(--app-accent-text)] shrink-0">
-                      <Mic className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] truncate">
-                        {t('settings.micTest.title', 'Tes Mikrofon')}
-                      </h2>
-                      <p className="text-[11px] text-[var(--app-text-muted)]">
-                        {t(
-                          'settings.micTest.desc',
-                          'Meter level nyata dari getUserMedia + AnalyserNode. Tidak ada hasil yang dibuat-buat: bila izin ditolak, error ditampilkan apa adanya.'
-                        )}
-                      </p>
-                    </div>
+                <div className="py-1 space-y-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-medium text-[var(--app-text-secondary)]">
+                      {micTestActive
+                        ? t('settings.micTest.level', 'Level input: ')
+                        : t('settings.micTest.idle', 'Tes tidak berjalan')}
+                    </span>
+                    <span className="font-mono-num text-xl font-bold text-[var(--app-text)]">
+                      {micTestActive ? `${micLevel}%` : '0%'}
+                    </span>
                   </div>
-                  <StatusBadge status="functional" />
-                </div>
 
-                <div className="p-4 sm:p-5 space-y-4">
-                  {/* Calibrated Live Level Bar */}
-                  <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-xs font-medium text-[var(--app-text-secondary)]">
-                        {micTestActive
-                          ? t('settings.micTest.level', 'Level input: ')
-                          : t('settings.micTest.idle', 'Tes tidak berjalan')}
-                      </span>
-                      <span className="font-mono-num text-xl font-bold text-[var(--app-text)]">
-                        {micTestActive ? `${micLevel}%` : '0%'}
-                      </span>
-                    </div>
+                  <div className="h-3 w-full rounded-full bg-[var(--app-bg)] border border-[var(--app-border)] overflow-hidden p-0.5">
+                    <div
+                      className="h-full rounded-full transition-[width] duration-75"
+                      style={{
+                        width: `${micTestActive ? micLevel : 0}%`,
+                        backgroundColor:
+                          micLevel > 85
+                            ? 'var(--app-error)'
+                            : micLevel > 55
+                            ? 'var(--app-warn)'
+                            : 'var(--app-ok)',
+                      }}
+                    />
+                  </div>
 
-                    <div className="h-3.5 w-full rounded-full bg-[var(--app-bg)] border border-[var(--app-border)] overflow-hidden p-0.5">
-                      <div
-                        className="h-full rounded-full transition-[width] duration-75"
-                        style={{
-                          width: `${micTestActive ? micLevel : 0}%`,
-                          backgroundColor:
-                            micLevel > 85
-                              ? 'var(--app-error)'
-                              : micLevel > 55
-                              ? 'var(--app-warn)'
-                              : 'var(--app-ok)',
-                        }}
-                      />
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                      {micTestActive ? (
-                        <button
-                          type="button"
-                          onClick={stopMicTest}
-                          className="min-h-[44px] px-4 py-2 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors"
-                          style={{
-                            backgroundColor: 'var(--app-error-soft)',
-                            borderColor: 'color-mix(in srgb, var(--app-error) 50%, transparent)',
-                            color: 'var(--app-error)',
-                          }}
-                        >
-                          <Square className="w-3.5 h-3.5 shrink-0" />
-                          <span>{t('settings.micTest.stop', 'Hentikan Tes')}</span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void startMicTest()}
-                          className="min-h-[44px] px-5 py-2 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <Play className="w-4 h-4 shrink-0" />
-                          <span>{t('settings.micTest.start', 'Mulai Tes Mikrofon')}</span>
-                        </button>
-                      )}
-
-                      <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-                        Gain: {settings.micGain ?? 100}%
-                      </span>
-                    </div>
-
-                    {micError && (
-                      <div
-                        role="alert"
-                        className="p-3 rounded-xl border text-xs flex items-start gap-2"
+                  <div className="flex items-center justify-between gap-2">
+                    {micTestActive ? (
+                      <button
+                        type="button"
+                        onClick={stopMicTest}
+                        className="btn-press min-h-[44px] px-4 rounded-xl border text-xs font-bold inline-flex items-center gap-2"
                         style={{
                           backgroundColor: 'var(--app-error-soft)',
-                          borderColor: 'color-mix(in srgb, var(--app-error) 45%, transparent)',
+                          borderColor: 'color-mix(in srgb, var(--app-error) 50%, transparent)',
                           color: 'var(--app-error)',
                         }}
                       >
-                        <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span className="min-w-0 break-words">{micError}</span>
-                      </div>
+                        <Square className="w-3.5 h-3.5 shrink-0" />
+                        <span>{t('settings.micTest.stop', 'Hentikan Tes')}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void startMicTest()}
+                        className="btn-press min-h-[44px] px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-2"
+                      >
+                        <Play className="w-4 h-4 shrink-0" />
+                        <span>{t('settings.micTest.start', 'Mulai Tes Mikrofon')}</span>
+                      </button>
                     )}
+                    <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
+                      Gain: {settings.micGain ?? 100}%
+                    </span>
                   </div>
 
-                  {/* Sensitivity / Gain paired directly beneath meter */}
-                  <FieldRow
-                    title={t('settings.micGain.title', 'Sensitivitas / Gain Input')}
-                    description={t(
-                      'settings.micGain.desc',
-                      'Penguatan diterapkan pada meter tes mikrofon di halaman ini. Belum ada encoder siaran yang memakainya, jadi nilai ini tidak mengubah suara LIVE.'
-                    )}
-                    status="stored"
-                  >
-                    <SliderRow
-                      label={t('settings.micGain.title', 'Gain mikrofon')}
-                      value={settings.micGain ?? 100}
-                      min={0}
-                      max={200}
-                      step={5}
-                      suffix="%"
-                      onChange={(value) => handleUpdate('micGain', value)}
-                    />
-                  </FieldRow>
+                  {micError && (
+                    <div
+                      role="alert"
+                      className="p-2.5 rounded-xl border text-xs flex items-start gap-2"
+                      style={{
+                        backgroundColor: 'var(--app-error-soft)',
+                        borderColor: 'color-mix(in srgb, var(--app-error) 45%, transparent)',
+                        color: 'var(--app-error)',
+                      }}
+                    >
+                      <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span className="min-w-0 break-words">{micError}</span>
+                    </div>
+                  )}
                 </div>
-              </section>
 
-              <Section
+                <DenseRow
+                  title={t('settings.micGain.title', 'Sensitivitas / Gain Input')}
+                  description={t(
+                    'settings.micGain.desc',
+                    'Penguatan diterapkan pada meter tes mikrofon di halaman ini.'
+                  )}
+                  status="stored"
+                >
+                  <SliderRow
+                    label={t('settings.micGain.title', 'Gain mikrofon')}
+                    value={settings.micGain ?? 100}
+                    min={0}
+                    max={200}
+                    step={5}
+                    suffix="%"
+                    onChange={(value) => handleUpdate('micGain', value)}
+                  />
+                </DenseRow>
+              </ConsolePanel>
+
+              <ConsolePanel
                 icon={Volume2}
-                title={t('settings.secB.title', 'Audio & Mikrofon')}
+                title={t('settings.secB.title', 'Perangkat & DSP Audio')}
                 subtitle={t(
                   'settings.secB.subtitle',
-                  'Pemilihan perangkat input, tes level mikrofon, sensitivitas, dan pemrosesan suara'
+                  'Pemilihan perangkat input, noise suppression, dan pemrosesan suara'
                 )}
               >
-                <FieldRow
+                <DenseRow
                   title={t('settings.micSelect.title', 'Pemilihan Mikrofon')}
                   description={t(
                     'settings.micSelect.desc',
-                    'Daftar perangkat berasal dari enumerasi perangkat nyata. Label perangkat hanya terbaca setelah izin mikrofon diberikan.'
+                    'Label perangkat terbaca setelah izin mikrofon diberikan.'
                   )}
                   status="functional"
                 >
-                  <div className="flex flex-col sm:flex-row gap-2.5">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <select
                       value={settings.microphoneDeviceId ?? ''}
                       onChange={(e) => handleUpdate('microphoneDeviceId', e.target.value)}
-                      className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs focus:outline-none focus:border-[var(--app-accent)]"
+                      className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs focus:outline-none focus:border-[var(--app-accent)]"
                     >
                       <option value="">
                         {t('settings.micSelect.default', 'Mikrofon bawaan sistem (default)')}
@@ -1622,25 +1537,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <button
                       type="button"
                       onClick={() => void refreshMicDevices()}
-                      className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center justify-center gap-2 shrink-0 transition-colors"
+                      className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center justify-center gap-2 shrink-0"
                     >
                       <RefreshCw className="w-3.5 h-3.5 shrink-0" />
                       <span>{t('settings.micSelect.reload', 'Muat Ulang')}</span>
                     </button>
                   </div>
-                  <p className="text-[11px] text-[var(--app-text-muted)]">
-                    {t(
-                      'settings.micSelect.note',
-                      'Pemilihan ini dipakai oleh Tes Mikrofon di bawah.'
-                    )}
-                  </p>
-                </FieldRow>
+                </DenseRow>
 
-                <FieldRow
+                <DenseRow
                   title={t('settings.noiseSuppression.title', 'Noise Suppression')}
                   description={t(
                     'settings.noiseSuppression.desc',
-                    'Diterapkan sebagai constraint getUserMedia. Hanya aktif bila perangkat/WebView mendukungnya.'
+                    'Diterapkan sebagai constraint getUserMedia bila didukung WebView.'
                   )}
                   status={
                     typeof navigator !== 'undefined' &&
@@ -1661,30 +1570,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onChange={(value) => handleUpdate('noiseSuppression', value)}
                     />
                   </div>
-                </FieldRow>
+                </DenseRow>
 
-                <div className="p-3.5 sm:p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
+                <div className="py-3.5 last:pb-0 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Volume2 className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-semibold text-[var(--app-text)] truncate">
-                        {t('settings.advancedMic.title', 'Pengaturan Mikrofon Lanjutan')}
-                      </span>
-                    </div>
+                    <span className="text-xs font-semibold text-[var(--app-text)]">
+                      {t('settings.advancedMic.title', 'Pengaturan Mikrofon Lanjutan')}
+                    </span>
                     <StatusBadge status="functional" />
                   </div>
-
-                  <div className="divide-y divide-[var(--app-border)]">
-                    <div className="py-2 first:pt-0 flex items-center justify-between gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-[var(--app-text)]">
+                        <div className="text-xs font-semibold text-[var(--app-text)] truncate">
                           {t('settings.echoCancellation.title', 'Echo Cancellation')}
                         </div>
-                        <div className="text-[11px] text-[var(--app-text-muted)]">
-                          {t(
-                            'settings.echoCancellation.desc',
-                            'Mengurangi gema dari speaker perangkat.'
-                          )}
+                        <div className="text-[10px] text-[var(--app-text-muted)] truncate">
+                          {t('settings.echoCancellation.desc', 'Kurangi gema speaker')}
                         </div>
                       </div>
                       <Toggle
@@ -1693,17 +1595,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(value) => handleUpdate('micEchoCancellation', value)}
                       />
                     </div>
-
-                    <div className="py-2 last:pb-0 flex items-center justify-between gap-3">
+                    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-[var(--app-text)]">
+                        <div className="text-xs font-semibold text-[var(--app-text)] truncate">
                           {t('settings.autoGain.title', 'Auto Gain Control')}
                         </div>
-                        <div className="text-[11px] text-[var(--app-text-muted)]">
-                          {t(
-                            'settings.autoGain.desc',
-                            'Menormalkan volume suara secara otomatis.'
-                          )}
+                        <div className="text-[10px] text-[var(--app-text-muted)] truncate">
+                          {t('settings.autoGain.desc', 'Normalisasi volume otomatis')}
                         </div>
                       </div>
                       <Toggle
@@ -1713,198 +1611,162 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       />
                     </div>
                   </div>
-
-                  <p className="text-[11px] text-[var(--app-text-muted)] pt-1 border-t border-[var(--app-border)]">
-                    {isEnglish
-                      ? 'Both options are forwarded as getUserMedia constraints when Mic Test is running.'
-                      : 'Kedua opsi diteruskan sebagai constraint getUserMedia saat Tes Mikrofon berjalan.'}
-                  </p>
                 </div>
-              </Section>
+              </ConsolePanel>
             </div>
           )}
 
           {/* ============================ 3. FLOATING HUD ============================ */}
           {activeCategory === 'hud' && (
-            <div className="space-y-4">
-              {/* HUD Geometry & Native Bridge Workspace */}
-              <Section
-                icon={PanelRight}
-                title={t('settings.secC.title', 'Floating HUD')}
-                subtitle={t(
-                  'settings.secC.subtitle',
-                  'Tombol mengambang kecil dan panel satu tangan yang dipakai bersama Mode A dan Mode B'
-                )}
-                action={
-                  <StatusBadge status={nativeAndroid ? 'pending' : 'not_supported'} />
-                }
-              >
-                {/* Master Enable & Native Controls + Live Geometry Summary */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-[var(--app-text)]">
-                        {t('settings.hudEnable.title', 'Aktifkan Floating HUD')}
-                      </div>
-                      <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-relaxed">
-                        {t(
-                          'settings.hudEnable.desc',
-                          'Preferensi tersimpan. Tombol di bawah memanggil bridge native Android yang sudah ada dan melaporkan hasil sebenarnya.'
-                        )}
-                      </p>
+            <ConsolePanel
+              icon={PanelRight}
+              title={t('settings.secC.title', 'Floating HUD')}
+              subtitle={t(
+                'settings.secC.subtitle',
+                'Tombol mengambang dan panel satu tangan untuk Mode A dan Mode B'
+              )}
+              action={<StatusBadge status={nativeAndroid ? 'pending' : 'not_supported'} />}
+            >
+              {/* Master Switch + Native Controls + Bubble Preview */}
+              <div className="py-1 pb-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-[var(--app-text)]">
+                      {t('settings.hudEnable.title', 'Aktifkan Floating HUD')}
                     </div>
-                    <Toggle
-                      label={t('settings.hudEnable.title', 'Aktifkan Floating HUD')}
-                      checked={!!settings.hudEnabled}
-                      onChange={(value) => handleUpdate('hudEnabled', value)}
-                    />
-                  </div>
-
-                  {/* Proportional HUD Bubble Inspector Preview */}
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        aria-hidden="true"
-                        className="rounded-full bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-mono-num font-bold text-[10px] flex items-center justify-center shrink-0 border border-[var(--app-accent-border)] shadow-sm transition-all"
-                        style={{
-                          width: `${settings.hudButtonSize ?? 48}px`,
-                          height: `${settings.hudButtonSize ?? 48}px`,
-                          opacity: (settings.hudOpacity ?? 92) / 100,
-                        }}
-                      >
-                        {settings.hudButtonSize ?? 48}dp
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-[var(--app-text)]">
-                          {isEnglish ? 'Bubble Geometry Preview' : 'Pratinjau Geometri Bubble'}
-                        </div>
-                        <div className="text-[11px] font-mono-num text-[var(--app-text-muted)] truncate">
-                          {settings.hudButtonSize ?? 48}dp · {settings.hudOpacity ?? 92}% ·{' '}
-                          {(settings.hudPosition ?? 'right') === 'left'
-                            ? t('settings.hudPosition.left', 'Kiri')
-                            : t('settings.hudPosition.right', 'Kanan')}
-                        </div>
-                      </div>
-                    </div>
-
-                    <span className="text-[11px] font-mono-num text-[var(--app-text-secondary)] shrink-0">
-                      {settings.hudEnabled
-                        ? t('status.active', 'Aktif')
-                        : t('status.inactive', 'Nonaktif')}
-                    </span>
-                  </div>
-
-                  {nativeAndroid ? (
-                    <div className="flex flex-col sm:flex-row flex-wrap gap-2.5">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const result = await showFloatingHud({
-                            sizeDp: settings.hudButtonSize ?? 48,
-                            opacity: settings.hudOpacity ?? 92,
-                            position: (settings.hudPosition ?? 'right') as 'left' | 'right',
-                          });
-                          setHudMessage(
-                            result.message ??
-                              (isEnglish
-                                ? 'Show HUD request sent.'
-                                : 'Permintaan tampilkan HUD dikirim.')
-                          );
-                        }}
-                        className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Eye className="w-4 h-4 shrink-0" />
-                        <span>{t('settings.hudEnable.show', 'Tampilkan HUD Native')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const result = await hideFloatingHud();
-                          setHudMessage(
-                            result.message ??
-                              (isEnglish
-                                ? 'Hide HUD request sent.'
-                                : 'Permintaan sembunyikan HUD dikirim.')
-                          );
-                        }}
-                        className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <EyeOff className="w-4 h-4 shrink-0" />
-                        <span>{t('settings.hudEnable.hide', 'Sembunyikan HUD Native')}</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-[var(--app-text-muted)]">
+                    <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-relaxed">
                       {t(
-                        'settings.hudEnable.browserNote',
-                        'Floating HUD native hanya tersedia pada APK Android. Di browser, preferensi tetap tersimpan.'
+                        'settings.hudEnable.desc',
+                        'Preferensi tersimpan & langsung diterapkan ke bubble native.'
                       )}
                     </p>
-                  )}
+                  </div>
+                  <Toggle
+                    label={t('settings.hudEnable.title', 'Aktifkan Floating HUD')}
+                    checked={!!settings.hudEnabled}
+                    onChange={(value) => handleUpdate('hudEnabled', value)}
+                  />
+                </div>
 
-                  {hudMessage && (
+                {/* Live Bubble Geometry Strip */}
+                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div
-                      role="status"
-                      className="p-3 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-xs text-[var(--app-accent-text)]"
+                      aria-hidden="true"
+                      className="rounded-full bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-mono-num font-bold text-[10px] flex items-center justify-center shrink-0 border border-[var(--app-accent-border)] shadow-sm transition-all"
+                      style={{
+                        width: `${settings.hudButtonSize ?? 48}px`,
+                        height: `${settings.hudButtonSize ?? 48}px`,
+                        opacity: (settings.hudOpacity ?? 92) / 100,
+                      }}
                     >
-                      {hudMessage}
+                      {settings.hudButtonSize ?? 48}dp
                     </div>
-                  )}
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--app-text)] truncate">
+                        {isEnglish ? 'Bubble Geometry Preview' : 'Pratinjau Geometri Bubble'}
+                      </div>
+                      <div className="text-[11px] font-mono-num text-[var(--app-text-muted)] truncate">
+                        {settings.hudButtonSize ?? 48}dp · {settings.hudOpacity ?? 92}% ·{' '}
+                        {(settings.hudPosition ?? 'right') === 'left'
+                          ? t('settings.hudPosition.left', 'Kiri')
+                          : t('settings.hudPosition.right', 'Kanan')}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-mono-num text-[var(--app-text-secondary)] shrink-0">
+                    {settings.hudEnabled ? t('status.active', 'Aktif') : t('status.inactive', 'Off')}
+                  </span>
                 </div>
 
-                {/* Size & Opacity Sliders + Docked Edge */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-[var(--app-text)]">
-                        {t('settings.hudSize.title', 'Ukuran Tombol')}
-                      </span>
-                      <StatusBadge status="functional" />
-                    </div>
-                    <SliderRow
-                      label={t('settings.hudSize.slider', 'Ukuran')}
-                      value={settings.hudButtonSize ?? 48}
-                      min={40}
-                      max={64}
-                      step={2}
-                      suffix="dp"
-                      onChange={(value) => handleUpdate('hudButtonSize', value)}
-                    />
+                {nativeAndroid ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const result = await showFloatingHud({
+                          sizeDp: settings.hudButtonSize ?? 48,
+                          opacity: settings.hudOpacity ?? 92,
+                          position: (settings.hudPosition ?? 'right') as 'left' | 'right',
+                        });
+                        setHudMessage(
+                          result.message ??
+                            (isEnglish
+                              ? 'Show HUD request sent.'
+                              : 'Permintaan tampilkan HUD dikirim.')
+                        );
+                      }}
+                      className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{t('settings.hudEnable.show', 'Tampilkan HUD')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const result = await hideFloatingHud();
+                        setHudMessage(
+                          result.message ??
+                            (isEnglish
+                              ? 'Hide HUD request sent.'
+                              : 'Permintaan sembunyikan HUD dikirim.')
+                        );
+                      }}
+                      className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center justify-center gap-1.5"
+                    >
+                      <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{t('settings.hudEnable.hide', 'Sembunyikan HUD')}</span>
+                    </button>
                   </div>
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-[var(--app-text)]">
-                        {t('settings.hudOpacity.title', 'Transparansi')}
-                      </span>
-                      <StatusBadge status="functional" />
-                    </div>
-                    <SliderRow
-                      label={t('settings.hudOpacity.slider', 'Opasitas')}
-                      value={settings.hudOpacity ?? 92}
-                      min={30}
-                      max={100}
-                      step={1}
-                      suffix="%"
-                      onChange={(value) => handleUpdate('hudOpacity', value)}
-                    />
+                ) : (
+                  <p className="text-[11px] text-[var(--app-text-muted)]">
+                    {t(
+                      'settings.hudEnable.browserNote',
+                      'Floating HUD native hanya tersedia pada APK Android. Di browser, preferensi tetap tersimpan.'
+                    )}
+                  </p>
+                )}
+
+                {hudMessage && (
+                  <div
+                    role="status"
+                    className="p-2.5 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-xs text-[var(--app-accent-text)]"
+                  >
+                    {hudMessage}
                   </div>
+                )}
+              </div>
+
+              {/* Paired Sliders + Docked Edge */}
+              <div className="py-3.5 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <SliderRow
+                    label={t('settings.hudSize.title', 'Ukuran Tombol')}
+                    value={settings.hudButtonSize ?? 48}
+                    min={40}
+                    max={64}
+                    step={2}
+                    suffix="dp"
+                    onChange={(value) => handleUpdate('hudButtonSize', value)}
+                  />
+                  <SliderRow
+                    label={t('settings.hudOpacity.title', 'Transparansi')}
+                    value={settings.hudOpacity ?? 92}
+                    min={30}
+                    max={100}
+                    step={1}
+                    suffix="%"
+                    onChange={(value) => handleUpdate('hudOpacity', value)}
+                  />
                 </div>
 
-                <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
-                  Ukuran, transparansi, dan sisi layar langsung diterapkan ke bubble native yang
-                  sedang tampil — tanpa perlu menyembunyikan HUD lalu menampilkannya lagi. Posisi
-                  geser pengguna tetap dipertahankan, dan nilai tersimpan dipakai lagi setelah
-                  aplikasi dibuka ulang.
-                </p>
-
-                <FieldRow
-                  title={t('settings.hudPosition.title', 'Posisi Tombol')}
-                  description={t(
-                    'settings.hudPosition.desc',
-                    'Sisi layar tempat tombol mengambang berlabuh. Mengubahnya langsung memindahkan bubble yang sedang tampil, dan pengguna tetap bebas menggesernya.'
-                  )}
-                  status={nativeAndroid ? 'functional' : 'not_supported'}
-                >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-xs font-semibold text-[var(--app-text)]">
+                      {t('settings.hudPosition.title', 'Posisi Tombol')}
+                    </span>
+                    <StatusBadge status={nativeAndroid ? 'functional' : 'not_supported'} />
+                  </div>
                   <Segmented<HudPosition>
                     options={[
                       { value: 'left', label: t('settings.hudPosition.left', 'Kiri') },
@@ -1914,586 +1776,433 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     value={(settings.hudPosition ?? 'right') as HudPosition}
                     onChange={(value) => handleUpdate('hudPosition', value)}
                   />
-                </FieldRow>
+                </div>
+              </div>
 
-                {/* HUD Panel Visibility & Menu Specs */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2.5">
-                    <div className="flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-semibold text-[var(--app-text)]">
-                        {t('settings.hudPanels.title', 'Preferensi Tampilan Panel')}
+              {/* HUD Panel Toggles (2x2 Grid) + Specs */}
+              <div className="py-3.5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                  <span className="text-xs font-semibold text-[var(--app-text)]">
+                    {t('settings.hudPanels.title', 'Preferensi Tampilan Panel')}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { key: 'hudPanelChat', label: 'Chat' },
+                      { key: 'hudPanelSoundboard', label: 'Soundboard' },
+                      { key: 'hudPanelMusic', label: 'Music' },
+                      { key: 'hudPanelMixer', label: 'Audio Mixer' },
+                    ] as const
+                  ).map((panel) => (
+                    <div
+                      key={panel.key}
+                      className="flex items-center justify-between gap-2 px-2.5 py-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]"
+                    >
+                      <span className="text-xs font-medium text-[var(--app-text-secondary)] truncate">
+                        {panel.label}
+                      </span>
+                      <Toggle
+                        label={
+                          isEnglish
+                            ? `Show ${panel.label} menu`
+                            : `Tampilkan menu ${panel.label}`
+                        }
+                        checked={!!settings[panel.key]}
+                        onChange={(value) => handleUpdate(panel.key, value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {hudPanelMenus.map((menu) => (
+                    <div
+                      key={menu.id}
+                      className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-start justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-[var(--app-text)]">
+                          {menu.name}
+                        </div>
+                        <div className="text-[10px] text-[var(--app-text-muted)] leading-snug">
+                          {menu.detail}
+                        </div>
+                      </div>
+                      <StatusBadge status={menu.status} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Operational Boundaries */}
+              <div className="py-3.5 last:pb-0 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div
+                  className="p-3 rounded-xl border space-y-1.5"
+                  style={{
+                    backgroundColor: 'var(--app-warn-soft)',
+                    borderColor: 'color-mix(in srgb, var(--app-warn) 42%, transparent)',
+                  }}
+                >
+                  <div
+                    className="flex items-center gap-1.5 text-xs font-semibold"
+                    style={{ color: 'var(--app-warn)' }}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t('settings.hudRules.title', 'Batas Kemampuan Mode')}</span>
+                  </div>
+                  <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
+                    <strong className="text-[var(--app-text)]">Mode A:</strong>{' '}
+                    {isEnglish
+                      ? 'Official TikTok handles LIVE broadcast; SYNTXRR is companion only.'
+                      : 'TikTok resmi menyiarkan LIVE; SYNTXRR pendamping HUD & event.'}
+                  </p>
+                  <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
+                    <strong className="text-[var(--app-text)]">Mode B:</strong>{' '}
+                    {isEnglish
+                      ? 'Standalone Android MediaProjection + RTMP operated from Dashboard.'
+                      : 'Encoder mandiri MediaProjection + RTMP dioperasikan di Dashboard.'}
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Wifi className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
+                      <span className="text-xs font-semibold text-[var(--app-text)] truncate">
+                        {t('settings.hudDeckRule.title', 'Aturan Stream Deck')}
                       </span>
                     </div>
-                    <div className="space-y-1.5">
-                      {(
-                        [
-                          { key: 'hudPanelChat', label: 'Chat' },
-                          { key: 'hudPanelSoundboard', label: 'Soundboard' },
-                          { key: 'hudPanelMusic', label: 'Music' },
-                          { key: 'hudPanelMixer', label: 'Audio Mixer' },
-                        ] as const
-                      ).map((panel) => (
-                        <div
-                          key={panel.key}
-                          className="flex items-center justify-between gap-2 px-3 py-1 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)]"
-                        >
-                          <span className="text-xs text-[var(--app-text-secondary)]">
-                            {panel.label}
-                          </span>
-                          <Toggle
-                            label={
-                              isEnglish
-                                ? `Show ${panel.label} menu`
-                                : `Tampilkan menu ${panel.label}`
-                            }
-                            checked={!!settings[panel.key]}
-                            onChange={(value) => handleUpdate(panel.key, value)}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                    <StatusBadge status="not_connected" />
                   </div>
-
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2.5">
-                    <div className="text-xs font-semibold text-[var(--app-text)]">
-                      {t('settings.hudPanels.sixMenus', 'Enam Menu Panel Floating HUD')}
-                    </div>
-                    <ul className="space-y-2">
-                      {hudPanelMenus.map((menu) => (
-                        <li
-                          key={menu.id}
-                          className="flex items-start justify-between gap-2 pb-2 last:pb-0 border-b last:border-b-0 border-[var(--app-border)]"
-                        >
-                          <div className="min-w-0">
-                            <div className="text-[11px] font-semibold text-[var(--app-text)]">
-                              {menu.name}
-                            </div>
-                            <div className="text-[10px] text-[var(--app-text-muted)] leading-snug">
-                              {menu.detail}
-                            </div>
-                          </div>
-                          <StatusBadge status={menu.status} />
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-[10px] text-[var(--app-text-muted)]">
-                      {t(
-                        'settings.hudPanels.note',
-                        'Panel melayang dioptimalkan untuk pengoperasian satu tangan saat siaran berlangsung.'
-                      )}
-                    </p>
-                  </div>
+                  <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
+                    {t(
+                      'settings.hudDeckRule.desc',
+                      'Stream Deck aktif → Floating HUD nonaktif, dan sebaliknya.'
+                    )}
+                  </p>
                 </div>
-
-                {/* Operational Boundaries: Mode A/B & Stream Deck */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div
-                    className="p-3.5 rounded-xl border space-y-2"
-                    style={{
-                      backgroundColor: 'var(--app-warn-soft)',
-                      borderColor: 'color-mix(in srgb, var(--app-warn) 42%, transparent)',
-                    }}
-                  >
-                    <div
-                      className="flex items-center gap-2 text-xs font-semibold"
-                      style={{ color: 'var(--app-warn)' }}
-                    >
-                      <AlertTriangle className="w-4 h-4 shrink-0" />
-                      <span>{t('settings.hudRules.title', 'Batas Kemampuan Mode')}</span>
-                    </div>
-                    <ul className="text-[11px] text-[var(--app-text-secondary)] space-y-1.5 list-disc pl-4 leading-relaxed">
-                      <li>
-                        <span className="text-[var(--app-text)] font-semibold">Mode A:</span>{' '}
-                        {isEnglish
-                          ? 'Official TikTok app broadcasts the LIVE stream. SYNTXRR STREAM is companion only and never exposes fake Pause/Resume/Stop controls.'
-                          : 'aplikasi TikTok resmi tetap yang menyiarkan LIVE. SYNTXRR STREAM hanya pendamping dan tidak boleh menampilkan Pause/Resume/Stop TikTok yang palsu.'}
-                      </li>
-                      <li>
-                        <span className="text-[var(--app-text)] font-semibold">Mode B:</span>{' '}
-                        {isEnglish
-                          ? 'Standalone Android MediaProjection + MediaCodec RTMP/RTMPS broadcast controls are operated directly from the Dashboard when Mode B is active.'
-                          : 'Kontrol siaran mandiri MediaProjection + MediaCodec RTMP/RTMPS dioperasikan langsung melalui Dashboard saat Mode B dipilih.'}
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Wifi className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                        <span className="text-xs font-semibold text-[var(--app-text)] truncate">
-                          {t('settings.hudDeckRule.title', 'Aturan Stream Deck')}
-                        </span>
-                      </div>
-                      <StatusBadge status="not_connected" />
-                    </div>
-                    <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
-                      {t(
-                        'settings.hudDeckRule.desc',
-                        'Stream Deck aktif → Floating HUD nonaktif, dan sebaliknya untuk mencegah tumpang tindih kontrol.'
-                      )}
-                    </p>
-                    <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
-                      {isEnglish
-                        ? 'Stream Deck session detection is not yet simulated; HUD state is not switched automatically. Stream Deck has its own interface outside Settings.'
-                        : 'Deteksi sesi Stream Deck belum tersedia, jadi status ini tidak disimulasikan dan HUD tidak diubah otomatis. Stream Deck tetap memiliki fiturnya sendiri di luar Settings.'}
-                    </p>
-                  </div>
-                </div>
-              </Section>
-            </div>
+              </div>
+            </ConsolePanel>
           )}
 
-          {/* ================= 4. GRAPHICS & PERFORMANCE CONSOLE ================= */}
+          {/* ================= 4. GRAPHICS, BENCHMARK & RTMP CONSOLE ================= */}
           {activeCategory === 'performance' && (
-            <div className="space-y-4">
-              {/* Hardware Benchmark & Probe Console */}
-              <Section
-                icon={Monitor}
-                title={t('settings.secD.title', 'Grafis & Performa Perangkat')}
-                subtitle={t(
-                  'settings.secD.subtitle',
-                  'Uji perangkat, rekomendasi, kontrol manual resolusi/FPS/bitrate, dan peringatan risiko'
+            <ConsolePanel
+              icon={Monitor}
+              title={t('settings.secD.title', 'Grafis & Performa Perangkat')}
+              subtitle={t(
+                'settings.secD.subtitle',
+                'Uji perangkat, resolusi/FPS/bitrate, profil hardware, dan output RTMP Mode B'
+              )}
+            >
+              {/* Device Benchmark Row */}
+              <DenseRow
+                title={t('settings.deviceTest.title', 'Uji Perangkat Otomatis')}
+                description={t(
+                  'settings.deviceTest.desc',
+                  'Membaca jumlah core CPU, estimasi memori, dan renderer GPU WebGL nyata.'
                 )}
+                status="functional"
               >
-                <FieldRow
-                  title={t('settings.deviceTest.title', 'Uji Perangkat Otomatis')}
-                  description={t(
-                    'settings.deviceTest.desc',
-                    'Membaca jumlah core logis CPU, perkiraan memori, dan renderer GPU WebGL nyata. Uji ini berjalan di WebView/browser; benchmark native Android belum tersedia.'
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={runDeviceTest}
+                    disabled={deviceTestRunning}
+                    className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-2 disabled:opacity-60"
+                  >
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                    <span>
+                      {deviceTestRunning
+                        ? t('settings.deviceTest.running', 'Menguji…')
+                        : t('settings.deviceTest.run', 'Jalankan Uji Perangkat')}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyRecommendations}
+                    disabled={!deviceTest}
+                    className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] disabled:opacity-45"
+                  >
+                    {t('settings.autoApply.applyNow', 'Terapkan Rekomendasi')}
+                  </button>
+                  {deviceTest && (
+                    <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
+                      {new Date(deviceTest.testedAt).toLocaleTimeString(isEnglish ? 'en-US' : 'id-ID')}
+                    </span>
                   )}
-                  status="functional"
-                >
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={runDeviceTest}
-                      disabled={deviceTestRunning}
-                      className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-2 disabled:opacity-60 transition-colors"
-                    >
-                      <Sparkles className="w-4 h-4 shrink-0" />
-                      <span>
-                        {deviceTestRunning
-                          ? t('settings.deviceTest.running', 'Menguji…')
-                          : t('settings.deviceTest.run', 'Jalankan Uji Perangkat')}
-                      </span>
-                    </button>
-                    {deviceTest && (
-                      <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-                        {isEnglish
-                          ? `Tested: ${new Date(deviceTest.testedAt).toLocaleTimeString('en-US')}`
-                          : `Hasil uji: ${new Date(deviceTest.testedAt).toLocaleTimeString('id-ID')}`}
-                      </span>
-                    )}
-                  </div>
+                </div>
 
-                  {deviceTest ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
-                      {[
-                        {
-                          label: 'Logical cores',
-                          value:
-                            deviceTest.cores ??
-                            (isEnglish ? 'unreadable' : 'tidak terbaca'),
-                        },
-                        {
-                          label: 'Device memory',
-                          value: deviceTest.memoryGB
-                            ? `${deviceTest.memoryGB} GB`
-                            : isEnglish
-                            ? 'unreadable'
-                            : 'tidak terbaca',
-                        },
-                        {
-                          label: 'Max texture',
-                          value:
-                            deviceTest.maxTextureSize ??
-                            (isEnglish ? 'unreadable' : 'tidak terbaca'),
-                        },
-                        { label: 'Platform', value: deviceTest.platform },
-                        {
-                          label: 'WebGL renderer',
-                          value:
-                            deviceTest.webglRenderer ??
-                            (isEnglish ? 'unreadable' : 'tidak terbaca'),
-                        },
-                        {
-                          label: isEnglish ? 'Recommendation' : 'Rekomendasi',
-                          value: `${deviceTest.recommendedResolution} / ${deviceTest.recommendedFrameRate} FPS`,
-                        },
-                      ].map((item) => (
-                        <div
-                          key={item.label}
-                          className="p-2.5 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] min-w-0"
-                        >
-                          <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                            {item.label}
-                          </div>
-                          <div className="text-xs text-[var(--app-text)] font-mono-num break-words mt-0.5">
-                            {String(item.value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-[var(--app-text-muted)]">
-                      {t(
-                        'settings.deviceTest.notTested',
-                        'Belum ada hasil uji. Tidak ada nilai yang ditampilkan sebelum pengujian dijalankan.'
-                      )}
-                    </p>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                {deviceTest ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       {
-                        label: isEnglish
-                          ? 'Thermal test (native Android)'
-                          : 'Uji termal (native Android)',
-                        detail: isEnglish
-                          ? 'Needs a native thermal module. No native implementation exists yet.'
-                          : 'Memerlukan modul termal native. Implementasinya belum ada.',
+                        label: 'Logical cores',
+                        value: deviceTest.cores ?? (isEnglish ? 'unreadable' : 'tidak terbaca'),
                       },
                       {
-                        label: isEnglish
-                          ? 'MediaCodec encoder benchmark'
-                          : 'Benchmark encoder MediaCodec',
-                        detail: isEnglish
-                          ? 'Needs the native RTMP/MediaCodec pipeline. Not available yet.'
-                          : 'Memerlukan pipeline RTMP/MediaCodec native. Belum tersedia.',
+                        label: 'Memory',
+                        value: deviceTest.memoryGB
+                          ? `${deviceTest.memoryGB} GB`
+                          : isEnglish
+                          ? 'unreadable'
+                          : 'tidak terbaca',
                       },
-                    ].map((row) => (
+                      {
+                        label: isEnglish ? 'Recommended' : 'Rekomendasi',
+                        value: `${deviceTest.recommendedResolution} / ${deviceTest.recommendedFrameRate}fps · ${deviceTest.recommendedBitrateKbps}k`,
+                      },
+                      {
+                        label: 'Max texture',
+                        value: deviceTest.maxTextureSize ?? (isEnglish ? 'unreadable' : 'tidak terbaca'),
+                      },
+                      { label: 'Platform', value: deviceTest.platform },
+                      {
+                        label: 'WebGL GPU',
+                        value: deviceTest.webglRenderer ?? (isEnglish ? 'unreadable' : 'tidak terbaca'),
+                      },
+                    ].map((item) => (
                       <div
-                        key={row.label}
-                        className="flex items-start justify-between gap-2 p-2.5 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)]"
+                        key={item.label}
+                        className="p-2 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0"
                       >
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-medium text-[var(--app-text)]">
-                            {row.label}
-                          </div>
-                          <div className="text-[10px] text-[var(--app-text-muted)] mt-0.5">
-                            {row.detail}
-                          </div>
+                        <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
+                          {item.label}
                         </div>
-                        <StatusBadge status="coming_soon" />
+                        <div className="text-[11px] text-[var(--app-text)] font-mono-num truncate mt-0.5">
+                          {String(item.value)}
+                        </div>
                       </div>
                     ))}
                   </div>
-                </FieldRow>
-
-                <FieldRow
-                  title={t(
-                    'settings.recommendations.title',
-                    'Rekomendasi Resolusi / FPS / Bitrate'
-                  )}
-                  description={t(
-                    'settings.recommendations.desc',
-                    'Diturunkan dari core dan memori yang terbaca secara heuristik.'
-                  )}
-                  status={deviceTest ? 'stored' : 'pending'}
-                >
-                  {deviceTest ? (
-                    <div className="flex flex-wrap gap-2 text-xs font-mono-num">
-                      <span className="px-2.5 py-1 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-[var(--app-accent-text)] font-semibold">
-                        {isEnglish ? 'Resolution: ' : 'Resolusi: '}
-                        {deviceTest.recommendedResolution}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-[var(--app-accent-text)] font-semibold">
-                        FPS: {deviceTest.recommendedFrameRate}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-[var(--app-accent-text)] font-semibold">
-                        Bitrate: {deviceTest.recommendedBitrateKbps} Kbps
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-[var(--app-text-muted)]">
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--app-text-muted)]">
+                    <span>
                       {t(
-                        'settings.recommendations.empty',
-                        'Jalankan Uji Perangkat untuk melihat rekomendasi.'
+                        'settings.deviceTest.notTested',
+                        'Belum ada hasil uji. Tidak ada nilai sebelum pengujian dijalankan.'
                       )}
-                    </p>
-                  )}
-                </FieldRow>
-
-                {/* Manual Resolution, FPS & Bitrate Console */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--app-text)] mb-2">
-                        {t('settings.manualRes.title', 'Resolusi Manual')}
-                      </label>
-                      <Segmented<ResolutionTarget>
-                        options={[
-                          {
-                            value: '720p',
-                            label: '720p',
-                            hint: isEnglish ? 'Eco' : 'Hemat',
-                          },
-                          {
-                            value: '1080p',
-                            label: '1080p',
-                            hint: isEnglish ? 'Recommended' : 'Disarankan',
-                          },
-                          {
-                            value: '1440p',
-                            label: '1440p',
-                            hint: isEnglish ? 'Heavy' : 'Berat',
-                          },
-                        ]}
-                        value={settings.targetResolution}
-                        onChange={(value) => handleUpdate('targetResolution', value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--app-text)] mb-2">
-                        {t('settings.manualFps.title', 'FPS Manual')}
-                      </label>
-                      <Segmented<FrameRate>
-                        options={[
-                          {
-                            value: 30,
-                            label: '30 FPS',
-                            hint: isEnglish ? 'Battery saver' : 'Hemat baterai',
-                          },
-                          {
-                            value: 60,
-                            label: '60 FPS',
-                            hint: isEnglish ? 'Smooth' : 'Mulus',
-                          },
-                        ]}
-                        columns="grid-cols-2"
-                        value={settings.frameRate}
-                        onChange={(value) => handleUpdate('frameRate', value)}
-                      />
-                    </div>
+                    </span>
                   </div>
+                )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[var(--app-border)]">
-                    <div className="p-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
-                      <SliderRow
-                        label={t('settings.videoBitrate.title', 'Bitrate Video')}
-                        value={settings.videoBitrateKbps}
-                        min={2500}
-                        max={9000}
-                        step={500}
-                        suffix="Kbps"
-                        onChange={(value) => handleUpdate('videoBitrateKbps', value)}
-                      />
-                    </div>
-                    <div className="p-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
-                      <SliderRow
-                        label={t('settings.audioBitrate.title', 'Bitrate Audio')}
-                        value={settings.audioBitrateKbps}
-                        min={96}
-                        max={320}
-                        step={32}
-                        suffix="Kbps"
-                        onChange={(value) => handleUpdate('audioBitrateKbps', value)}
-                      />
-                    </div>
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <span className="text-[11px] text-[var(--app-text-secondary)]">
+                    {t('settings.autoApply.title', 'Auto Apply Rekomendasi')}
+                  </span>
+                  <Toggle
+                    label={t('settings.autoApply.title', 'Auto apply rekomendasi')}
+                    checked={!!settings.autoApplyRecommendations}
+                    onChange={(value) => handleUpdate('autoApplyRecommendations', value)}
+                  />
+                </div>
+              </DenseRow>
+
+              {/* Resolution, FPS & Bitrate Matrix */}
+              <div className="py-3.5 space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--app-text)] mb-1.5">
+                      {t('settings.manualRes.title', 'Resolusi Manual')}
+                    </label>
+                    <Segmented<ResolutionTarget>
+                      options={[
+                        { value: '720p', label: '720p', hint: isEnglish ? 'Eco' : 'Hemat' },
+                        { value: '1080p', label: '1080p', hint: isEnglish ? 'Ideal' : 'Ideal' },
+                        { value: '1440p', label: '1440p', hint: isEnglish ? 'Heavy' : 'Berat' },
+                      ]}
+                      value={settings.targetResolution}
+                      onChange={(value) => handleUpdate('targetResolution', value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--app-text)] mb-1.5">
+                      {t('settings.manualFps.title', 'FPS Manual')}
+                    </label>
+                    <Segmented<FrameRate>
+                      options={[
+                        { value: 30, label: '30 FPS', hint: isEnglish ? 'Eco' : 'Hemat' },
+                        { value: 60, label: '60 FPS', hint: isEnglish ? 'Smooth' : 'Mulus' },
+                      ]}
+                      columns="grid-cols-2"
+                      value={settings.frameRate}
+                      onChange={(value) => handleUpdate('frameRate', value)}
+                    />
                   </div>
                 </div>
 
-                <FieldRow
-                  title={t('settings.autoApply.title', 'Auto Apply Rekomendasi')}
-                  description={t(
-                    'settings.autoApply.desc',
-                    'Saat aktif, hasil uji perangkat langsung ditulis ke pengaturan. Kontrol manual tidak pernah dikunci.'
-                  )}
-                  status="functional"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <span className="text-[11px] text-[var(--app-text-secondary)]">
-                      {settings.autoApplyRecommendations
-                        ? isEnglish
-                          ? 'Active — recommendations applied after test completes'
-                          : 'Aktif — rekomendasi diterapkan setelah uji selesai'
-                        : isEnglish
-                        ? 'Inactive — recommendations only displayed'
-                        : 'Nonaktif — rekomendasi hanya ditampilkan'}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={applyRecommendations}
-                        disabled={!deviceTest}
-                        className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] disabled:opacity-45 transition-colors"
-                      >
-                        {t('settings.autoApply.applyNow', 'Terapkan Sekarang')}
-                      </button>
-                      <Toggle
-                        label={t('settings.autoApply.title', 'Auto apply rekomendasi')}
-                        checked={!!settings.autoApplyRecommendations}
-                        onChange={(value) => handleUpdate('autoApplyRecommendations', value)}
-                      />
-                    </div>
-                  </div>
-                </FieldRow>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <SliderRow
+                    label={t('settings.videoBitrate.title', 'Bitrate Video')}
+                    value={settings.videoBitrateKbps}
+                    min={2500}
+                    max={9000}
+                    step={500}
+                    suffix="Kbps"
+                    onChange={(value) => handleUpdate('videoBitrateKbps', value)}
+                  />
+                  <SliderRow
+                    label={t('settings.audioBitrate.title', 'Bitrate Audio')}
+                    value={settings.audioBitrateKbps}
+                    min={96}
+                    max={320}
+                    step={32}
+                    suffix="Kbps"
+                    onChange={(value) => handleUpdate('audioBitrateKbps', value)}
+                  />
+                </div>
 
                 {warnings.length > 0 ? (
                   <div
                     role="alert"
-                    className="p-3.5 rounded-xl border space-y-1.5"
+                    className="p-3 rounded-xl border space-y-1"
                     style={{
                       backgroundColor: 'var(--app-warn-soft)',
                       borderColor: 'color-mix(in srgb, var(--app-warn) 45%, transparent)',
                     }}
                   >
                     <div
-                      className="flex items-center gap-2 text-xs font-bold"
+                      className="flex items-center gap-1.5 text-xs font-bold"
                       style={{ color: 'var(--app-warn)' }}
                     >
-                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                       <span>{t('settings.warnings.title', 'Peringatan Konfigurasi')}</span>
                     </div>
-                    <ul className="text-[11px] text-[var(--app-text-secondary)] space-y-1 list-disc pl-4">
+                    <ul className="text-[11px] text-[var(--app-text-secondary)] space-y-0.5 list-disc pl-4">
                       {warnings.map((warning) => (
                         <li key={warning}>{warning}</li>
                       ))}
                     </ul>
-                    <p className="text-[10px] text-[var(--app-text-muted)]">
-                      {isEnglish
-                        ? 'Advisory notice, not a hard restriction. Values can still be modified.'
-                        : 'Ini peringatan jujur, bukan pembatasan. Nilai tetap dapat diubah.'}
-                    </p>
                   </div>
                 ) : (
                   <p
-                    className="text-xs flex items-center gap-2 font-medium"
+                    className="text-xs flex items-center gap-1.5 font-medium"
                     style={{ color: 'var(--app-ok)' }}
                   >
-                    <Check className="w-4 h-4 shrink-0" />
+                    <Check className="w-3.5 h-3.5 shrink-0" />
                     <span>
                       {t('settings.warnings.none', 'Tidak ada konfigurasi berisiko terdeteksi.')}
                     </span>
                   </p>
                 )}
+              </div>
 
-                {/* Performance Profile & Hardware Acceleration */}
-                <div className="pt-3 border-t border-[var(--app-border)] space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                    <span className="text-xs font-bold text-[var(--app-text)]">
-                      {t('settings.profile.title', 'Profil Performa & Hardware')}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    {(
-                      [
-                        {
-                          id: 'battery_saver',
-                          name: t('settings.profile.battery', 'Hemat Baterai'),
-                          desc: t(
-                            'settings.profile.batteryDesc',
-                            'Alokasi RAM minimal, suhu stabil'
-                          ),
-                          icon: Battery,
-                        },
-                        {
-                          id: 'balanced',
-                          name: t('settings.profile.balanced', 'Seimbang'),
-                          desc: t(
-                            'settings.profile.balancedDesc',
-                            'Optimal untuk 1080p durasi panjang'
-                          ),
-                          icon: Cpu,
-                        },
-                        {
-                          id: 'performance',
-                          name: t('settings.profile.performance', 'Performa Maksimal'),
-                          desc: t(
-                            'settings.profile.performanceDesc',
-                            'Prioritas bitrate tinggi, latensi rendah'
-                          ),
-                          icon: Flame,
-                        },
-                      ] as const
-                    ).map((profile) => {
-                      const Icon = profile.icon;
-                      const isSelected = settings.performanceProfile === profile.id;
-                      return (
-                        <button
-                          key={profile.id}
-                          type="button"
-                          onClick={() =>
-                            handleUpdate('performanceProfile', profile.id as PerformanceProfile)
-                          }
-                          aria-pressed={isSelected}
-                          className={`min-h-[82px] p-3.5 rounded-xl text-left border transition-colors ${
-                            isSelected
-                              ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
-                              : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <Icon
-                              className={`w-4 h-4 shrink-0 ${
-                                isSelected
-                                  ? 'text-[var(--app-accent-text)]'
-                                  : 'text-[var(--app-text-muted)]'
-                              }`}
-                            />
-                            <span
-                              className={`text-xs font-bold ${
-                                isSelected
-                                  ? 'text-[var(--app-accent-text)]'
-                                  : 'text-[var(--app-text)]'
-                              }`}
-                            >
-                              {profile.name}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[var(--app-text-muted)] leading-snug">
-                            {profile.desc}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-[var(--app-text)]">
-                        {t('settings.gpuAccel.title', 'Akselerasi Hardware GPU')}
-                      </div>
-                      <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
-                        {t(
-                          'settings.gpuAccel.desc',
-                          'Gunakan MediaCodec H.264 / HEVC hardware jika tersedia di Android'
-                        )}
-                      </div>
-                    </div>
-                    <Toggle
-                      label={t('settings.gpuAccel.title', 'Akselerasi Hardware GPU')}
-                      checked={!!settings.hardwareAcceleration}
-                      onChange={(value) => handleUpdate('hardwareAcceleration', value)}
-                    />
-                  </div>
+              {/* Performance Profile & Hardware GPU */}
+              <div className="py-3.5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                  <span className="text-xs font-bold text-[var(--app-text)]">
+                    {t('settings.profile.title', 'Profil Performa & Hardware')}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      {
+                        id: 'battery_saver',
+                        name: t('settings.profile.battery', 'Hemat'),
+                        desc: isEnglish ? 'Stable temp' : 'Suhu stabil',
+                        icon: Battery,
+                      },
+                      {
+                        id: 'balanced',
+                        name: t('settings.profile.balanced', 'Seimbang'),
+                        desc: isEnglish ? 'Long 1080p' : '1080p stabil',
+                        icon: Cpu,
+                      },
+                      {
+                        id: 'performance',
+                        name: t('settings.profile.performance', 'Maksimal'),
+                        desc: isEnglish ? 'Low latency' : 'Latensi rendah',
+                        icon: Flame,
+                      },
+                    ] as const
+                  ).map((profile) => {
+                    const Icon = profile.icon;
+                    const isSelected = settings.performanceProfile === profile.id;
+                    return (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        onClick={() =>
+                          handleUpdate('performanceProfile', profile.id as PerformanceProfile)
+                        }
+                        aria-pressed={isSelected}
+                        className={`btn-press min-h-[60px] p-2.5 rounded-xl text-left border ${
+                          isSelected
+                            ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent-border)] text-[var(--app-text)]'
+                            : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <Icon
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isSelected
+                                ? 'text-[var(--app-accent-text)]'
+                                : 'text-[var(--app-text-muted)]'
+                            }`}
+                          />
+                          <span
+                            className={`text-xs font-bold truncate ${
+                              isSelected ? 'text-[var(--app-accent-text)]' : 'text-[var(--app-text)]'
+                            }`}
+                          >
+                            {profile.name}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-[var(--app-text-muted)] truncate">
+                          {profile.desc}
+                        </p>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* Mode B Output (RTMP / RTMPS & Audio Source) */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Radio className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)] truncate">
-                        {t('settings.rtmp.title', 'Output Siaran Mode B (RTMP / RTMPS)')}
-                      </span>
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-[var(--app-text)]">
+                      {t('settings.gpuAccel.title', 'Akselerasi Hardware GPU')}
                     </div>
-                    <StatusBadge
-                      status={
-                        rtmpValidation.valid
-                          ? nativeAndroid
-                            ? 'functional'
-                            : 'stored'
-                          : 'not_connected'
-                      }
-                    />
+                    <div className="text-[11px] text-[var(--app-text-muted)]">
+                      {t(
+                        'settings.gpuAccel.desc',
+                        'Gunakan MediaCodec H.264 / HEVC hardware jika tersedia'
+                      )}
+                    </div>
                   </div>
+                  <Toggle
+                    label={t('settings.gpuAccel.title', 'Akselerasi Hardware GPU')}
+                    checked={!!settings.hardwareAcceleration}
+                    onChange={(value) => handleUpdate('hardwareAcceleration', value)}
+                  />
+                </div>
+              </div>
 
+              {/* Mode B RTMP / RTMPS Output */}
+              <div className="py-3.5 last:pb-0 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Radio className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                    <span className="text-xs font-bold text-[var(--app-text)] truncate">
+                      {t('settings.rtmp.title', 'Output Siaran Mode B (RTMP / RTMPS)')}
+                    </span>
+                  </div>
+                  <StatusBadge
+                    status={
+                      rtmpValidation.valid
+                        ? nativeAndroid
+                          ? 'functional'
+                          : 'stored'
+                        : 'not_connected'
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[var(--app-text-secondary)] font-medium mb-1.5 text-xs">
+                    <label className="block text-[var(--app-text-secondary)] font-medium mb-1 text-xs">
                       {t('settings.rtmp.url', 'URL Server RTMP / RTMPS')}
                     </label>
                     <input
@@ -2501,7 +2210,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       value={settings.rtmpServer}
                       onChange={(e) => handleUpdate('rtmpServer', e.target.value)}
                       placeholder="rtmp://live.twitch.tv/app"
-                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface)] border text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] border text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
                       style={{
                         borderColor: rtmpValidation.serverError
                           ? 'color-mix(in srgb, var(--app-warn) 70%, transparent)'
@@ -2518,21 +2227,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <label className="text-[var(--app-text-secondary)] font-medium text-xs">
-                        {t('settings.rtmp.key', 'Stream Key / Kunci Siaran')}
+                        {t('settings.rtmp.key', 'Stream Key')}
                       </label>
                       <button
                         type="button"
                         onClick={() => setShowStreamKey(!showStreamKey)}
-                        className="min-h-[36px] px-2 text-xs font-semibold text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1"
+                        className="min-h-[24px] px-1.5 text-[11px] font-semibold text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1"
                       >
                         {showStreamKey ? (
                           <>
-                            <EyeOff className="w-3.5 h-3.5" />
+                            <EyeOff className="w-3 h-3" />
                             <span>{t('settings.rtmp.hide', 'Sembunyikan')}</span>
                           </>
                         ) : (
                           <>
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-3 h-3" />
                             <span>{t('settings.rtmp.show', 'Tampilkan')}</span>
                           </>
                         )}
@@ -2542,9 +2251,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       type={showStreamKey ? 'text' : 'password'}
                       value={settings.streamKey}
                       onChange={(e) => handleUpdate('streamKey', e.target.value)}
-                      placeholder="Masukkan stream key platform Anda"
+                      placeholder="Stream key platform..."
                       autoComplete="off"
-                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface)] border text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] border text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
                       style={{
                         borderColor: rtmpValidation.streamKeyError
                           ? 'color-mix(in srgb, var(--app-warn) 70%, transparent)'
@@ -2557,311 +2266,213 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       </p>
                     )}
                   </div>
-
-                  <div className="pt-1 space-y-2">
-                    <label className="block text-[var(--app-text-secondary)] font-medium text-xs">
-                      {isEnglish ? 'Mode B Audio Source' : 'Sumber Audio Mode B'}
-                    </label>
-                    <Segmented<ModeBAudioSource>
-                      columns="grid-cols-1 min-[360px]:grid-cols-3"
-                      options={[
-                        {
-                          value: 'mix',
-                          label: isEnglish ? 'Mixed' : 'Campuran',
-                          hint: isEnglish ? 'Internal + Mic' : 'Sistem + Mic',
-                        },
-                        {
-                          value: 'internal',
-                          label: isEnglish ? 'Internal' : 'Audio Internal',
-                          hint: 'Android 10+',
-                        },
-                        {
-                          value: 'microphone',
-                          label: isEnglish ? 'Microphone' : 'Mikrofon',
-                          hint: isEnglish ? 'Mic only' : 'Mic saja',
-                        },
-                      ]}
-                      value={currentAudioSource}
-                      onChange={(value) => handleUpdate('modeBAudioSource', value)}
-                    />
-                    <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
-                      {isEnglish
-                        ? 'Internal playback capture requires Android 10+ and RECORD_AUDIO permission. Mixed mode falls back to microphone only if internal capture is unavailable on the device.'
-                        : 'Capture audio internal memerlukan Android 10+ dan izin RECORD_AUDIO. Mode Campuran hanya beralih ke mikrofon bila capture playback sistem tidak tersedia.'}
-                    </p>
-                  </div>
-
-                  <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed pt-2 border-t border-[var(--app-border)]">
-                    {isEnglish
-                      ? 'Stream keys are saved locally per device and never included in backup files. Operate Go Live, Stop, and Screen Reshare from the Dashboard when Mode B is active.'
-                      : 'Kredensial disimpan lokal per perangkat dan tidak pernah disertakan dalam file cadangan. Pengoperasian Mulai Siaran, Hentikan, Layar Tunggu, dan Bagikan Layar Ulang dilakukan di Dashboard saat Mode B dipilih.'}
-                  </p>
                 </div>
-              </Section>
-            </div>
+
+                <div>
+                  <label className="block text-[var(--app-text-secondary)] font-medium text-xs mb-1.5">
+                    {isEnglish ? 'Mode B Audio Source' : 'Sumber Audio Mode B'}
+                  </label>
+                  <Segmented<ModeBAudioSource>
+                    options={[
+                      {
+                        value: 'mix',
+                        label: isEnglish ? 'Mixed' : 'Campuran',
+                        hint: isEnglish ? 'Sys + Mic' : 'Sistem + Mic',
+                      },
+                      {
+                        value: 'internal',
+                        label: isEnglish ? 'Internal' : 'Internal',
+                        hint: 'Android 10+',
+                      },
+                      {
+                        value: 'microphone',
+                        label: isEnglish ? 'Mic' : 'Mikrofon',
+                        hint: isEnglish ? 'Mic only' : 'Mic saja',
+                      },
+                    ]}
+                    value={currentAudioSource}
+                    onChange={(value) => handleUpdate('modeBAudioSource', value)}
+                  />
+                </div>
+              </div>
+            </ConsolePanel>
           )}
 
           {/* =============================== 5. SYSTEM =============================== */}
           {activeCategory === 'system' && (
-            <div className="space-y-4">
-              <Section
-                icon={Lock}
-                title={t('settings.secE.title', 'Sistem (System)')}
-                subtitle={t(
-                  'settings.secE.subtitle',
-                  'Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data'
+            <ConsolePanel
+              icon={Lock}
+              title={t('settings.secE.title', 'Sistem (System)')}
+              subtitle={t(
+                'settings.secE.subtitle',
+                'Manajer izin, penyimpanan & cache, diagnostik, serta pencadangan data'
+              )}
+            >
+              {/* Permissions Manager 2x2 Grid */}
+              <DenseRow
+                title={t('settings.permissions.title', 'Permissions Manager')}
+                description={t(
+                  'settings.permissions.desc',
+                  'Status izin aktual perangkat & WebView.'
                 )}
+                status="functional"
               >
-                {/* Permissions Manager */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Lock className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)]">
-                        {t('settings.permissions.title', 'Permissions Manager')}
-                      </span>
-                    </div>
-                    <StatusBadge status="functional" />
-                  </div>
-                  <p className="text-[11px] text-[var(--app-text-muted)]">
-                    {t(
-                      'settings.permissions.desc',
-                      'Status dibaca dari Permissions API dan Notification API secara nyata.'
-                    )}
-                  </p>
-
-                  <div className="space-y-2">
-                    {(
-                      [
-                        {
-                          key: 'camera',
-                          label: t('settings.permissions.camera', 'Kamera'),
-                          kind: 'camera' as const,
-                        },
-                        {
-                          key: 'microphone',
-                          label: t('settings.permissions.mic', 'Mikrofon'),
-                          kind: 'microphone' as const,
-                        },
-                      ]
-                    ).map((item) => (
-                      <div
-                        key={item.key}
-                        className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[var(--app-text)]">
-                            {item.label}
-                          </div>
-                          <div className="text-[11px] text-[var(--app-text-muted)] font-mono-num truncate">
-                            {permissionState[item.key] ??
-                              (isEnglish ? 'checking…' : 'memeriksa…')}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void requestMediaPermission(item.kind)}
-                          disabled={permissionBusy === item.kind}
-                          className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] disabled:opacity-50 shrink-0 transition-colors"
-                        >
-                          {permissionBusy === item.kind
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    {
+                      key: 'camera',
+                      label: t('settings.permissions.camera', 'Kamera'),
+                      status: permissionState.camera ?? (isEnglish ? 'checking…' : 'memeriksa…'),
+                      busy: permissionBusy === 'camera',
+                      disabled: false,
+                      btnLabel: t('settings.permissions.request', 'Minta Izin'),
+                      onClick: () => void requestMediaPermission('camera'),
+                    },
+                    {
+                      key: 'microphone',
+                      label: t('settings.permissions.mic', 'Mikrofon'),
+                      status: permissionState.microphone ?? (isEnglish ? 'checking…' : 'memeriksa…'),
+                      busy: permissionBusy === 'microphone',
+                      disabled: false,
+                      btnLabel: t('settings.permissions.request', 'Minta Izin'),
+                      onClick: () => void requestMediaPermission('microphone'),
+                    },
+                    {
+                      key: 'notifications',
+                      label: t('settings.permissions.notif', 'Notifikasi'),
+                      status:
+                        permissionState.notifications ?? (isEnglish ? 'checking…' : 'memeriksa…'),
+                      busy: permissionBusy === 'notifications',
+                      disabled: false,
+                      btnLabel: t('settings.permissions.request', 'Minta Izin'),
+                      onClick: () => void requestNotification(),
+                    },
+                    {
+                      key: 'overlay',
+                      label: t('settings.permissions.overlay', 'Overlay HUD'),
+                      status:
+                        overlayGranted === null
+                          ? nativeAndroid
                             ? isEnglish
-                              ? 'Requesting…'
-                              : 'Meminta…'
-                            : t('settings.permissions.request', 'Minta Izin')}
-                        </button>
-                      </div>
-                    ))}
-
-                    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
+                              ? 'checking…'
+                              : 'memeriksa…'
+                            : isEnglish
+                            ? 'Android APK only'
+                            : 'Khusus APK Android'
+                          : overlayGranted
+                          ? isEnglish
+                            ? 'granted'
+                            : 'diizinkan'
+                          : isEnglish
+                          ? 'not granted'
+                          : 'belum diizinkan',
+                      busy: false,
+                      disabled: !nativeAndroid,
+                      btnLabel: overlayGranted
+                        ? t('settings.permissions.recheck', 'Periksa Ulang')
+                        : t('settings.permissions.request', 'Minta Izin'),
+                      onClick: () => void askOverlayPermission(),
+                    },
+                  ].map((perm) => (
+                    <div
+                      key={perm.key}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]"
+                    >
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-[var(--app-text)]">
-                          {t('settings.permissions.notif', 'Notifikasi')}
+                        <div className="text-xs font-semibold text-[var(--app-text)] truncate">
+                          {perm.label}
                         </div>
                         <div className="text-[11px] text-[var(--app-text-muted)] font-mono-num truncate">
-                          {permissionState.notifications ??
-                            (isEnglish ? 'checking…' : 'memeriksa…')}
+                          {perm.status}
                         </div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => void requestNotification()}
-                        disabled={permissionBusy === 'notifications'}
-                        className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] disabled:opacity-50 shrink-0 transition-colors"
+                        onClick={perm.onClick}
+                        disabled={perm.busy || perm.disabled}
+                        className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] disabled:opacity-50 shrink-0"
                       >
-                        {permissionBusy === 'notifications'
+                        {perm.busy
                           ? isEnglish
                             ? 'Requesting…'
                             : 'Meminta…'
-                          : t('settings.permissions.request', 'Minta Izin')}
+                          : perm.btnLabel}
                       </button>
                     </div>
-
-                    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)]">
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-[var(--app-text)]">
-                          {t('settings.permissions.overlay', 'Overlay (Floating HUD)')}
-                        </div>
-                        <div className="text-[11px] text-[var(--app-text-muted)] font-mono-num truncate">
-                          {overlayGranted === null
-                            ? nativeAndroid
-                              ? isEnglish
-                                ? 'checking…'
-                                : 'memeriksa…'
-                              : isEnglish
-                              ? 'only available in Android APK'
-                              : 'hanya tersedia di APK Android'
-                            : overlayGranted
-                            ? isEnglish
-                              ? 'granted'
-                              : 'diizinkan'
-                            : isEnglish
-                            ? 'not granted'
-                            : 'belum diizinkan'}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void askOverlayPermission()}
-                        disabled={!nativeAndroid}
-                        className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[var(--app-surface-elevated)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] disabled:opacity-50 shrink-0 transition-colors"
-                      >
-                        {overlayGranted
-                          ? t('settings.permissions.recheck', 'Periksa Ulang')
-                          : t('settings.permissions.request', 'Minta Izin')}
-                      </button>
-                    </div>
-                  </div>
+                  ))}
                 </div>
+              </DenseRow>
 
-                {/* Storage & Cache */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <HardDrive className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)]">
-                        {t('settings.storage.title', 'Penyimpanan & Cache')}
+              {/* Storage & Cache */}
+              <DenseRow
+                title={t('settings.storage.title', 'Penyimpanan & Cache')}
+                status={storageInfo ? 'functional' : 'pending'}
+              >
+                {storageInfo && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-[var(--app-text-secondary)]">
+                      <span>{t('settings.storage.used', 'Terpakai')}</span>
+                      <span className="font-mono-num font-semibold text-[var(--app-text)]">
+                        {formatBytes(storageInfo.usage)} / {formatBytes(storageInfo.quota)}
                       </span>
                     </div>
-                    <StatusBadge status={storageInfo ? 'functional' : 'pending'} />
-                  </div>
-                  {storageInfo ? (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs text-[var(--app-text-secondary)]">
-                        <span>{t('settings.storage.used', 'Terpakai')}</span>
-                        <span className="font-mono-num font-semibold text-[var(--app-text)]">
-                          {formatBytes(storageInfo.usage)} / {formatBytes(storageInfo.quota)}
-                        </span>
-                      </div>
-                      <div className="h-2.5 w-full rounded-full bg-[var(--app-surface)] border border-[var(--app-border)] overflow-hidden">
-                        <div
-                          className="h-full bg-[var(--app-accent)]"
-                          style={{
-                            width: `${Math.min(
-                              100,
-                              storageInfo.quota > 0
-                                ? (storageInfo.usage / storageInfo.quota) * 100
-                                : 0
-                            )}%`,
-                          }}
-                        />
-                      </div>
+                    <div className="h-2 w-full rounded-full bg-[var(--app-bg)] border border-[var(--app-border)] overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--app-accent)]"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            storageInfo.quota > 0
+                              ? (storageInfo.usage / storageInfo.quota) * 100
+                              : 0
+                          )}%`,
+                        }}
+                      />
                     </div>
-                  ) : (
-                    <p className="text-xs text-[var(--app-text-muted)]">
-                      {isEnglish
-                        ? 'Storage quota could not be read.'
-                        : 'Perkiraan penyimpanan belum dapat dibaca.'}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => void clearAppCache()}
-                      className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-2 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-[var(--app-error)] shrink-0" />
-                      <span>{t('settings.storage.clearCache', 'Bersihkan Cache Aplikasi')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void refreshStorage()}
-                      className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-2 transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                      <span>{t('settings.storage.refresh', 'Segarkan')}</span>
-                    </button>
                   </div>
-                  {cacheMessage && (
-                    <p className="text-xs text-[var(--app-accent-text)]">{cacheMessage}</p>
-                  )}
-                  <p className="text-[11px] text-[var(--app-text-muted)]">
-                    {t(
-                      'settings.storage.note',
-                      'Hanya Cache Storage yang dihapus. IndexedDB (preset, pengaturan) tidak disentuh.'
-                    )}
-                  </p>
-                </div>
-
-                {/* Diagnostics */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Activity className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)]">
-                        {t('settings.diag.title', 'Diagnostik')}
-                      </span>
-                    </div>
-                    <StatusBadge status="functional" />
-                  </div>
-                  <div className="max-h-48 overflow-y-auto rounded-xl bg-[var(--app-bg)] border border-[var(--app-border)] p-3">
-                    <ul className="space-y-1">
-                      {diagnosticsLines.map((line) => (
-                        <li
-                          key={line}
-                          className="text-[11px] text-[var(--app-text-secondary)] font-mono-num break-words"
-                        >
-                          {line}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => void copyDiagnostics()}
-                    className="min-h-[44px] px-4 py-2 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-2 transition-colors"
+                    onClick={() => void clearAppCache()}
+                    className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-2"
                   >
-                    <Copy className="w-3.5 h-3.5 shrink-0" />
-                    <span>{t('settings.diag.copy', 'Salin Diagnostik')}</span>
+                    <Trash2 className="w-3.5 h-3.5 text-[var(--app-error)] shrink-0" />
+                    <span>{t('settings.storage.clearCache', 'Bersihkan Cache Aplikasi')}</span>
                   </button>
-                  {diagnosticsMessage && (
-                    <p className="text-xs text-[var(--app-accent-text)]">{diagnosticsMessage}</p>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => void refreshStorage()}
+                    className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-2"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t('settings.storage.refresh', 'Segarkan')}</span>
+                  </button>
                 </div>
+                {cacheMessage && (
+                  <p className="text-xs text-[var(--app-accent-text)]">{cacheMessage}</p>
+                )}
+              </DenseRow>
 
-                {/* Integration Credentials */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <KeyRound className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)]">
-                        {t('settings.credentials.title', 'Kredensial Integrasi')}
-                      </span>
-                    </div>
-                    <StatusBadge status="stored" />
-                  </div>
-
+              {/* Integration API Credentials */}
+              <DenseRow
+                title={t('settings.credentials.title', 'Kredensial Integrasi')}
+                status="stored"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <label className="text-[var(--app-text-secondary)] font-medium text-xs flex items-center gap-1.5">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="text-[var(--app-text-secondary)] font-medium text-xs flex items-center gap-1.5 truncate">
                         <Music2 className="w-3.5 h-3.5 text-[var(--app-error)] shrink-0" />
-                        <span>{t('settings.credentials.youtube', 'Kunci API YouTube Data v3')}</span>
+                        <span className="truncate">
+                          {t('settings.credentials.youtube', 'YouTube Data v3')}
+                        </span>
                       </label>
                       <a
                         href="https://console.cloud.google.com/apis/credentials"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-xs text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 shrink-0"
+                        className="text-[11px] text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 shrink-0"
                       >
                         <span>{t('settings.credentials.get', 'Dapatkan')}</span>
                         <ExternalLink className="w-3 h-3" />
@@ -2873,21 +2484,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         value={settings.youtubeApiKey || ''}
                         onChange={(e) => handleUpdate('youtubeApiKey', e.target.value)}
                         placeholder="AIzaSy..."
-                        className="w-full min-h-[44px] px-3 py-2 pr-12 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
+                        className="w-full min-h-[44px] px-3 py-2 pr-12 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
                       />
                       <button
                         type="button"
                         onClick={() => setShowYouTubeKey(!showYouTubeKey)}
                         className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 text-[var(--app-text-muted)] hover:text-[var(--app-text)] rounded-r-xl"
-                        title={
-                          showYouTubeKey
-                            ? isEnglish
-                              ? 'Hide'
-                              : 'Sembunyikan'
-                            : isEnglish
-                            ? 'Show'
-                            : 'Tampilkan'
-                        }
                         aria-label={
                           showYouTubeKey
                             ? isEnglish
@@ -2905,26 +2507,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         )}
                       </button>
                     </div>
-                    <p className="text-[11px] text-[var(--app-text-muted)] mt-1">
-                      {isEnglish
-                        ? 'Used purely for official YouTube video title and thumbnail search.'
-                        : 'Digunakan murni untuk pencarian judul dan thumbnail video YouTube resmi.'}
-                    </p>
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <label className="text-[var(--app-text-secondary)] font-medium text-xs flex items-center gap-1.5">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="text-[var(--app-text-secondary)] font-medium text-xs flex items-center gap-1.5 truncate">
                         <Music2 className="w-3.5 h-3.5 text-[var(--app-ok)] shrink-0" />
-                        <span>
-                          {t('settings.credentials.spotify', 'Client ID Spotify Developer')}
+                        <span className="truncate">
+                          {t('settings.credentials.spotify', 'Spotify Client ID')}
                         </span>
                       </label>
                       <a
                         href="https://developer.spotify.com/dashboard"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-xs text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 shrink-0"
+                        className="text-[11px] text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 shrink-0"
                       >
                         <span>{t('settings.credentials.portal', 'Portal')}</span>
                         <ExternalLink className="w-3 h-3" />
@@ -2935,288 +2532,235 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       value={settings.spotifyClientId || ''}
                       onChange={(e) => handleUpdate('spotifyClientId', e.target.value)}
                       placeholder={
-                        isEnglish
-                          ? 'Spotify Client ID (32 characters)...'
-                          : 'Spotify Client ID 32-karakter...'
+                        isEnglish ? '32-char Client ID...' : 'Client ID 32-karakter...'
                       }
-                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-mono-num text-xs focus:outline-none focus:border-[var(--app-accent)]"
                     />
-                    <p className="text-[11px] text-[var(--app-text-muted)] mt-1">
-                      {isEnglish
-                        ? 'Requires redirect URI pointed to this application for PKCE authentication.'
-                        : 'Memerlukan redirect URI yang diarahkan ke aplikasi ini untuk autentikasi PKCE.'}
-                    </p>
                   </div>
                 </div>
+              </DenseRow>
 
-                {/* Routine Backup & Restore */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Database className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)]">
-                        {t('settings.backup.title', 'Pencadangan & Pemulihan JSON')}
-                      </span>
-                    </div>
-                    <StatusBadge status="functional" />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={onExportData}
-                      className="min-h-[44px] p-3 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <Download className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span>{t('settings.backup.export', 'Ekspor Cadangan')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="min-h-[44px] p-3 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <Upload className="w-4 h-4 shrink-0" style={{ color: 'var(--app-ok)' }} />
-                      <span>{t('settings.backup.import', 'Pulihkan Cadangan')}</span>
-                    </button>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      accept=".json,application/json"
-                      className="hidden"
-                    />
-                  </div>
-                  <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed flex items-start gap-2">
-                    <ShieldAlert className="w-4 h-4 text-[var(--app-text-muted)] shrink-0 mt-0.5" />
-                    <span>
-                      {t(
-                        'settings.backup.securityNote',
-                        'File cadangan tidak memuat Stream Key atau kunci API. Kredensial lokal terlindungi aman.'
-                      )}
+              {/* Diagnostics Viewer */}
+              <DenseRow
+                title={t('settings.diag.title', 'Diagnostik')}
+                status="functional"
+              >
+                <div className="max-h-36 overflow-y-auto rounded-xl bg-[var(--app-bg)] border border-[var(--app-border)] p-2.5">
+                  <ul className="space-y-0.5">
+                    {diagnosticsLines.map((line) => (
+                      <li
+                        key={line}
+                        className="text-[11px] text-[var(--app-text-secondary)] font-mono-num break-words"
+                      >
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => void copyDiagnostics()}
+                    className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] inline-flex items-center gap-2"
+                  >
+                    <Copy className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t('settings.diag.copy', 'Salin Diagnostik')}</span>
+                  </button>
+                  {diagnosticsMessage && (
+                    <span className="text-xs text-[var(--app-accent-text)]">
+                      {diagnosticsMessage}
                     </span>
-                  </p>
+                  )}
                 </div>
+              </DenseRow>
 
-                {/* Isolated Danger Zone: Reset Defaults */}
+              {/* Routine Backup & Restore */}
+              <DenseRow
+                title={t('settings.backup.title', 'Pencadangan & Pemulihan JSON')}
+                description={t(
+                  'settings.backup.securityNote',
+                  'File cadangan tidak memuat Stream Key atau kunci API.'
+                )}
+                status="functional"
+              >
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={onExportData}
+                    className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                    <span>{t('settings.backup.export', 'Ekspor Cadangan')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] text-xs font-semibold flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4 shrink-0" style={{ color: 'var(--app-ok)' }} />
+                    <span>{t('settings.backup.import', 'Pulihkan Cadangan')}</span>
+                  </button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept=".json,application/json"
+                    className="hidden"
+                  />
+                </div>
+              </DenseRow>
+
+              {/* Danger Zone: Reset Defaults */}
+              <div className="pt-3.5">
                 <div
-                  className="p-4 rounded-xl border space-y-3"
+                  className="p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   style={{
                     backgroundColor: 'var(--app-error-soft)',
                     borderColor: 'color-mix(in srgb, var(--app-error) 45%, transparent)',
                   }}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div
-                        className="text-xs font-bold flex items-center gap-2"
-                        style={{ color: 'var(--app-error)' }}
-                      >
-                        <AlertTriangle className="w-4 h-4 shrink-0" />
-                        <span>
-                          {isEnglish ? 'Danger Zone — Factory Reset' : 'Zona Berisiko — Atur Ulang Penuh'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[var(--app-text-secondary)] mt-1 leading-relaxed">
-                        {isEnglish
-                          ? 'Resets app settings, presets, studio elements, custom soundboard audio, marketplace items, TikTok account state, TTS config, and music queue after confirmation.'
-                          : 'Mengembalikan pengaturan, preset, elemen Studio, audio kustom soundboard, marketplace, status akun TikTok, TTS, dan antrean musik ke bawaan setelah konfirmasi.'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={onResetDefaults}
-                      className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border text-xs font-bold inline-flex items-center justify-center gap-2 shrink-0 transition-colors"
-                      style={{
-                        borderColor: 'color-mix(in srgb, var(--app-error) 60%, transparent)',
-                        color: 'var(--app-error)',
-                      }}
+                  <div className="min-w-0">
+                    <div
+                      className="text-xs font-bold flex items-center gap-1.5"
+                      style={{ color: 'var(--app-error)' }}
                     >
-                      <RotateCcw className="w-4 h-4 shrink-0" />
-                      <span>{t('settings.backup.reset', 'Atur Ulang Pengaturan')}</span>
-                    </button>
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>
+                        {isEnglish
+                          ? 'Danger Zone — Factory Reset'
+                          : 'Zona Berisiko — Atur Ulang Penuh'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[var(--app-text-secondary)] mt-0.5 leading-relaxed">
+                      {isEnglish
+                        ? 'Resets settings, presets, studio elements, soundboard, marketplace items, TikTok state, TTS, and music queue.'
+                        : 'Mengembalikan pengaturan, preset, Studio, soundboard, marketplace, akun TikTok, TTS & musik ke bawaan.'}
+                    </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={onResetDefaults}
+                    className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border text-xs font-bold inline-flex items-center justify-center gap-2 shrink-0"
+                    style={{
+                      borderColor: 'color-mix(in srgb, var(--app-error) 60%, transparent)',
+                      color: 'var(--app-error)',
+                    }}
+                  >
+                    <RotateCcw className="w-4 h-4 shrink-0" />
+                    <span>{t('settings.backup.reset', 'Atur Ulang Pengaturan')}</span>
+                  </button>
                 </div>
-              </Section>
-            </div>
+              </div>
+            </ConsolePanel>
           )}
 
           {/* ========================= 6. ABOUT & SUPPORT ========================= */}
           {activeCategory === 'about' && (
-            <div className="space-y-4">
-              <Section
-                icon={Info}
-                title={t('settings.secF.title', 'Tentang SYNTXRR')}
-                subtitle={t(
-                  'settings.secF.subtitle',
-                  'Versi aplikasi, informasi pembaruan, dan lisensi komponen'
+            <ConsolePanel
+              icon={Info}
+              title={t('settings.secF.title', 'Tentang SYNTXRR')}
+              subtitle={t(
+                'settings.secF.subtitle',
+                'Versi aplikasi, informasi pembaruan, dan lisensi komponen'
+              )}
+            >
+              <div className="pb-3.5 grid grid-cols-3 gap-2">
+                <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                  <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
+                    {t('settings.about.version', 'Versi')}
+                  </div>
+                  <div className="font-mono-num text-sm font-bold text-[var(--app-text)] mt-0.5">
+                    v{APP_VERSION}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                  <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
+                    App ID
+                  </div>
+                  <div className="text-[11px] font-mono-num text-[var(--app-accent-text)] font-semibold truncate mt-1">
+                    com.syntxrr.streamtools
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
+                  <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
+                    Runtime
+                  </div>
+                  <div className="text-[11px] font-semibold text-[var(--app-text)] flex items-center gap-1 mt-1 truncate">
+                    <Smartphone className="w-3 h-3 text-[var(--app-accent-text)] shrink-0" />
+                    <span className="truncate">
+                      {nativeAndroid ? 'Android APK' : 'Web Preview'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <DenseRow
+                title={t('settings.about.buildMeta', 'Metadata Build')}
+                description={t(
+                  'settings.about.buildMetaDesc',
+                  `Spec settings v${SETTINGS_SPEC_VERSION} · rilis via APK/CI build.`
                 )}
+                status="pending"
               >
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {t('settings.about.version', 'Versi Aplikasi')}
-                    </div>
-                    <div className="font-mono-num text-base font-bold text-[var(--app-text)] mt-1">
-                      {APP_VERSION}
-                    </div>
-                    <div className="text-[10px] text-[var(--app-text-muted)] mt-0.5">
-                      {isEnglish
-                        ? `package.json & Gradle versionName · spec v${SETTINGS_SPEC_VERSION}`
-                        : `package.json & versionName Gradle · spesifikasi v${SETTINGS_SPEC_VERSION}`}
-                    </div>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {t('settings.about.appId', 'Application ID')}
-                    </div>
-                    <div className="text-xs font-mono-num text-[var(--app-accent-text)] font-semibold break-words mt-1">
-                      com.syntxrr.streamtools
-                    </div>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--app-text-muted)]">
-                      {t('settings.about.runtime', 'Runtime')}
-                    </div>
-                    <div className="text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 mt-1">
-                      <Smartphone className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
-                      <span>
-                        {nativeAndroid
-                          ? t('settings.about.runtimeApk', 'Android (APK)')
-                          : t('settings.about.runtimeWeb', 'Browser / Desktop')}
+                <ul className="space-y-0.5 text-[11px] text-[var(--app-text-secondary)] font-mono-num break-words">
+                  <li>package.json → syntxrr-stream · v1.0.0</li>
+                  <li>android/app/build.gradle → versionName 1.0.0 · versionCode 1</li>
+                </ul>
+              </DenseRow>
+
+              <DenseRow
+                title={t('settings.about.oss', 'Lisensi Komponen')}
+                status="functional"
+              >
+                <ul className="grid grid-cols-2 gap-1.5">
+                  {OSS_COMPONENTS.map((component) => (
+                    <li
+                      key={component.name}
+                      className="flex items-center justify-between gap-2 text-[11px] text-[var(--app-text-secondary)] px-2.5 py-1.5 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)]"
+                    >
+                      <span className="truncate">{component.name}</span>
+                      <span className="font-mono-num text-[10px] text-[var(--app-text-muted)] shrink-0">
+                        {component.license}
                       </span>
-                    </div>
-                  </div>
+                    </li>
+                  ))}
+                </ul>
+              </DenseRow>
+
+              <DenseRow
+                title={isEnglish ? 'Support SYNTXRR' : 'Dukung SYNTXRR'}
+                status="not_connected"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    {
+                      label: isEnglish ? 'Donation' : 'Donasi',
+                      detail: isEnglish
+                        ? 'Official donation link not yet provided.'
+                        : 'Tautan donasi resmi belum tersedia.',
+                    },
+                    {
+                      label: 'Discord Server',
+                      detail: isEnglish
+                        ? 'Official Discord invite not yet provided.'
+                        : 'Undangan Discord resmi belum tersedia.',
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      disabled
+                      className="min-h-[48px] text-left p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] disabled:opacity-75 cursor-not-allowed"
+                    >
+                      <div className="text-xs font-semibold text-[var(--app-text)]">{item.label}</div>
+                      <p className="text-[10px] text-[var(--app-text-muted)] truncate">
+                        {item.detail}
+                      </p>
+                    </button>
+                  ))}
                 </div>
-
-                <FieldRow
-                  title={t('settings.about.buildMeta', 'Metadata Build')}
-                  description={t(
-                    'settings.about.buildMetaDesc',
-                    'Sumber metadata build sebenarnya, diverifikasi langsung dari file proyek.'
-                  )}
-                  status="pending"
-                >
-                  <ul className="space-y-1 text-[11px] text-[var(--app-text-secondary)] font-mono-num break-words">
-                    <li>package.json → name: &quot;syntxrr-stream&quot; · version: &quot;1.0.0&quot;</li>
-                    <li>android/app/build.gradle → versionName: &quot;1.0.0&quot; · versionCode: 1</li>
-                    <li>capacitor.config.ts → appId: &quot;com.syntxrr.streamtools&quot;</li>
-                  </ul>
-                  <p className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
-                    {isEnglish
-                      ? `Application ID, package name and version are now aligned. The app version ${APP_VERSION} matches package.json and Gradle versionName; ${SETTINGS_SPEC_VERSION} is only the Settings specification revision.`
-                      : `Application ID, nama package, dan versi sudah selaras. Versi aplikasi ${APP_VERSION} sama dengan package.json dan versionName Gradle; ${SETTINGS_SPEC_VERSION} hanyalah revisi spesifikasi Settings.`}
-                  </p>
-                </FieldRow>
-
-                <FieldRow
-                  title={t('settings.about.updates', 'Informasi Pembaruan')}
-                  description={t(
-                    'settings.about.updatesDesc',
-                    'Pembaruan didistribusikan melalui build APK rilis GitHub Actions.'
-                  )}
-                  status="coming_soon"
-                >
-                  <p className="text-[11px] text-[var(--app-text-muted)]">
-                    {isEnglish
-                      ? 'Updates are currently distributed manually via APK/CI builds, not via automatic in-app checks.'
-                      : 'Pembaruan saat ini didistribusikan manual melalui build APK/CI, bukan melalui pemeriksaan otomatis dari dalam aplikasi.'}
-                  </p>
-                </FieldRow>
-
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FileCode className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span className="text-xs font-bold text-[var(--app-text)]">
-                        {t('settings.about.oss', 'Lisensi Komponen')}
-                      </span>
-                    </div>
-                    <StatusBadge status="functional" />
-                  </div>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {OSS_COMPONENTS.map((component) => (
-                      <li
-                        key={component.name}
-                        className="flex items-center justify-between gap-2 text-xs text-[var(--app-text-secondary)] px-3 py-1.5 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)]"
-                      >
-                        <span className="truncate">{component.name}</span>
-                        <span className="font-mono-num text-[11px] text-[var(--app-text-muted)] shrink-0">
-                          {component.license}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-[11px] text-[var(--app-text-muted)]">
-                    {isEnglish
-                      ? 'List of core open-source components used by this app. Full license texts available in respective packages.'
-                      : 'Daftar komponen open-source utama yang dipakai aplikasi ini. Teks lisensi lengkap tersedia di masing-masing paket.'}
-                  </p>
-                </div>
-
-                {/* Support SYNTXRR — Moved cleanly from overview into About & Support without fake links */}
-                <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[var(--app-text)]">
-                      {isEnglish ? 'Support SYNTXRR' : 'Dukung SYNTXRR'}
-                    </span>
-                    <StatusBadge status="not_connected" />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {(
-                      [
-                        {
-                          label: isEnglish ? 'Donation' : 'Donasi',
-                          detail: isEnglish
-                            ? 'Official donation link has not been supplied yet, so this action is intentionally not wired.'
-                            : 'Tautan donasi resmi belum tersedia, jadi tombol ini sengaja belum dihubungkan.',
-                        },
-                        {
-                          label: 'Discord Server',
-                          detail: isEnglish
-                            ? 'Official Discord invite has not been supplied yet, so this action is intentionally not wired.'
-                            : 'Undangan Discord resmi belum tersedia, jadi tombol ini sengaja belum dihubungkan.',
-                        },
-                      ]
-                    ).map((item) => (
-                      <button
-                        key={item.label}
-                        type="button"
-                        disabled
-                        className="min-h-[64px] text-left p-3 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] disabled:opacity-75 cursor-not-allowed"
-                      >
-                        <div className="text-xs font-semibold text-[var(--app-text)]">
-                          {item.label}
-                        </div>
-                        <p className="mt-0.5 text-[11px] text-[var(--app-text-muted)] leading-snug">
-                          {item.detail}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex flex-col sm:flex-row sm:items-center justify-between text-xs text-[var(--app-text-secondary)] gap-2">
-                  <div>
-                    <span className="font-display font-bold text-[var(--app-text)]">
-                      SYNTXRR STREAM
-                    </span>
-                    <span className="text-[var(--app-text-muted)] mx-2">·</span>
-                    <span className="font-mono-num">
-                      {isEnglish ? `Version ${APP_VERSION}` : `Versi ${APP_VERSION}`}
-                    </span>
-                    <span className="text-[var(--app-text-muted)] mx-2">·</span>
-                    <span className="font-mono-num text-[var(--app-accent-text)]">
-                      com.syntxrr.streamtools
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-[var(--app-text-muted)]">
-                    {t(
-                      'settings.about.footer',
-                      'Mobile Streaming Studio & TikTok LIVE Companion'
-                    )}
-                  </div>
-                </div>
-              </Section>
-            </div>
+              </DenseRow>
+            </ConsolePanel>
           )}
         </div>
       </div>

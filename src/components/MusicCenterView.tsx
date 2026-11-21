@@ -236,60 +236,52 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   const pendingCount = unifiedQueue.filter((q) => q.status === 'pending').length;
 
   return (
-    <div className="space-y-5 pb-6">
-      {/* Header */}
-      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.12em] text-[var(--app-accent-text)] uppercase">
-            <span>Stage 2</span>
-            <span className="text-[var(--app-border-strong)]">/</span>
-            <span className="text-[var(--app-text-muted)]">Studio Audio Console</span>
-          </div>
-          <h1 className="font-display text-2xl sm:text-[26px] font-bold text-[var(--app-text)] tracking-tight flex items-center gap-2 mt-0.5">
-            <Disc3 className="w-6 h-6 text-[var(--app-accent-text)]" />
-            <span>Music Center</span>
+    <div className="space-y-3.5 pb-2">
+      {/* Compact Top Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <Disc3 className="w-5 h-5 text-[var(--app-accent-text)] shrink-0" />
+          <h1 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] tracking-tight truncate">
+            Music Center
           </h1>
-          <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
-            Pemutaran audio lokal HTML5, katalog YouTube &amp; Spotify, dan manajemen antrean terpadu
-          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto text-[11px] font-mono-num">
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono-num">
           <span
-            className="px-2.5 py-1 rounded-lg border font-semibold inline-flex items-center gap-1"
+            className="px-2 py-0.5 rounded-md border font-semibold inline-flex items-center gap-1"
             style={{
               backgroundColor: 'var(--app-ok-soft)',
               borderColor: 'color-mix(in srgb, var(--app-ok) 40%, transparent)',
               color: 'var(--app-ok)',
             }}
           >
-            <ShieldCheck className="w-3.5 h-3.5" /> Local: Siap
+            <ShieldCheck className="w-3 h-3" /> Local
           </span>
           <span
-            className={`px-2.5 py-1 rounded-lg border font-semibold ${
+            className={`px-2 py-0.5 rounded-md border font-semibold ${
               settings.youtubeApiKey?.trim()
                 ? 'bg-rose-950/60 border-rose-700/60 text-rose-200'
                 : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
             }`}
           >
-            YT: {settings.youtubeApiKey?.trim() ? 'Terkonfigurasi' : 'Butuh Key'}
+            YT {settings.youtubeApiKey?.trim() ? 'OK' : 'Key?'}
           </span>
           <span
-            className={`px-2.5 py-1 rounded-lg border font-semibold ${
+            className={`px-2 py-0.5 rounded-md border font-semibold ${
               settings.spotifyAccessToken?.trim()
                 ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-200'
                 : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
             }`}
           >
-            Spotify: {settings.spotifyAccessToken?.trim() ? 'Terhubung' : 'Butuh Auth'}
+            Spotify {settings.spotifyAccessToken?.trim() ? 'OK' : 'Auth?'}
           </span>
         </div>
-      </header>
+      </div>
 
       {notice && (
         <div
           role="status"
-          className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-xs"
+          className="anim-pop-in flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border text-xs"
           style={
             notice.tone === 'error'
               ? {
@@ -311,7 +303,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
           <button
             type="button"
             onClick={() => setNotice(null)}
-            className="min-w-[44px] min-h-[44px] -my-2 -mr-2 flex items-center justify-center rounded-xl hover:bg-[var(--app-surface-hover)] transition-colors shrink-0"
+            className="btn-press min-w-[44px] min-h-[44px] -my-2 -mr-2 flex items-center justify-center rounded-xl hover:bg-[var(--app-surface-hover)] shrink-0"
             aria-label="Tutup pemberitahuan"
           >
             <X className="w-4 h-4" />
@@ -319,136 +311,74 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
         </div>
       )}
 
-      {/* Now Playing Studio Deck Card */}
-      <section className="p-4 sm:p-5 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border-strong)] space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--app-accent-text)] flex items-center gap-2">
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{
-                backgroundColor: isPlayingNow ? 'var(--app-accent)' : 'var(--app-border-strong)',
-              }}
-            />
-            <span>Now Playing on Stream</span>
-          </span>
-          <span className="text-[11px] font-mono-num text-[var(--app-text-muted)]">
-            {isSongRequestActive
-              ? songRequestState?.audioPlaybackMode === 'native_android_media'
-                ? 'Source: Song Request (Native Android)'
-                : `Source: Song Request (${songRequestState?.playbackStatus || 'idle'})`
-              : isLocalEngineActive
-              ? 'Source: Local Device Audio'
-              : activeQueuePlaying?.source
-              ? `Source: ${activeQueuePlaying.source.toUpperCase()}`
-              : 'Status: Standby'}
-          </span>
-        </div>
-
-        <div className="flex flex-col md:flex-row md:items-center gap-4 sm:gap-5">
-          <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] flex items-center justify-center shrink-0 mx-auto md:mx-0 overflow-hidden">
-            {activeQueuePlaying?.thumbnailUrl ? (
-              <img
-                src={activeQueuePlaying.thumbnailUrl}
-                alt={displayTitle}
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <Disc3
-                className={`w-12 h-12 text-[var(--app-accent-text)] transition-transform ${
-                  isPlayingNow ? 'animate-spin motion-reduce:animate-none' : ''
-                }`}
-                style={{ animationDuration: '8s' }}
-              />
-            )}
-            <div className="absolute inset-x-0 bottom-0 bg-black/75 py-1 text-center">
-              <span className="text-[9px] font-mono-num font-bold text-[var(--app-accent-text)] tracking-wider uppercase">
-                {isLocalEngineActive ? 'LOCAL ENGINE' : activeQueuePlaying?.source || 'SYNTXRR'}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex-1 min-w-0 text-center md:text-left space-y-1.5">
-            <h2 className="font-display text-lg sm:text-xl font-bold text-[var(--app-text)] truncate">
-              {displayTitle}
-            </h2>
-            <p className="text-sm text-[var(--app-text-secondary)] font-medium truncate">
-              {displayArtist}
-            </p>
-
-            <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 text-xs text-[var(--app-text-muted)] pt-0.5">
-              <span>Origin:</span>
-              <span className="font-semibold text-[var(--app-text)]">
-                {activeQueuePlaying?.requesterName || nowPlayingSong?.requesterName || 'Streamer'}
-              </span>
-              <span className="text-[var(--app-border-strong)]">·</span>
-              <span className="px-2 py-0.5 rounded-md bg-[var(--app-accent-soft)] border border-[var(--app-accent-border)] text-[var(--app-accent-text)] text-[10px] font-bold uppercase font-mono-num">
-                {activeQueuePlaying?.platform || nowPlayingSong?.platform || 'Local'}
-              </span>
-              {activeQueuePlaying?.externalUrl && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    window.open(activeQueuePlaying.externalUrl, '_blank', 'noopener,noreferrer')
-                  }
-                  className="text-xs text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 ml-1"
-                >
-                  <ExternalLink className="w-3 h-3" /> Buka Tautan
-                </button>
+      {/* Compact Horizontal Now Playing Deck */}
+      <section className="p-3.5 sm:p-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border-strong)] space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] flex items-center justify-center shrink-0 overflow-hidden">
+              {activeQueuePlaying?.thumbnailUrl ? (
+                <img
+                  src={activeQueuePlaying.thumbnailUrl}
+                  alt={displayTitle}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <Disc3
+                  className={`w-8 h-8 text-[var(--app-accent-text)] ${
+                    isPlayingNow ? 'animate-spin motion-reduce:animate-none' : ''
+                  }`}
+                  style={{ animationDuration: '8s' }}
+                />
               )}
             </div>
 
-            <div className="h-6 flex items-end justify-center md:justify-start gap-1 pt-1">
-              <span className={`w-1.5 rounded-full bg-[var(--app-accent)] ${isPlayingNow ? 'animate-bar-1' : 'h-1.5'}`} />
-              <span className={`w-1.5 rounded-full bg-[var(--app-accent-hover)] ${isPlayingNow ? 'animate-bar-2' : 'h-2.5'}`} />
-              <span className={`w-1.5 rounded-full bg-[var(--app-accent)] ${isPlayingNow ? 'animate-bar-3' : 'h-1.5'}`} />
-              <span className={`w-1.5 rounded-full bg-[var(--app-accent-text)] ${isPlayingNow ? 'animate-bar-4' : 'h-3'}`} />
-              <span className={`w-1.5 rounded-full bg-[var(--app-accent)] ${isPlayingNow ? 'animate-bar-5' : 'h-1.5'}`} />
-              <span className={`w-1.5 rounded-full bg-[var(--app-accent-hover)] ${isPlayingNow ? 'animate-bar-2' : 'h-2'}`} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[10px] font-mono-num text-[var(--app-accent-text)] uppercase font-bold">
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{
+                    backgroundColor: isPlayingNow ? 'var(--app-accent)' : 'var(--app-border-strong)',
+                  }}
+                />
+                <span className="truncate">
+                  {isSongRequestActive
+                    ? `Song Request (${songRequestState?.playbackStatus || 'idle'})`
+                    : isLocalEngineActive
+                    ? 'Local Audio'
+                    : activeQueuePlaying?.source?.toUpperCase() || 'Standby'}
+                </span>
+                <span className="text-[var(--app-border-strong)]">·</span>
+                <span className="text-[var(--app-text-muted)]">{unifiedQueue.length} Antrean</span>
+              </div>
+              <h2 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] truncate mt-0.5">
+                {displayTitle}
+              </h2>
+              <div className="flex items-center gap-2 text-xs text-[var(--app-text-secondary)] truncate">
+                <span className="truncate">{displayArtist}</span>
+                {activeQueuePlaying?.externalUrl && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.open(activeQueuePlaying.externalUrl, '_blank', 'noopener,noreferrer')
+                    }
+                    className="text-[11px] text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 shrink-0"
+                  >
+                    <ExternalLink className="w-3 h-3" /> Tautan
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {(songRequestState?.lastError || songRequestState?.playbackStatus === 'preparing') && (
-          <div
-            className={`px-3.5 py-2.5 rounded-xl border text-xs ${
-              songRequestState?.lastError
-                ? 'bg-rose-950/45 border-rose-700/60 text-rose-200'
-                : 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
-            }`}
-          >
-            {songRequestState?.lastError || 'Memuat dan menyiapkan pemutaran lagu...'}
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--app-border)] pt-3">
-          <div className="text-xs text-[var(--app-text-muted)]">
-            {isSongRequestActive ? (
-              <span
-                className="font-semibold"
-                style={{ color: isPlayingNow ? 'var(--app-ok)' : 'var(--app-warn)' }}
-              >
-                {songRequestState?.audioPlaybackMode === 'native_android_media'
-                  ? `Native Media (${songRequestState?.playbackStatus})`
-                  : `Song Request (${songRequestState?.playbackStatus})`}
-              </span>
-            ) : isLocalEngineActive ? (
-              <span className="font-semibold" style={{ color: 'var(--app-ok)' }}>
-                HTML5 Engine Aktif
-              </span>
-            ) : (
-              <span>Antrean Siaga</span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={onPrevTrack}
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] transition-colors"
+              className="btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
               aria-label="Lagu sebelumnya"
             >
-              <SkipBack className="w-5 h-5" />
+              <SkipBack className="w-4 h-4" />
             </button>
 
             <button
@@ -462,78 +392,80 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
                   onTogglePlay();
                 }
               }}
-              className="min-h-[48px] min-w-[48px] rounded-2xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] flex items-center justify-center transition-colors"
+              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] flex items-center justify-center"
               aria-label={isPlayingNow ? 'Jeda musik' : 'Putar musik'}
             >
-              {isPlayingNow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+              {isPlayingNow ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
             </button>
 
             <button
               type="button"
               onClick={onNextTrack}
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] transition-colors"
+              className="btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
               aria-label="Lagu berikutnya"
             >
-              <SkipForward className="w-5 h-5" />
+              <SkipForward className="w-4 h-4" />
             </button>
           </div>
+        </div>
 
-          <div className="text-right">
-            <span className="text-[11px] text-[var(--app-text-muted)] block">Antrean</span>
-            <span className="text-xs font-bold text-[var(--app-text)] font-mono-num">
-              {unifiedQueue.length} Lagu
-            </span>
+        {(songRequestState?.lastError || songRequestState?.playbackStatus === 'preparing') && (
+          <div
+            className={`px-3 py-2 rounded-xl border text-xs ${
+              songRequestState?.lastError
+                ? 'bg-rose-950/45 border-rose-700/60 text-rose-200'
+                : 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
+            }`}
+          >
+            {songRequestState?.lastError || 'Memuat dan menyiapkan pemutaran lagu...'}
+          </div>
+        )}
+
+        {/* Preset Packs Inline Row */}
+        <div className="pt-2.5 border-t border-[var(--app-border)] flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-[var(--app-text-muted)] inline-flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-[var(--app-accent-text)]" />
+            <span>Paket Musik:</span>
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => onLoadPresetPack('synthwave')}
+              className="btn-press min-h-[36px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-[11px] font-semibold text-[var(--app-text)]"
+            >
+              Synthwave
+            </button>
+            <button
+              type="button"
+              onClick={() => onLoadPresetPack('lofi')}
+              className="btn-press min-h-[36px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-[11px] font-semibold text-[var(--app-text)]"
+            >
+              Lo-Fi
+            </button>
+            <button
+              type="button"
+              onClick={() => onLoadPresetPack('gaming')}
+              className="btn-press min-h-[36px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-[11px] font-semibold text-[var(--app-text)]"
+            >
+              Esports
+            </button>
           </div>
         </div>
       </section>
 
-      {/* Preset Packs Strip */}
-      <div className="p-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold text-[var(--app-text-secondary)] inline-flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-[var(--app-accent-text)]" />
-            <span>Paket Suasana Musik:</span>
-          </span>
-          <span className="text-[11px] text-[var(--app-text-muted)]">Muat ke antrean</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onLoadPresetPack('synthwave')}
-            className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-xs font-semibold text-[var(--app-text)] transition-colors"
-          >
-            Synthwave Pack
-          </button>
-          <button
-            type="button"
-            onClick={() => onLoadPresetPack('lofi')}
-            className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-xs font-semibold text-[var(--app-text)] transition-colors"
-          >
-            Chill Lo-Fi Session
-          </button>
-          <button
-            type="button"
-            onClick={() => onLoadPresetPack('gaming')}
-            className="min-h-[44px] px-3.5 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-xs font-semibold text-[var(--app-text)] transition-colors"
-          >
-            Esports Energy
-          </button>
-        </div>
-      </div>
-
       {/* 5-Tab Segmented Navigation */}
-      <div className="flex overflow-x-auto gap-1.5 p-1.5 bg-[var(--app-surface)] rounded-2xl border border-[var(--app-border)] no-scrollbar">
+      <div className="flex overflow-x-auto gap-1 p-1 bg-[var(--app-surface)] rounded-xl border border-[var(--app-border)] no-scrollbar">
         <button
           type="button"
           onClick={() => setActiveTab('queue')}
-          className={`min-h-[44px] px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors inline-flex items-center gap-2 ${
+          className={`btn-press min-h-[44px] px-3.5 rounded-[9px] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 ${
             activeTab === 'queue'
               ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
               : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
           }`}
         >
-          <ListMusic className="w-4 h-4 shrink-0" />
-          <span>Unified Queue</span>
+          <ListMusic className="w-3.5 h-3.5 shrink-0" />
+          <span>Queue</span>
           {pendingCount > 0 && (
             <span className="px-1.5 py-0.5 rounded-md bg-black/25 text-[10px] font-mono-num font-bold">
               {pendingCount}
@@ -544,106 +476,101 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('local_audio')}
-          className={`min-h-[44px] px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors inline-flex items-center gap-2 ${
+          className={`btn-press min-h-[44px] px-3.5 rounded-[9px] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 ${
             activeTab === 'local_audio'
               ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
               : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
           }`}
         >
-          <FileAudio className="w-4 h-4 shrink-0" />
-          <span>Local Audio Engine</span>
-          {localTracksMeta.length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-md bg-black/20 text-[10px] font-mono-num">
-              {localTracksMeta.length}
-            </span>
-          )}
+          <FileAudio className="w-3.5 h-3.5 shrink-0" />
+          <span>Local ({localTracksMeta.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('youtube')}
-          className={`min-h-[44px] px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors inline-flex items-center gap-2 ${
+          className={`btn-press min-h-[44px] px-3.5 rounded-[9px] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 ${
             activeTab === 'youtube'
               ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
               : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
           }`}
         >
-          <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-black text-[9px]">
-            YT
-          </span>
-          <span>YouTube Catalog</span>
+          <span className="px-1 py-0.5 rounded bg-rose-600 text-white font-black text-[9px]">YT</span>
+          <span>YouTube</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('spotify')}
-          className={`min-h-[44px] px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors inline-flex items-center gap-2 ${
+          className={`btn-press min-h-[44px] px-3.5 rounded-[9px] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 ${
             activeTab === 'spotify'
               ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
               : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
           }`}
         >
-          <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px]">
+          <span className="px-1 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px]">
             SP
           </span>
-          <span>Spotify Catalog</span>
+          <span>Spotify</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('viewer_portal')}
-          className={`min-h-[44px] px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors inline-flex items-center gap-2 ${
+          className={`btn-press min-h-[44px] px-3.5 rounded-[9px] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 ${
             activeTab === 'viewer_portal'
               ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
               : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
           }`}
         >
-          <Send className="w-4 h-4 shrink-0" />
-          <span>Viewer Portal</span>
+          <Send className="w-3.5 h-3.5 shrink-0" />
+          <span>Request</span>
         </button>
       </div>
 
       {/* Tab Panels */}
-      {activeTab === 'queue' && (
-        <UnifiedQueueManager
-          queue={unifiedQueue}
-          onUpdateQueue={onUpdateUnifiedQueue}
-          onPlayLocalItem={handlePlayLocalQueueItem}
-          currentlyPlayingId={audioState.currentTrackId || activeQueuePlaying?.id}
-        />
-      )}
+      <div key={activeTab} className="anim-tab-panel">
+        {activeTab === 'queue' && (
+          <UnifiedQueueManager
+            queue={unifiedQueue}
+            onUpdateQueue={onUpdateUnifiedQueue}
+            onPlayLocalItem={handlePlayLocalQueueItem}
+            currentlyPlayingId={audioState.currentTrackId || activeQueuePlaying?.id}
+          />
+        )}
 
-      {activeTab === 'local_audio' && (
-        <LocalAudioPlayer
-          localTracksMeta={localTracksMeta}
-          localFilesMap={localFilesMap}
-          onAddLocalFiles={onAddLocalFiles}
-          onRemoveTrack={onRemoveLocalTrack}
-          onAddTrackToQueue={handleAddLocalToQueue}
-        />
-      )}
+        {activeTab === 'local_audio' && (
+          <LocalAudioPlayer
+            localTracksMeta={localTracksMeta}
+            localFilesMap={localFilesMap}
+            onAddLocalFiles={onAddLocalFiles}
+            onRemoveTrack={onRemoveLocalTrack}
+            onAddTrackToQueue={handleAddLocalToQueue}
+          />
+        )}
 
-      {activeTab === 'youtube' && (
-        <YouTubeConnector
-          apiKey={settings.youtubeApiKey}
-          onAddToQueue={handleAddYouTubeResult}
-          onNavigateToSettings={onNavigateToSettings}
-        />
-      )}
+        {activeTab === 'youtube' && (
+          <YouTubeConnector
+            apiKey={settings.youtubeApiKey}
+            onAddToQueue={handleAddYouTubeResult}
+            onNavigateToSettings={onNavigateToSettings}
+          />
+        )}
 
-      {activeTab === 'spotify' && (
-        <SpotifyConnector
-          clientId={settings.spotifyClientId}
-          accessToken={settings.spotifyAccessToken}
-          onUpdateSpotifyToken={onUpdateSpotifyToken}
-          onAddToQueue={handleAddSpotifyResult}
-          onNavigateToSettings={onNavigateToSettings}
-        />
-      )}
+        {activeTab === 'spotify' && (
+          <SpotifyConnector
+            clientId={settings.spotifyClientId}
+            accessToken={settings.spotifyAccessToken}
+            onUpdateSpotifyToken={onUpdateSpotifyToken}
+            onAddToQueue={handleAddSpotifyResult}
+            onNavigateToSettings={onNavigateToSettings}
+          />
+        )}
 
-      {activeTab === 'viewer_portal' && (
-        <ViewerRequestPortal queue={unifiedQueue} onSubmitRequest={handleViewerSubmit} />
-      )}
+        {activeTab === 'viewer_portal' && (
+          <ViewerRequestPortal queue={unifiedQueue} onSubmitRequest={handleViewerSubmit} />
+        )}
+      </div>
     </div>
   );
 };
