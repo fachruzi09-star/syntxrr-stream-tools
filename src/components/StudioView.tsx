@@ -43,6 +43,12 @@ import {
   isSupportedScreensaverAssetSelection,
   toStudioScreensaverSettings,
 } from '../services/modeBScreensaverPolicy';
+import {
+  buildBlankPresetDraft,
+  clonePresetWithRemappedIds,
+  submitAsyncPresetCreation,
+  type StudioSaveState,
+} from '../services/studioPresetActions';
 import { SOURCE_CATALOG } from './SourcesLibraryView';
 import {
   Tv,
@@ -105,14 +111,16 @@ interface StudioViewProps {
   canvasOrientation: CanvasOrientation;
   onChangeOrientation: (orientation: CanvasOrientation) => void;
   onUpdateElements: (elements: StudioElement[]) => void;
-  onSaveAsPreset: () => void;
+  onSaveActivePreset?: () => Promise<{ success: boolean; message: string } | boolean | void> | boolean | void;
+  onSaveAsPreset: () => Promise<boolean | void> | boolean | void;
+  saveState?: StudioSaveState;
   // Shared Presets System integration
   presets?: StudioPreset[];
   activePresetId?: string;
   activePreset?: StudioPreset | null;
   onUpdateActivePreset?: (patch: Partial<StudioPreset>) => void | Promise<void>;
   onSelectPreset?: (presetId: string) => void;
-  onCreatePreset?: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => void;
+  onCreatePreset?: (preset: Omit<StudioPreset, 'id' | 'createdAt'>) => Promise<boolean | void> | boolean | void;
   onDuplicatePreset?: (presetId: string) => void;
   onDeletePreset?: (presetId: string) => void;
   onToggleFavoritePreset?: (presetId: string) => void;
@@ -164,7 +172,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
   canvasOrientation,
   onChangeOrientation,
   onUpdateElements,
+  onSaveActivePreset,
   onSaveAsPreset,
+  saveState,
   presets = [],
   activePresetId,
   activePreset: activePresetProp,
@@ -263,11 +273,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [history, setHistory] = useState<StudioElement[][]>([]);
   const [redoStack, setRedoStack] = useState<StudioElement[][]>([]);
 
-  // Presets Category Filter
+  // Presets Category Filter & Async Integrity States
   const [presetFilterCategory, setPresetFilterCategory] = useState<PresetCategory>('all');
   const [newPresetModalOpen, setNewPresetModalOpen] = useState(false);
   const [newPresetNameInput, setNewPresetNameInput] = useState('');
   const [newPresetDescInput, setNewPresetDescInput] = useState('');
+  const [isCreatingSidebarPreset, setIsCreatingSidebarPreset] = useState(false);
+  const [sidebarCreateError, setSidebarCreateError] = useState<string | null>(null);
+
+  const [isSavingActivePreset, setIsSavingActivePreset] = useState(false);
+  const [isSavingCopy, setIsSavingCopy] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   // Preset Selector (entry screen before canvas)
   const [showPresetSelector, setShowPresetSelector] = useState(true);
@@ -280,6 +296,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [selectorFilterCategory, setSelectorFilterCategory] = useState<PresetCategory>('all');
   const [editingPresetIdInSelector, setEditingPresetIdInSelector] = useState<string | null>(null);
   const [editingNameInSelector, setEditingNameInSelector] = useState('');
+  const [isCreatingBlankCanvas, setIsCreatingBlankCanvas] = useState(false);
+  const [selectorActionError, setSelectorActionError] = useState<string | null>(null);
+  const [isCreatingSelectorPreset, setIsCreatingSelectorPreset] = useState(false);
+  const [selectorCreateError, setSelectorCreateError] = useState<string | null>(null);
 
   // Preset rename in sidebar
   const [editingPresetIdInSidebar, setEditingPresetIdInSidebar] = useState<string | null>(null);
@@ -597,6 +617,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setZoomLevel(100);
     setPanOffset({ x: 0, y: 0 });
     setNewPresetModalOpen(false);
+    setSidebarCreateError(null);
+    setSaveFeedback(null);
     isLiveDragRef.current = false;
     preDragElementsRef.current = null;
     dragRef.current.isDragging = false;
@@ -615,6 +637,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       originalElements: [],
     };
   }, [activePresetId]);
+
+  useEffect(() => {
+    if (saveState?.status === 'pending') {
+      setSaveFeedback((prev) => (prev?.tone === 'ok' ? null : prev));
+    }
+  }, [saveState?.status]);
 
   useEffect(() => {
     if (selectedGroupId && !activeGroups.some((group) => group.id === selectedGroupId)) {
@@ -2260,34 +2288,184 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return [];
   };
 
-  // --- Preset Selector: handlers ---
+  // --- Preset Selector & Save Handlers ---
   const handleSelectorSelectPreset = (presetId: string) => {
+    setSelectorActionError(null);
     if (onSelectPreset) onSelectPreset(presetId);
     setShowPresetSelector(false);
   };
 
-  const handleSelectorBlankCanvas = () => {
-    if (onUpdateElements) onUpdateElements([]);
-    setShowPresetSelector(false);
+  const handleSelectorBlankCanvas = async () => {
+    if (isCreatingBlankCanvas) return;
+    setSelectorActionError(null);
+    if (!onCreatePreset) {
+      setSelectorActionError('Aksi pembuatan kanvas kosong tidak tersedia.');
+      return;
+    }
+    setIsCreatingBlankCanvas(true);
+    try {
+      const draft = buildBlankPresetDraft(presets, canvasOrientation);
+      const result = await submitAsyncPresetCreation(() => onCreatePreset(draft));
+      if (!isMountedRef.current) return;
+      if (!result.ok) {
+        setSelectorActionError(result.message);
+        return;
+      }
+      setSelectedId(null);
+      setSelectedGroupId(null);
+      setShowPresetSelector(false);
+    } finally {
+      if (isMountedRef.current) {
+        setIsCreatingBlankCanvas(false);
+      }
+    }
   };
 
-  const handleSelectorCreatePreset = (e: React.FormEvent) => {
+  const handleSelectorCreatePreset = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectorPresetName.trim() || !onCreatePreset) return;
-    const elements = generateTemplateElements(selectorTemplate);
-    onCreatePreset({
-      name: selectorPresetName.trim(),
-      category: selectorCategory,
-      canvasOrientation: selectorOrientation,
-      elements,
-      isFavorite: false,
-      description: selectorDescription.trim() || 'Preset tata letak kustom SYNTXRR STREAM',
-      thumbnailColor: '#F2C230',
-    });
-    setSelectorCreateModalOpen(false);
-    setSelectorPresetName('');
-    setSelectorDescription('');
-    setShowPresetSelector(false);
+    if (isCreatingSelectorPreset) return;
+    const trimmedName = selectorPresetName.trim();
+    if (!trimmedName) {
+      setSelectorCreateError('Nama preset wajib diisi.');
+      return;
+    }
+    if (!onCreatePreset) {
+      setSelectorCreateError('Aksi pembuatan preset tidak tersedia.');
+      return;
+    }
+
+    setSelectorCreateError(null);
+    setIsCreatingSelectorPreset(true);
+    try {
+      const templateElements = ensureUniqueElementIds(generateTemplateElements(selectorTemplate));
+      const result = await submitAsyncPresetCreation(() =>
+        onCreatePreset({
+          name: trimmedName,
+          category: selectorCategory,
+          canvasOrientation: selectorOrientation,
+          elements: templateElements,
+          groups: [],
+          superGroups: [],
+          isFavorite: false,
+          description: selectorDescription.trim() || 'Preset tata letak kustom SYNTXRR STREAM',
+          thumbnailColor: '#F2C230',
+        }),
+      );
+      if (!isMountedRef.current) return;
+      if (!result.ok) {
+        setSelectorCreateError(result.message);
+        return;
+      }
+      setSelectorCreateModalOpen(false);
+      setSelectorPresetName('');
+      setSelectorDescription('');
+      setSelectorCreateError(null);
+      setShowPresetSelector(false);
+    } finally {
+      if (isMountedRef.current) {
+        setIsCreatingSelectorPreset(false);
+      }
+    }
+  };
+
+  const handleSidebarCreatePresetFromScene = async () => {
+    if (isCreatingSidebarPreset) return;
+    const trimmedName = newPresetNameInput.trim();
+    if (!trimmedName) {
+      setSidebarCreateError('Nama preset baru wajib diisi.');
+      return;
+    }
+
+    setSidebarCreateError(null);
+    setIsCreatingSidebarPreset(true);
+    try {
+      const result = await submitAsyncPresetCreation(async () => {
+        if (onCreatePreset) {
+          const cloned = clonePresetWithRemappedIds({
+            sourcePreset: activePreset,
+            currentElements: elements,
+            existingPresets: presets,
+            canvasOrientation,
+            customName: trimmedName,
+            customDescription:
+              newPresetDescInput.trim() || activePreset?.description || 'Preset kustom Studio',
+          });
+          const { id: _id, createdAt: _createdAt, ...draft } = cloned;
+          return onCreatePreset(draft);
+        }
+        return onSaveAsPreset();
+      });
+      if (!isMountedRef.current) return;
+      if (!result.ok) {
+        setSidebarCreateError(result.message);
+        return;
+      }
+      setNewPresetNameInput('');
+      setNewPresetDescInput('');
+      setSidebarCreateError(null);
+      setNewPresetModalOpen(false);
+    } finally {
+      if (isMountedRef.current) {
+        setIsCreatingSidebarPreset(false);
+      }
+    }
+  };
+
+  const handleSaveActivePresetClick = async () => {
+    if (isSavingActivePreset || !onSaveActivePreset) return;
+    setSaveFeedback(null);
+    setIsSavingActivePreset(true);
+    try {
+      const result = await onSaveActivePreset();
+      if (!isMountedRef.current) return;
+      if (result === false) {
+        setSaveFeedback({
+          tone: 'error',
+          text: 'Gagal menyimpan perubahan ke preset aktif.',
+        });
+      } else if (result && typeof result === 'object' && 'success' in result) {
+        setSaveFeedback({
+          tone: result.success ? 'ok' : 'error',
+          text:
+            result.message ||
+            (result.success ? 'Perubahan preset tersimpan.' : 'Gagal menyimpan preset aktif.'),
+        });
+      } else {
+        setSaveFeedback({ tone: 'ok', text: 'Perubahan preset tersimpan.' });
+      }
+    } catch (error) {
+      if (!isMountedRef.current) return;
+      setSaveFeedback({
+        tone: 'error',
+        text:
+          error instanceof Error && error.message
+            ? error.message
+            : 'Gagal menyimpan perubahan ke preset aktif.',
+      });
+    } finally {
+      if (isMountedRef.current) {
+        setIsSavingActivePreset(false);
+      }
+    }
+  };
+
+  const handleSavePresetCopyClick = async () => {
+    if (isSavingCopy) return;
+    setSaveFeedback(null);
+    setIsSavingCopy(true);
+    try {
+      const result = await submitAsyncPresetCreation(() => onSaveAsPreset());
+      if (!isMountedRef.current) return;
+      if (!result.ok) {
+        setSaveFeedback({ tone: 'error', text: result.message });
+        return;
+      }
+      setSaveFeedback({ tone: 'ok', text: 'Salinan preset baru berhasil disimpan.' });
+    } finally {
+      if (isMountedRef.current) {
+        setIsSavingCopy(false);
+      }
+    }
   };
 
   const handleSelectorSaveRename = (presetId: string) => {
@@ -2303,6 +2481,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
     setEditingPresetIdInSidebar(null);
   };
+
+  const resolvedSaveStatus = isSavingActivePreset ? 'saving' : saveState?.status ?? 'saved';
+  const resolvedSaveError =
+    saveFeedback?.tone === 'error'
+      ? saveFeedback.text
+      : saveState?.status === 'error'
+        ? saveState.errorMessage || 'Gagal menyimpan perubahan Studio.'
+        : null;
 
   return (
     <div className="space-y-4 pb-6">
@@ -2322,7 +2508,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setSelectorCreateModalOpen(true)}
+                  onClick={() => {
+                    setSelectorActionError(null);
+                    setSelectorCreateError(null);
+                    setSelectorCreateModalOpen(true);
+                  }}
                   disabled={isModeBMutationLocked}
                   className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] font-bold text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
@@ -2331,15 +2521,34 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={handleSelectorBlankCanvas}
-                  disabled={isStrictModeBLocked}
+                  onClick={() => void handleSelectorBlankCanvas()}
+                  disabled={isModeBMutationLocked || isCreatingBlankCanvas}
                   className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   <Layout className="w-4 h-4 text-[var(--app-accent-text)]" />
-                  <span>Kanvas Kosong</span>
+                  <span>{isCreatingBlankCanvas ? 'Membuat...' : 'Kanvas Kosong'}</span>
                 </button>
               </div>
             </div>
+
+            {selectorActionError && (
+              <div
+                role="alert"
+                className="p-2.5 rounded-xl border border-rose-500/40 bg-rose-950/40 text-xs text-rose-200 flex items-center justify-between gap-2"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{selectorActionError}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectorActionError(null)}
+                  className="text-[11px] font-semibold text-rose-300 hover:text-white px-2 py-1"
+                >
+                  Tutup
+                </button>
+              </div>
+            )}
 
             <div className="pt-2.5 border-t border-[var(--app-border)] flex items-center gap-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] overflow-x-auto no-scrollbar">
               {(
@@ -2515,15 +2724,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setSelectorCreateModalOpen(false)}
+                    disabled={isCreatingSelectorPreset}
+                    onClick={() => {
+                      setSelectorCreateError(null);
+                      setSelectorCreateModalOpen(false);
+                    }}
                     aria-label="Tutup modal preset"
-                    className="btn-press min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center"
+                    className="btn-press min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-muted)] flex items-center justify-center disabled:opacity-40"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <form onSubmit={handleSelectorCreatePreset} className="space-y-4">
+                <form onSubmit={(e) => void handleSelectorCreatePreset(e)} className="space-y-4">
+                  {selectorCreateError && (
+                    <div
+                      role="alert"
+                      className="p-2.5 rounded-xl border border-rose-500/40 bg-rose-950/40 text-xs text-rose-200 flex items-center gap-2"
+                    >
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{selectorCreateError}</span>
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <label className="block text-xs font-semibold text-[var(--app-text-secondary)]">Nama Preset</label>
                     <input
@@ -2610,16 +2832,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <div className="pt-2 flex items-center justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setSelectorCreateModalOpen(false)}
-                      className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs font-semibold hover:text-[var(--app-text)]"
+                      disabled={isCreatingSelectorPreset}
+                      onClick={() => {
+                        setSelectorCreateError(null);
+                        setSelectorCreateModalOpen(false);
+                      }}
+                      className="btn-press min-h-[44px] px-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] text-xs font-semibold hover:text-[var(--app-text)] disabled:opacity-40"
                     >
                       Batal
                     </button>
                     <button
                       type="submit"
-                      className="btn-press min-h-[44px] px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold"
+                      disabled={isCreatingSelectorPreset}
+                      className="btn-press min-h-[44px] px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold disabled:opacity-50"
                     >
-                      Simpan &amp; Buat Preset
+                      {isCreatingSelectorPreset ? 'Menyimpan...' : 'Simpan & Buat Preset'}
                     </button>
                   </div>
                 </form>
@@ -2631,62 +2858,127 @@ export const StudioView: React.FC<StudioViewProps> = ({
       /* === MAIN STUDIO CANVAS VIEW === */
       <>
       {/* Compact Studio Toolbar Header */}
-      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <button
-            type="button"
-            onClick={() => setShowPresetSelector(true)}
-            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
-            title="Ganti Preset"
-          >
-            <Layout className="w-4 h-4 text-[var(--app-accent-text)]" />
-            <span>Preset</span>
-          </button>
-          <div className="min-w-0">
-            <h1 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] tracking-tight truncate">
-              {activePreset?.name || 'Studio Produksi'}
-            </h1>
-            <div className="text-[11px] text-[var(--app-text-muted)] tabular-metrics truncate">
-              {canvasOrientation} · {elements.length} elemen
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3 sm:px-4 sm:py-3 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setShowPresetSelector(true)}
+              className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+              title="Ganti Preset"
+            >
+              <Layout className="w-4 h-4 text-[var(--app-accent-text)]" />
+              <span>Preset</span>
+            </button>
+            <div className="min-w-0">
+              <h1 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] tracking-tight truncate">
+                {activePreset?.name || 'Studio Produksi'}
+              </h1>
+              <div className="text-[11px] text-[var(--app-text-muted)] tabular-metrics truncate flex items-center gap-1.5">
+                <span>
+                  {canvasOrientation} · {elements.length} elemen
+                </span>
+                <span aria-hidden="true">·</span>
+                <span
+                  data-save-status={resolvedSaveStatus}
+                  className={
+                    resolvedSaveStatus === 'error'
+                      ? 'font-semibold text-rose-400'
+                      : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
+                        ? 'font-semibold text-[var(--app-accent-text)]'
+                        : 'text-[var(--app-ok)]'
+                  }
+                >
+                  {resolvedSaveStatus === 'saving'
+                    ? 'Menyimpan...'
+                    : resolvedSaveStatus === 'pending'
+                      ? 'Perubahan belum tersimpan'
+                      : resolvedSaveStatus === 'error'
+                        ? 'Gagal menyimpan'
+                        : 'Tersimpan'}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-xs font-bold">
-            {(
-              [
-                { id: '9:16', label: '9:16' },
-                { id: '16:9', label: '16:9' },
-                { id: '1:1', label: '1:1' },
-              ] as const
-            ).map((opt) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-xs font-bold">
+              {(
+                [
+                  { id: '9:16', label: '9:16' },
+                  { id: '16:9', label: '16:9' },
+                  { id: '1:1', label: '1:1' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={isModeBMutationLocked}
+                  onClick={() => onChangeOrientation(opt.id)}
+                  className={`btn-press min-h-[44px] px-2.5 sm:px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    canvasOrientation === opt.id
+                      ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                      : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {onSaveActivePreset && (
               <button
-                key={opt.id}
                 type="button"
-                disabled={isModeBMutationLocked}
-                onClick={() => onChangeOrientation(opt.id)}
-                className={`btn-press min-h-[44px] px-2.5 sm:px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  canvasOrientation === opt.id
-                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                }`}
+                disabled={isStrictModeBLocked || isSavingActivePreset}
+                onClick={() => void handleSaveActivePresetClick()}
+                className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                title="Simpan perubahan ke preset aktif"
               >
-                {opt.label}
+                <Check className="w-4 h-4" />
+                <span>{isSavingActivePreset ? 'Menyimpan...' : 'Simpan'}</span>
               </button>
-            ))}
-          </div>
+            )}
 
-          <button
-            type="button"
-            disabled={isModeBMutationLocked}
-            onClick={onSaveAsPreset}
-            className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>Simpan Preset</span>
-          </button>
+            <button
+              type="button"
+              disabled={isModeBMutationLocked || isSavingCopy}
+              onClick={() => void handleSavePresetCopyClick()}
+              className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              title="Simpan Sebagai Salinan"
+              aria-label="Simpan Sebagai Salinan"
+            >
+              <Copy className="w-4 h-4 text-[var(--app-accent-text)]" />
+              <span>{isSavingCopy ? 'Menyalin...' : 'Simpan Salinan'}</span>
+            </button>
+          </div>
         </div>
+
+        {(resolvedSaveError || saveFeedback?.tone === 'ok') && (
+          <div
+            role={resolvedSaveError ? 'alert' : 'status'}
+            className={`px-3 py-2 rounded-xl border text-[11px] flex items-center justify-between gap-2 ${
+              resolvedSaveError
+                ? 'border-rose-500/40 bg-rose-950/40 text-rose-200'
+                : 'border-emerald-500/35 bg-[var(--app-ok-soft)] text-[var(--app-text)]'
+            }`}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              {resolvedSaveError ? (
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              ) : (
+                <Check className="w-3.5 h-3.5 text-[var(--app-ok)] shrink-0" />
+              )}
+              <span>{resolvedSaveError || saveFeedback?.text}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setSaveFeedback(null)}
+              className="text-[11px] font-semibold opacity-80 hover:opacity-100 px-1.5"
+            >
+              Tutup
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Mode B Active Status / Lock / Live Apply Banner */}
@@ -4184,7 +4476,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <button
                   type="button"
                   disabled={isModeBMutationLocked}
-                  onClick={() => setNewPresetModalOpen(true)}
+                  onClick={() => {
+                    setSidebarCreateError(null);
+                    setNewPresetModalOpen(true);
+                  }}
                   className="btn-press min-h-[44px] px-3.5 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" /> Baru
@@ -4537,6 +4832,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
               {newPresetModalOpen && (
                 <div className="anim-pop-in p-3.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] space-y-3">
                   <div className="text-xs font-bold text-[var(--app-accent-text)]">Simpan Scene Sebagai Preset Baru</div>
+                  {sidebarCreateError && (
+                    <div
+                      role="alert"
+                      className="p-2 rounded-lg border border-rose-500/40 bg-rose-950/40 text-[11px] text-rose-200 flex items-center gap-1.5"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span>{sidebarCreateError}</span>
+                    </div>
+                  )}
                   <div>
                     <label className="text-[10px] text-[var(--app-text-secondary)]">Nama Preset</label>
                     <input
@@ -4560,36 +4864,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   <div className="flex items-center justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setNewPresetModalOpen(false)}
-                      className="btn-press min-h-[44px] px-3.5 bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] rounded-xl text-xs font-semibold"
+                      disabled={isCreatingSidebarPreset}
+                      onClick={() => {
+                        setSidebarCreateError(null);
+                        setNewPresetModalOpen(false);
+                      }}
+                      className="btn-press min-h-[44px] px-3.5 bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-text-secondary)] rounded-xl text-xs font-semibold disabled:opacity-40"
                     >
                       Batal
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (newPresetNameInput.trim()) {
-                          if (onCreatePreset) {
-                            onCreatePreset({
-                              name: newPresetNameInput.trim(),
-                              category: canvasOrientation === '9:16' ? 'hp_screen' : canvasOrientation === '16:9' ? 'landscape' : 'portrait',
-                              canvasOrientation,
-                              elements: ensureUniqueElementIds([...elements]),
-                              isFavorite: false,
-                              description: newPresetDescInput.trim() || 'Preset kustom Studio',
-                              thumbnailColor: '#F2C230',
-                            });
-                          } else {
-                            onSaveAsPreset();
-                          }
-                          setNewPresetNameInput('');
-                          setNewPresetDescInput('');
-                          setNewPresetModalOpen(false);
-                        }
-                      }}
-                      className="btn-press min-h-[44px] px-4 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold"
+                      disabled={isCreatingSidebarPreset}
+                      onClick={() => void handleSidebarCreatePresetFromScene()}
+                      className="btn-press min-h-[44px] px-4 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold disabled:opacity-50"
                     >
-                      Simpan
+                      {isCreatingSidebarPreset ? 'Menyimpan...' : 'Simpan Salinan'}
                     </button>
                   </div>
                 </div>
