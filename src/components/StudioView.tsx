@@ -153,8 +153,6 @@ import {
   Award,
   Radio,
   MoreVertical,
-  ChevronUp,
-  ChevronDown,
   ArrowLeft,
 } from 'lucide-react';
 
@@ -393,7 +391,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [hasEnteredCanvasSession, setHasEnteredCanvasSession] = useState<boolean>(false);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState<boolean>(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState<boolean>(false);
+  const [isZoomMenuOpen, setIsZoomMenuOpen] = useState<boolean>(false);
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
+  const zoomMenuRef = useRef<HTMLDivElement | null>(null);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
   const presetImportInputRef = useRef<HTMLInputElement | null>(null);
   const isPresetTransferringRef = useRef<boolean>(false);
@@ -889,6 +889,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isHeaderMenuOpen]);
+
+  useEffect(() => {
+    if (!isZoomMenuOpen) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (zoomMenuRef.current && !zoomMenuRef.current.contains(event.target as Node)) {
+        setIsZoomMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsZoomMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isZoomMenuOpen]);
 
   // Hydrate persisted Studio media assets (images & MP4/video blobs) from IndexedDB cleanly
   useEffect(() => {
@@ -2852,8 +2872,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const fittedCanvasDimensions = (() => {
     if (!stageSize) return null;
-    const availW = Math.max(120, stageSize.width - 16);
-    const availH = Math.max(120, stageSize.height - 16);
+    const availW = Math.max(120, stageSize.width - 8);
+    const availH = Math.max(120, stageSize.height - 8);
     const ratio =
       canvasOrientation === '9:16'
         ? 9 / 16
@@ -2933,6 +2953,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const handleOpenPresetSelector = () => {
     setIsHeaderMenuOpen(false);
+    setIsZoomMenuOpen(false);
     setIsMobilePanelOpen(false);
     setShowPresetSelector(true);
   };
@@ -3258,12 +3279,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
         ? saveState.errorMessage || 'Gagal menyimpan perubahan Studio.'
         : null;
 
+  const canvasResolutionLabel =
+    canvasOrientation === '16:9'
+      ? '1920×1080'
+      : canvasOrientation === '1:1'
+        ? '1080×1080'
+        : '1080×1920';
+
   return (
     <div
       className={
         showPresetSelector
           ? 'space-y-3.5 pb-20 xl:pb-6'
-          : 'flex-1 h-full min-h-0 flex flex-col gap-1.5 sm:gap-2 p-1.5 sm:p-2.5 overflow-hidden'
+          : 'relative flex-1 w-full h-full min-h-0 overflow-hidden bg-[var(--app-bg)] select-none'
       }
     >
       {/* Shared Hidden JSON Preset Import Picker */}
@@ -3336,455 +3364,54 @@ export const StudioView: React.FC<StudioViewProps> = ({
           onSubmitCreatePreset={handleSelectorCreatePreset}
         />
       ) : (
-      /* === MAIN STUDIO CANVAS VIEW === */
+      /* === IMMERSIVE FULLSCREEN STUDIO WORKSPACE === */
       <>
-      {/* Dual-Group Minimal Studio Header */}
-      <header className="shrink-0 rounded-xl sm:rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] px-2 py-1.5 sm:px-3.5 sm:py-2 space-y-1.5">
-        <div className="flex items-center justify-between gap-1.5 sm:gap-2.5 flex-nowrap">
-          {/* Left Capsule: Back to Preset Hub + Title + Save State */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
-            <button
-              type="button"
-              onClick={handleOpenPresetSelector}
-              className="btn-press min-h-[44px] min-w-0 max-w-full px-2.5 sm:px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-bold inline-flex items-center gap-1.5"
-              title={`Ganti Preset (${activePreset?.name || 'Studio Produksi'})`}
-              aria-label={`Kembali ke Daftar Preset: ${activePreset?.name || 'Studio Produksi'}`}
-            >
-              <ArrowLeft className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-              <span className="truncate font-display tracking-tight">
-                {activePreset?.name || 'Studio Produksi'}
-              </span>
-              <span className="hidden md:inline text-[10px] text-[var(--app-text-muted)] tabular-metrics shrink-0">
-                · {canvasOrientation}
-              </span>
-            </button>
-
-            <span
-              data-save-status={resolvedSaveStatus}
-              title={
-                resolvedSaveStatus === 'saving'
-                  ? 'Menyimpan...'
-                  : resolvedSaveStatus === 'pending'
-                    ? 'Perubahan belum tersimpan'
-                    : resolvedSaveStatus === 'error'
-                      ? 'Gagal menyimpan'
-                      : 'Tersimpan'
-              }
-              aria-label={
-                resolvedSaveStatus === 'saving'
-                  ? 'Menyimpan preset'
-                  : resolvedSaveStatus === 'pending'
-                    ? 'Perubahan belum tersimpan'
-                    : resolvedSaveStatus === 'error'
-                      ? 'Gagal menyimpan preset'
-                      : 'Preset tersimpan'
-              }
-              className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 min-h-[28px] rounded-lg text-[11px] font-semibold shrink-0 whitespace-nowrap ${
-                resolvedSaveStatus === 'error'
-                  ? 'text-rose-300'
-                  : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
-                    ? 'text-[var(--app-accent-text)]'
-                    : 'text-[var(--app-ok)]'
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full shrink-0 ${
-                  resolvedSaveStatus === 'error'
-                    ? 'bg-rose-400'
-                    : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
-                      ? 'bg-[var(--app-accent)] animate-pulse'
-                      : 'bg-[var(--app-ok)]'
-                }`}
-              />
-              <span className="hidden sm:inline">
-                {resolvedSaveStatus === 'saving'
-                  ? 'Menyimpan...'
-                  : resolvedSaveStatus === 'pending'
-                    ? 'Belum tersimpan'
-                    : resolvedSaveStatus === 'error'
-                      ? 'Gagal'
-                      : 'Tersimpan'}
-              </span>
-            </span>
-          </div>
-
-          {/* Right Capsule: History, Live Simulator, Save, Overflow */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleUndo}
-              disabled={isStrictModeBLocked || history.length === 0}
-              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
-              title="Undo"
-              aria-label="Undo"
-            >
-              <Undo2 className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={handleRedo}
-              disabled={isStrictModeBLocked || redoStack.length === 0}
-              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
-              title="Redo"
-              aria-label="Redo"
-            >
-              <Redo2 className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openStudioPanel('simulator')}
-              className={`btn-press hidden sm:flex min-h-[44px] min-w-[44px] rounded-xl border items-center justify-center transition-colors ${
-                activeSidePanel === 'simulator'
-                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
-                  : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-              }`}
-              title="Uji Live Simulator"
-              aria-label="Buka Uji Live Simulator"
-            >
-              <Zap className="w-4 h-4" />
-            </button>
-
-            {onSaveActivePreset && (
-              <button
-                type="button"
-                disabled={isStrictModeBLocked || isSavingActivePreset}
-                onClick={() => void handleSaveActivePresetClick()}
-                className="btn-press min-h-[44px] px-2.5 sm:px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-                title="Simpan perubahan ke preset aktif"
-                aria-label={isSavingActivePreset ? 'Menyimpan preset' : 'Simpan preset'}
-              >
-                <Check className="w-4 h-4 shrink-0" />
-                <span>{isSavingActivePreset ? 'Menyimpan...' : 'Simpan'}</span>
-              </button>
-            )}
-
-            <div className="relative" ref={headerMenuRef}>
-              <button
-                type="button"
-                onClick={() => setIsHeaderMenuOpen((open) => !open)}
-                aria-haspopup="menu"
-                aria-expanded={isHeaderMenuOpen}
-                aria-label="Menu tambahan Studio"
-                title="Menu tambahan"
-                className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border flex items-center justify-center transition-colors ${
-                  isHeaderMenuOpen
-                    ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)] text-[var(--app-text)]'
-                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                }`}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-
-              {isHeaderMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="Opsi tambahan Studio"
-                  className="absolute right-0 mt-1.5 w-64 rounded-2xl bg-[var(--app-surface-elevated)] border border-[var(--app-border-strong)] shadow-2xl p-2 z-40 space-y-2"
-                >
-                  <div className="space-y-1">
-                    <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
-                      Orientasi Kanvas
-                    </div>
-                    <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs font-bold">
-                      {(
-                        [
-                          { id: '9:16', label: '9:16' },
-                          { id: '16:9', label: '16:9' },
-                          { id: '1:1', label: '1:1' },
-                        ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={canvasOrientation === opt.id}
-                          disabled={isModeBMutationLocked}
-                          onClick={() => {
-                            onChangeOrientation(opt.id);
-                            setIsHeaderMenuOpen(false);
-                          }}
-                          className={`btn-press min-h-[40px] px-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                            canvasOrientation === opt.id
-                              ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                              : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-[var(--app-border)] pt-1.5 space-y-1">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={isModeBMutationLocked || isSavingCopy}
-                      onClick={() => {
-                        setIsHeaderMenuOpen(false);
-                        void handleSavePresetCopyClick();
-                      }}
-                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <Copy className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span>{isSavingCopy ? 'Menyalin...' : 'Simpan Salinan'}</span>
-                    </button>
-
-                    {activePreset && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={isTransferringPreset}
-                        onClick={() => {
-                          setIsHeaderMenuOpen(false);
-                          void handleExportPreset(activePreset);
-                        }}
-                        className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40"
-                      >
-                        <Download className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                        <span>Ekspor Preset (.json)</span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={isModeBMutationLocked || isTransferringPreset}
-                      onClick={() => {
-                        setIsHeaderMenuOpen(false);
-                        presetImportInputRef.current?.click();
-                      }}
-                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40"
-                    >
-                      <Upload className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span>Impor Preset (.json)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setIsHeaderMenuOpen(false);
-                        openStudioPanel('presets');
-                      }}
-                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2"
-                    >
-                      <Sliders className="w-4 h-4 text-[var(--app-ok)] shrink-0" />
-                      <span>Pengaturan Mode B Preset</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={handleOpenPresetSelector}
-                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2"
-                    >
-                      <Layout className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
-                      <span>Kelola Semua Preset</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {(resolvedSaveError || saveFeedback?.tone === 'ok') && (
-          <div
-            role={resolvedSaveError ? 'alert' : 'status'}
-            className={`px-3 py-2 rounded-xl border text-[11px] flex items-center justify-between gap-2 ${
-              resolvedSaveError
-                ? 'border-rose-500/40 bg-rose-950/40 text-rose-200'
-                : 'border-emerald-500/35 bg-[var(--app-ok-soft)] text-[var(--app-text)]'
-            }`}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              {resolvedSaveError ? (
-                <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-              ) : (
-                <Check className="w-3.5 h-3.5 text-[var(--app-ok)] shrink-0" />
-              )}
-              <span>{resolvedSaveError || saveFeedback?.text}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setSaveFeedback(null)}
-              className="text-[11px] font-semibold opacity-80 hover:opacity-100 px-1.5"
-            >
-              Tutup
-            </button>
-          </div>
-        )}
-      </header>
-
-      {/* Mode B Active Status / Lock / Live Apply Banner */}
-      {isModeBSelected && isModeBMutationLocked && (
+      {/* Full-Viewport Interactive Canvas Stage (always mounted, never unmounted by overlay drawer) */}
+      <div
+        ref={stageContainerRef}
+        className="w-full h-full overflow-hidden flex items-center justify-center p-1 bg-[var(--app-bg)] relative select-none overscroll-y-contain"
+        style={{
+          touchAction: 'none',
+          overscrollBehaviorY: 'contain',
+          backgroundImage:
+            'radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px)',
+          backgroundSize: '20px 20px',
+        }}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) {
+            setIsPanning(true);
+            panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+          }
+        }}
+        onMouseMove={(e) => {
+          if (isPanning) {
+            setPanOffset({
+              x: e.clientX - panStartRef.current.x,
+              y: e.clientY - panStartRef.current.y,
+            });
+          }
+        }}
+        onMouseUp={() => setIsPanning(false)}
+        onMouseLeave={() => setIsPanning(false)}
+      >
+        {/* The Actual Canvas (Proportional Contain/Fit Scaled to Full Viewport) */}
         <div
-          className={`shrink-0 p-2.5 sm:p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-            isModeBLive
-              ? 'bg-[var(--app-ok-soft)] border-emerald-500/35 text-[var(--app-text)]'
-              : 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-text)]'
-          }`}
-        >
-          <div className="space-y-1 text-xs">
-            <div className={`font-bold flex items-center gap-2 ${isModeBLive ? 'text-[var(--app-ok)]' : 'text-[var(--app-warn)]'}`}>
-              <Lock className="w-4 h-4 shrink-0" />
-              {isModeBLive
-                ? 'Mode B sedang LIVE — Orientasi & Struktur Preset Dikunci'
-                : `Mode B sedang sibuk (${modeBStatus?.status || 'transisi'}) — Mutasi Kanvas Dikunci Sementara`}
-            </div>
-            <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
-              {isModeBLive
-                ? 'Anda tetap dapat menyesuaikan overlay/teks/layar tunggu atau memilih preset statis yang kompatibel, lalu tekan "Terapkan Perubahan ke LIVE" untuk mengirim ke encoder native.'
-                : 'Mutasi struktur kanvas dan preset diblokir sementara selama Mode B memulai, menghentikan, atau meminta ulang Screen Share.'}
-            </p>
-            {modeBLiveApplyFeedback && (
-              <div
-                className={`text-[11px] font-semibold pt-0.5 ${
-                  modeBLiveApplyFeedback.success ? 'text-[var(--app-ok)]' : 'text-[var(--app-warn)]'
-                }`}
-              >
-                {modeBLiveApplyFeedback.message}
-              </div>
-            )}
-          </div>
-          {isModeBLive && onApplyLiveSceneToModeB && (
-            <button
-              type="button"
-              disabled={isModeBActionPending}
-              onClick={async () => {
-                const res = await onApplyLiveSceneToModeB(elements, activePreset);
-                setModeBLiveApplyFeedback(res);
-              }}
-              className="btn-press shrink-0 min-h-[44px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isModeBActionPending ? 'Menerapkan...' : 'Terapkan Perubahan ke LIVE'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Main Studio Viewport Split (Fullscreen Stage on Mobile/Tablet, Split with Side Dock on lg+) */}
-      <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 gap-2.5 lg:gap-4">
-        {/* SECTION 1: CANVAS EDITOR */}
-        <div
-          className="flex-1 min-h-0 lg:col-span-7 lg:h-full bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl sm:rounded-2xl p-2 sm:p-3 flex flex-col gap-2 overscroll-y-contain"
-          style={{ overscrollBehaviorY: 'contain' }}
-        >
-          {/* Viewport Toolbar */}
-          <div className="w-full shrink-0 flex items-center justify-between gap-1.5 text-xs text-[var(--app-text-secondary)] border-b border-[var(--app-border)] pb-1.5">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-[var(--app-accent)] shrink-0" />
-              <span className="font-bold text-[var(--app-text)] tabular-metrics truncate text-[11px] sm:text-xs">
-                Kanvas {canvasOrientation} ({elements.length})
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={() =>
-                  openStudioPanel(
-                    selectedElement
-                      ? 'properties'
-                      : activeSidePanel === 'properties'
-                        ? 'elements'
-                        : activeSidePanel,
-                  )
+          ref={canvasRef}
+          style={{
+            ...(fittedCanvasDimensions
+              ? {
+                  width: `${fittedCanvasDimensions.width}px`,
+                  height: `${fittedCanvasDimensions.height}px`,
                 }
-                className={`lg:hidden btn-press min-h-[38px] px-2.5 rounded-xl border text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors ${
-                  isMobilePanelOpen
-                    ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
-                }`}
-                title="Buka panel alat Studio"
-                aria-label="Buka panel alat Studio"
-              >
-                <Sliders className="w-3.5 h-3.5 shrink-0" />
-                <span>Alat</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
-                className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
-                title="Zoom Out"
-                aria-label="Zoom Out"
-              >
-                <ZoomOut className="w-4 h-4" />
-              </button>
-              <span className="tabular-metrics text-[11px] px-1 text-[var(--app-text)]">{zoomLevel}%</span>
-              <button
-                type="button"
-                onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
-                className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
-                title="Zoom In"
-                aria-label="Zoom In"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setZoomLevel(100);
-                  setPanOffset({ x: 0, y: 0 });
-                }}
-                className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
-                title="Reset Posisi & Zoom"
-                aria-label="Reset Posisi dan Zoom"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive Screen Stage Container */}
-          <div
-            ref={stageContainerRef}
-            className="flex-1 min-h-0 w-full overflow-hidden flex items-center justify-center p-2 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative select-none overscroll-y-contain"
-            style={{
-              touchAction: 'none',
-              overscrollBehaviorY: 'contain',
-              backgroundImage:
-                'radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)',
-              backgroundSize: '18px 18px',
-            }}
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) {
-                setIsPanning(true);
-                panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
-              }
-            }}
-            onMouseMove={(e) => {
-              if (isPanning) {
-                setPanOffset({
-                  x: e.clientX - panStartRef.current.x,
-                  y: e.clientY - panStartRef.current.y,
-                });
-              }
-            }}
-            onMouseUp={() => setIsPanning(false)}
-            onMouseLeave={() => setIsPanning(false)}
-          >
-            {/* The Actual Canvas (Orientation Scaled) */}
-            <div
-              ref={canvasRef}
-              style={{
-                ...(fittedCanvasDimensions
-                  ? {
-                      width: `${fittedCanvasDimensions.width}px`,
-                      height: `${fittedCanvasDimensions.height}px`,
-                    }
-                  : {}),
-                transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel / 100})`,
-                transformOrigin: 'center center',
-                touchAction: 'none',
-                overscrollBehaviorY: 'contain',
-              }}
-              className={`relative bg-[#07080A] border-2 border-[var(--app-border-strong)] rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${
-                fittedCanvasDimensions ? 'shrink-0' : getCanvasAspectClass()
-              } overscroll-y-contain`}
+              : {}),
+            transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel / 100})`,
+            transformOrigin: 'center center',
+            touchAction: 'none',
+            overscrollBehaviorY: 'contain',
+          }}
+          className={`relative bg-[#07080A] border border-[var(--app-border-strong)] rounded-xl sm:rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${
+            fittedCanvasDimensions ? 'shrink-0' : getCanvasAspectClass()
+          } overscroll-y-contain`}
               onClick={() => {
                 setSelectedId(null);
                 setSelectedGroupId(null);
@@ -3916,192 +3543,536 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
               )}
             </div>
+      </div>
 
-            {/* Floating Selection Quick-Bar (inside Stage, outside canvasRef) */}
-            {selectedElement && !selectedGroup && (
-              <div className="absolute bottom-2.5 inset-x-2 z-30 flex justify-center pointer-events-none">
-                <div
-                  role="toolbar"
-                  aria-label={`Tindakan cepat ${selectedElement.name}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  className="pointer-events-auto max-w-full overflow-x-auto no-scrollbar flex items-center gap-1 px-2 py-1.5 rounded-2xl bg-[var(--app-surface-elevated)]/95 backdrop-blur-md border border-[var(--app-border-strong)] shadow-2xl"
-                >
+      {/* FLOATING TOP HEADER CAPSULES (overlaid above Canvas without eating permanent height) */}
+      <header className="pointer-events-none absolute top-2 inset-x-2 sm:top-3 sm:inset-x-3 z-30 flex items-start justify-between gap-2">
+        {/* Top-Left Capsule: Back + Undo + Redo + Preset Name & Resolution + Save State */}
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="pointer-events-auto flex items-center gap-0.5 sm:gap-1 p-1 rounded-2xl bg-[var(--app-surface)]/90 backdrop-blur-md border border-[var(--app-border-strong)]/80 shadow-2xl min-w-0 flex-1 max-w-[440px]"
+        >
+          <button
+            type="button"
+            onClick={handleOpenPresetSelector}
+            className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text)] flex items-center justify-center shrink-0"
+            title={`Kembali ke Preset Hub (${activePreset?.name || 'Studio Produksi'})`}
+            aria-label={`Kembali ke Daftar Preset: ${activePreset?.name || 'Studio Produksi'}`}
+          >
+            <ArrowLeft className="w-4 h-4 text-[var(--app-accent-text)]" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={isStrictModeBLocked || history.length === 0}
+            className="btn-press min-h-[38px] min-w-[36px] sm:min-h-[42px] sm:min-w-[40px] rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+            title="Undo"
+            aria-label="Undo"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={isStrictModeBLocked || redoStack.length === 0}
+            className="btn-press min-h-[38px] min-w-[36px] sm:min-h-[42px] sm:min-w-[40px] rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+            title="Redo"
+            aria-label="Redo"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+
+          <div className="h-5 w-px bg-[var(--app-border)] mx-0.5 shrink-0" />
+
+          <div className="min-w-0 pr-2 pl-1 flex flex-col justify-center leading-tight">
+            <span className="truncate font-display text-[11px] sm:text-xs font-bold text-[var(--app-text)]">
+              {activePreset?.name || 'Studio Produksi'}
+            </span>
+            <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] tabular-metrics text-[var(--app-text-muted)] truncate">
+              <span className="shrink-0">{canvasResolutionLabel}</span>
+              <span
+                data-save-status={resolvedSaveStatus}
+                title={
+                  resolvedSaveStatus === 'saving'
+                    ? 'Menyimpan...'
+                    : resolvedSaveStatus === 'pending'
+                      ? 'Perubahan belum tersimpan'
+                      : resolvedSaveStatus === 'error'
+                        ? 'Gagal menyimpan'
+                        : 'Tersimpan'
+                }
+                aria-label={
+                  resolvedSaveStatus === 'saving'
+                    ? 'Menyimpan preset'
+                    : resolvedSaveStatus === 'pending'
+                      ? 'Perubahan belum tersimpan'
+                      : resolvedSaveStatus === 'error'
+                        ? 'Gagal menyimpan preset'
+                        : 'Preset tersimpan'
+                }
+                className={`inline-flex items-center gap-1 font-semibold shrink-0 ${
+                  resolvedSaveStatus === 'error'
+                    ? 'text-rose-300'
+                    : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
+                      ? 'text-[var(--app-accent-text)]'
+                      : 'text-[var(--app-ok)]'
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    resolvedSaveStatus === 'error'
+                      ? 'bg-rose-400'
+                      : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
+                        ? 'bg-[var(--app-accent)] animate-pulse'
+                        : 'bg-[var(--app-ok)]'
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {resolvedSaveStatus === 'saving'
+                    ? 'Menyimpan...'
+                    : resolvedSaveStatus === 'pending'
+                      ? 'Belum tersimpan'
+                      : resolvedSaveStatus === 'error'
+                        ? 'Gagal'
+                        : 'Tersimpan'}
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Top-Right Capsule: Uji Live + Overflow Menu + Simpan */}
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="pointer-events-auto flex items-center gap-0.5 sm:gap-1 p-1 rounded-2xl bg-[var(--app-surface)]/90 backdrop-blur-md border border-[var(--app-border-strong)]/80 shadow-2xl shrink-0"
+        >
+          <button
+            type="button"
+            onClick={() => openStudioPanel('simulator')}
+            className={`btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl flex items-center justify-center transition-colors ${
+              isMobilePanelOpen && activeSidePanel === 'simulator'
+                ? 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)]'
+                : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+            }`}
+            title="Uji Live Simulator"
+            aria-label="Buka Uji Live Simulator"
+          >
+            <Zap className="w-4 h-4" />
+          </button>
+
+          <div className="relative" ref={headerMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsHeaderMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={isHeaderMenuOpen}
+              aria-label="Menu tambahan Studio"
+              title="Menu tambahan"
+              className={`btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl flex items-center justify-center transition-colors ${
+                isHeaderMenuOpen
+                  ? 'bg-[var(--app-surface-elevated)] text-[var(--app-accent-text)]'
+                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+              }`}
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {isHeaderMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Opsi tambahan Studio"
+                className="absolute right-0 mt-2 w-64 rounded-2xl bg-[var(--app-surface-elevated)] border border-[var(--app-border-strong)] shadow-2xl p-2 z-40 space-y-2"
+              >
+                <div className="space-y-1">
+                  <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                    Orientasi Kanvas
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs font-bold">
+                    {(
+                      [
+                        { id: '9:16', label: '9:16' },
+                        { id: '16:9', label: '16:9' },
+                        { id: '1:1', label: '1:1' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={canvasOrientation === opt.id}
+                        disabled={isModeBMutationLocked}
+                        onClick={() => {
+                          onChangeOrientation(opt.id);
+                          setIsHeaderMenuOpen(false);
+                        }}
+                        className={`btn-press min-h-[40px] px-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                          canvasOrientation === opt.id
+                            ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                            : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-[var(--app-border)] pt-1.5 space-y-1">
                   <button
                     type="button"
-                    onClick={() => openStudioPanel('properties')}
-                    className="btn-press min-h-[40px] sm:min-h-[44px] px-2.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap"
-                    title="Edit Properti Elemen"
-                    aria-label="Edit Properti Elemen"
+                    role="menuitem"
+                    disabled={isModeBMutationLocked || isSavingCopy}
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      void handleSavePresetCopyClick();
+                    }}
+                    className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Sliders className="w-3.5 h-3.5 shrink-0" />
-                    <span>Properti</span>
+                    <Copy className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                    <span>{isSavingCopy ? 'Menyalin...' : 'Simpan Salinan'}</span>
                   </button>
 
-                  <div className="h-5 w-px bg-[var(--app-border)] mx-0.5 shrink-0" />
+                  {activePreset && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={isTransferringPreset}
+                      onClick={() => {
+                        setIsHeaderMenuOpen(false);
+                        void handleExportPreset(activePreset);
+                      }}
+                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40"
+                    >
+                      <Download className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                      <span>Ekspor Preset (.json)</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
-                    onClick={() => handleMoveLayer(selectedElement.id, 'up')}
-                    disabled={!canMoveSelectedLayerUp}
-                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
-                    title={
-                      isStrictModeBLocked || isSelectedElementGroupLocked
-                        ? 'Terkunci oleh grup atau Mode B'
-                        : 'Naikkan Layer'
-                    }
-                    aria-label="Naikkan Layer"
+                    role="menuitem"
+                    disabled={isModeBMutationLocked || isTransferringPreset}
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      presetImportInputRef.current?.click();
+                    }}
+                    className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40"
                   >
-                    <ChevronUp className="w-4 h-4" />
+                    <Upload className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                    <span>Impor Preset (.json)</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleMoveLayer(selectedElement.id, 'down')}
-                    disabled={!canMoveSelectedLayerDown}
-                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
-                    title={
-                      isStrictModeBLocked || isSelectedElementGroupLocked
-                        ? 'Terkunci oleh grup atau Mode B'
-                        : 'Turunkan Layer'
-                    }
-                    aria-label="Turunkan Layer"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      openStudioPanel('presets');
+                    }}
+                    className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2"
                   >
-                    <ChevronDown className="w-4 h-4" />
+                    <Sliders className="w-4 h-4 text-[var(--app-ok)] shrink-0" />
+                    <span>Pengaturan Mode B Preset</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => updateElementField(selectedElement.id, 'visible', !selectedElement.visible)}
-                    disabled={!canMutateSelectedElement}
-                    className={`btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl border flex items-center justify-center shrink-0 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
-                      selectedElement.visible && !isSelectedElementHiddenByGroup
-                        ? 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                        : 'bg-[var(--app-error-soft)] border-rose-500/35 text-[var(--app-error)]'
-                    }`}
-                    title={
-                      isStrictModeBLocked || isSelectedElementGroupLocked
-                        ? 'Terkunci oleh grup atau Mode B'
-                        : selectedElement.visible
-                          ? 'Sembunyikan Elemen'
-                          : 'Tampilkan Elemen'
-                    }
-                    aria-label={selectedElement.visible ? 'Sembunyikan Elemen' : 'Tampilkan Elemen'}
+                    role="menuitem"
+                    onClick={handleOpenPresetSelector}
+                    className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2"
                   >
-                    {selectedElement.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => updateElementField(selectedElement.id, 'locked', !selectedElement.locked)}
-                    disabled={!canMutateSelectedElement}
-                    className={`btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl border flex items-center justify-center shrink-0 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
-                      selectedElement.locked || isSelectedElementGroupLocked
-                        ? 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-warn)]'
-                        : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                    }`}
-                    title={
-                      isStrictModeBLocked || isSelectedElementGroupLocked
-                        ? 'Terkunci oleh grup atau Mode B'
-                        : selectedElement.locked
-                          ? 'Buka Kunci Elemen'
-                          : 'Kunci Elemen'
-                    }
-                    aria-label={selectedElement.locked ? 'Buka Kunci Elemen' : 'Kunci Elemen'}
-                  >
-                    {selectedElement.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDuplicate(selectedElement.id)}
-                    disabled={!canMutateSelectedElement}
-                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
-                    title={
-                      isStrictModeBLocked || isSelectedElementGroupLocked
-                        ? 'Terkunci oleh grup atau Mode B'
-                        : 'Duplikat Elemen'
-                    }
-                    aria-label="Duplikat Elemen"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(selectedElement.id)}
-                    disabled={!canMutateSelectedElement}
-                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] hover:border-rose-500 flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
-                    title={
-                      isStrictModeBLocked || isSelectedElementGroupLocked
-                        ? 'Terkunci oleh grup atau Mode B'
-                        : 'Hapus Elemen'
-                    }
-                    aria-label="Hapus Elemen"
-                  >
-                    <Trash2 className="w-4 h-4" />
+                    <Layout className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                    <span>Kelola Semua Preset</span>
                   </button>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="w-full shrink-0 hidden lg:flex items-center justify-between gap-2 text-[11px] text-[var(--app-text-muted)] px-1">
-            <span>Geser elemen bebas horizontal &amp; vertikal.</span>
-            <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">1080p Produksi</span>
-          </div>
-        </div>
-
-        {/* Mobile Sheet Backdrop */}
-        {isMobilePanelOpen && (
-          <div
-            aria-hidden="true"
-            onClick={() => setIsMobilePanelOpen(false)}
-            className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px] lg:hidden"
-          />
-        )}
-
-        {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL (Bottom Sheet in Portrait, Right Drawer in Landscape, Side Dock on lg+) */}
-        <div
-          ref={sidePanelRef}
-          className={`${
-            isMobilePanelOpen
-              ? 'fixed inset-x-0 bottom-0 pb-safe z-40 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[72dvh] landscape:top-0 landscape:bottom-0 landscape:right-0 landscape:left-auto landscape:w-[360px] landscape:max-w-[85vw] landscape:max-h-full landscape:rounded-none landscape:rounded-l-2xl landscape:border-t-0 landscape:border-l flex flex-col anim-sheet-up'
-              : 'hidden lg:flex'
-          } lg:static lg:inset-auto lg:w-auto lg:max-w-none lg:z-auto lg:col-span-5 lg:h-full lg:min-h-0 lg:bg-[var(--app-surface)] lg:border lg:border-[var(--app-border)] lg:rounded-2xl lg:shadow-none lg:max-h-none overflow-hidden flex-col`}
-        >
-          {/* Mobile Slide-Up Drag Handle & Header */}
-          <div className="lg:hidden flex items-center justify-between px-4 pt-2.5 pb-1.5 border-b border-[var(--app-border)] shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="w-8 h-1 rounded-full bg-[var(--app-border-strong)] shrink-0" />
-              <span className="text-xs font-display font-bold text-[var(--app-text)] truncate">
-                {activeSidePanel === 'properties'
-                  ? selectedElement
-                    ? `Properti: ${selectedElement.name}`
-                    : 'Properti Elemen'
-                  : activeSidePanel === 'elements' || activeSidePanel === 'sources'
-                    ? 'Tambah Elemen & Sumber'
-                    : activeSidePanel === 'layers'
-                      ? 'Lapisan & Grup'
-                      : activeSidePanel === 'media'
-                        ? 'Pustaka Media'
-                        : activeSidePanel === 'presets'
-                          ? 'Preset & Pengaturan Mode B'
-                          : activeSidePanel === 'simulator'
-                            ? 'Uji Live Simulator'
-                            : 'Marketplace Overlay'}
-              </span>
-            </div>
+          {onSaveActivePreset && (
             <button
               type="button"
-              onClick={() => setIsMobilePanelOpen(false)}
-              aria-label="Tutup panel Studio"
-              className="btn-press min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0"
+              disabled={isStrictModeBLocked || isSavingActivePreset}
+              onClick={() => void handleSaveActivePresetClick()}
+              className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] px-2.5 sm:px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              title="Simpan perubahan ke preset aktif"
+              aria-label={isSavingActivePreset ? 'Menyimpan preset' : 'Simpan preset'}
             >
-              <X className="w-4 h-4" />
+              <Check className="w-4 h-4 shrink-0" />
+              <span className="hidden min-[440px]:inline">
+                {isSavingActivePreset ? 'Menyimpan...' : 'Simpan'}
+              </span>
             </button>
+          )}
+        </div>
+      </header>
+
+      {/* FLOATING SAVE TOAST / MODE B LOCK NOTICE (only visible when active) */}
+      {(resolvedSaveError || saveFeedback?.tone === 'ok' || (isModeBSelected && isModeBMutationLocked)) && (
+        <div className="pointer-events-none absolute top-14 sm:top-[68px] inset-x-2 sm:inset-x-3 z-20 flex flex-col items-center gap-1.5">
+          {(resolvedSaveError || saveFeedback?.tone === 'ok') && (
+            <div
+              role={resolvedSaveError ? 'alert' : 'status'}
+              onPointerDown={(e) => e.stopPropagation()}
+              className={`pointer-events-auto max-w-md px-3 py-1.5 rounded-xl border backdrop-blur-md shadow-xl text-[11px] flex items-center justify-between gap-2 ${
+                resolvedSaveError
+                  ? 'border-rose-500/45 bg-rose-950/90 text-rose-100'
+                  : 'border-emerald-500/40 bg-[var(--app-surface-elevated)]/95 text-[var(--app-text)]'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {resolvedSaveError ? (
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 text-[var(--app-ok)] shrink-0" />
+                )}
+                <span>{resolvedSaveError || saveFeedback?.text}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSaveFeedback(null)}
+                className="text-[11px] font-semibold opacity-80 hover:opacity-100 px-1.5 shrink-0"
+              >
+                Tutup
+              </button>
+            </div>
+          )}
+
+          {isModeBSelected && isModeBMutationLocked && (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              className={`pointer-events-auto max-w-xl w-full sm:w-auto px-3 py-2 rounded-2xl border backdrop-blur-md shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                isModeBLive
+                  ? 'bg-[var(--app-surface-elevated)]/92 border-emerald-500/40 text-[var(--app-text)]'
+                  : 'bg-[var(--app-surface-elevated)]/92 border-amber-500/40 text-[var(--app-text)]'
+              }`}
+            >
+              <div className="space-y-0.5 text-[11px]">
+                <div className={`font-bold flex items-center gap-1.5 ${isModeBLive ? 'text-[var(--app-ok)]' : 'text-[var(--app-warn)]'}`}>
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {isModeBLive
+                      ? 'Mode B LIVE — Orientasi & Struktur Preset Dikunci'
+                      : `Mode B sibuk (${modeBStatus?.status || 'transisi'}) — Mutasi Kanvas Dikunci`}
+                  </span>
+                </div>
+                {modeBLiveApplyFeedback && (
+                  <div className={`text-[10px] font-semibold ${modeBLiveApplyFeedback.success ? 'text-[var(--app-ok)]' : 'text-[var(--app-warn)]'}`}>
+                    {modeBLiveApplyFeedback.message}
+                  </div>
+                )}
+              </div>
+              {isModeBLive && onApplyLiveSceneToModeB && (
+                <button
+                  type="button"
+                  disabled={isModeBActionPending}
+                  onClick={async () => {
+                    const res = await onApplyLiveSceneToModeB(elements, activePreset);
+                    setModeBLiveApplyFeedback(res);
+                  }}
+                  className="btn-press shrink-0 min-h-[38px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isModeBActionPending ? 'Menerapkan...' : 'Terapkan Perubahan ke LIVE'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* FLOATING BOTTOM WORKSPACE CONTROLS (Elemen, Marketplace, Lapisan, Alat, Zoom) */}
+      <div className="pointer-events-none absolute bottom-2 inset-x-2 sm:bottom-3 sm:inset-x-3 z-30 flex items-end justify-between gap-2">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="pointer-events-auto flex items-center gap-1.5 max-w-full"
+        >
+          <button
+            type="button"
+            onClick={() => openStudioPanel('elements')}
+            className={`btn-press min-h-[42px] sm:min-h-[44px] px-3.5 rounded-2xl text-xs font-bold inline-flex items-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+              isMobilePanelOpen && (activeSidePanel === 'elements' || activeSidePanel === 'sources')
+                ? 'bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] ring-2 ring-white/40'
+                : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
+            }`}
+            title="Tambah Elemen & Sumber"
+            aria-label="Tambah Elemen"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>Elemen</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openStudioPanel('marketplace')}
+            className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] px-2.5 sm:px-3.5 rounded-2xl border backdrop-blur-md text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+              isMobilePanelOpen && activeSidePanel === 'marketplace'
+                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
+                : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+            }`}
+            title="Buka Marketplace Overlay"
+            aria-label="Marketplace"
+          >
+            <ShoppingBag className="w-4 h-4 shrink-0 text-[var(--app-accent-text)]" />
+            <span className="hidden min-[440px]:inline">Marketplace</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openStudioPanel('layers')}
+            className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] sm:px-3 rounded-2xl border backdrop-blur-md text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+              isMobilePanelOpen && activeSidePanel === 'layers'
+                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
+                : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+            }`}
+            title="Lapisan & Grup"
+            aria-label="Lapisan"
+          >
+            <Layers className="w-4 h-4 shrink-0" />
+            <span className="hidden md:inline">Lapisan</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              openStudioPanel(
+                selectedElement
+                  ? 'properties'
+                  : activeSidePanel === 'properties'
+                    ? 'elements'
+                    : activeSidePanel,
+              )
+            }
+            className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] px-2.5 sm:px-3 rounded-2xl border backdrop-blur-md text-xs font-bold inline-flex items-center justify-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+              isMobilePanelOpen && activeSidePanel === 'properties'
+                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                : selectedElement
+                  ? 'bg-[var(--app-surface)]/92 border-[var(--app-accent-border)] text-[var(--app-accent-text)] hover:bg-[var(--app-surface-hover)]'
+                  : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+            }`}
+            title="Buka panel alat Studio & Properti"
+            aria-label="Buka panel alat Studio"
+          >
+            <Sliders className="w-4 h-4 shrink-0" />
+            <span className="hidden min-[380px]:inline">Alat</span>
+          </button>
+
+          {/* Compact Zoom Trigger + Floating Popover */}
+          <div className="relative shrink-0" ref={zoomMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsZoomMenuOpen((open) => !open)}
+              aria-expanded={isZoomMenuOpen}
+              aria-label={`Kontrol Zoom (${zoomLevel}%)`}
+              title={`Zoom Kanvas (${zoomLevel}%)`}
+              className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] px-2.5 rounded-2xl border backdrop-blur-md text-[11px] tabular-metrics font-bold inline-flex items-center justify-center gap-1 shadow-2xl transition-colors ${
+                isZoomMenuOpen || zoomLevel !== 100
+                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
+                  : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+              }`}
+            >
+              <Search className="w-4 h-4 shrink-0" />
+              {zoomLevel !== 100 && <span>{zoomLevel}%</span>}
+            </button>
+
+            {isZoomMenuOpen && (
+              <div
+                role="toolbar"
+                aria-label="Pengaturan Zoom dan Posisi Kanvas"
+                className="absolute bottom-full right-0 sm:left-0 sm:right-auto mb-2 flex items-center gap-1 p-1.5 rounded-2xl bg-[var(--app-surface-elevated)] border border-[var(--app-border-strong)] shadow-2xl z-40"
+              >
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
+                  className="btn-press min-h-[38px] min-w-[38px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center"
+                  title="Zoom Out"
+                  aria-label="Zoom Out"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <span className="tabular-metrics text-[11px] font-bold px-2 text-[var(--app-text)] min-w-[46px] text-center">
+                  {zoomLevel}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
+                  className="btn-press min-h-[38px] min-w-[38px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center"
+                  title="Zoom In"
+                  aria-label="Zoom In"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setZoomLevel(100);
+                    setPanOffset({ x: 0, y: 0 });
+                  }}
+                  className="btn-press min-h-[38px] min-w-[38px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                  title="Reset Posisi & Zoom"
+                  aria-label="Reset Posisi dan Zoom"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
+        </div>
+      </div>
+
+      {/* Overlay Backdrop */}
+      {isMobilePanelOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setIsMobilePanelOpen(false)}
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px]"
+        />
+      )}
+
+      {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL (Bottom Sheet on Portrait, Right Drawer on Landscape / md+) */}
+      <div
+        ref={sidePanelRef}
+        className={`${
+          isMobilePanelOpen
+            ? 'fixed inset-x-0 bottom-0 pb-safe z-50 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[74dvh] landscape:inset-y-0 landscape:right-0 landscape:left-auto landscape:w-[360px] landscape:sm:w-[400px] landscape:max-w-[88vw] landscape:max-h-full landscape:rounded-none landscape:rounded-l-2xl landscape:border-t-0 landscape:border-l md:inset-y-0 md:right-0 md:left-auto md:w-[400px] md:max-w-[88vw] md:max-h-full md:rounded-none md:rounded-l-2xl md:border-t-0 md:border-l flex flex-col overflow-hidden anim-sheet-up'
+            : 'hidden'
+        }`}
+      >
+        {/* Overlay Panel Header */}
+        <div className="flex items-center justify-between px-4 pt-2.5 pb-1.5 border-b border-[var(--app-border)] shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-8 h-1 rounded-full bg-[var(--app-border-strong)] shrink-0 landscape:hidden md:hidden" />
+            <span className="text-xs font-display font-bold text-[var(--app-text)] truncate">
+              {activeSidePanel === 'properties'
+                ? selectedElement
+                  ? `Properti: ${selectedElement.name}`
+                  : 'Properti Elemen'
+                : activeSidePanel === 'elements' || activeSidePanel === 'sources'
+                  ? 'Tambah Elemen & Sumber'
+                  : activeSidePanel === 'layers'
+                    ? 'Lapisan & Grup'
+                    : activeSidePanel === 'media'
+                      ? 'Pustaka Media'
+                      : activeSidePanel === 'presets'
+                        ? 'Preset & Pengaturan Mode B'
+                        : activeSidePanel === 'simulator'
+                          ? 'Uji Live Simulator'
+                          : 'Marketplace Overlay'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsMobilePanelOpen(false)}
+            aria-label="Tutup panel Studio"
+            className="btn-press min-h-[44px] min-w-[44px] -mr-2 rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
           {/* Main Module Tabs */}
           <div
@@ -4227,8 +4198,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => updateElementField(selectedElement.id, 'visible', !selectedElement.visible)}
-                        className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors ${
-                          selectedElement.visible
+                        disabled={!canMutateSelectedElement}
+                        className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
+                          selectedElement.visible && !isSelectedElementHiddenByGroup
                             ? 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                             : 'bg-[var(--app-error-soft)] border-rose-500/35 text-[var(--app-error)]'
                         }`}
@@ -4239,8 +4211,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => updateElementField(selectedElement.id, 'locked', !selectedElement.locked)}
-                        className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors ${
-                          selectedElement.locked
+                        disabled={!canMutateSelectedElement}
+                        className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
+                          selectedElement.locked || isSelectedElementGroupLocked
                             ? 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-warn)]'
                             : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
                         }`}
@@ -4251,7 +4224,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDuplicate(selectedElement.id)}
-                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors"
+                        disabled={!canMutateSelectedElement}
+                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
                         title="Duplikasi Elemen"
                       >
                         <Copy className="w-4 h-4" />
@@ -4259,7 +4233,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDelete(selectedElement.id)}
-                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] hover:border-rose-500 flex items-center justify-center transition-colors"
+                        disabled={!canMutateSelectedElement}
+                        className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] hover:border-rose-500 flex items-center justify-center transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
                         title="Hapus Elemen"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -5605,14 +5580,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleMoveLayer(selectedElement.id, 'up')}
-                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
+                            disabled={!canMoveSelectedLayerUp}
+                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)] disabled:opacity-35 disabled:cursor-not-allowed"
                           >
                             Ke Atas
                           </button>
                           <button
                             type="button"
                             onClick={() => handleMoveLayer(selectedElement.id, 'down')}
-                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)]"
+                            disabled={!canMoveSelectedLayerDown}
+                            className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] hover:text-[var(--app-text)] disabled:opacity-35 disabled:cursor-not-allowed"
                           >
                             Ke Bawah
                           </button>
@@ -6904,7 +6881,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           )}
           </div>
         </div>
-      </div>
 
       {/* 7-STAGE SONG REQUEST DIAGNOSTIC MODAL */}
       {isSongTestModalOpen && (
