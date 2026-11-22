@@ -112,15 +112,70 @@ export function resolveViewerCounterDisplay(params: {
   };
 }
 
+export function shouldShowViewerLiveBadge(
+  liveBadgeProp: unknown,
+  hasLiveSample: boolean,
+): boolean {
+  return liveBadgeProp !== false && hasLiveSample;
+}
+
 export function extractLikeIncrementFromEvent(event: StreamEvent | null | undefined): number {
   if (!event || event.type !== 'like') return 0;
-  if (typeof event.amount === 'number' && Number.isFinite(event.amount) && event.amount > 0) {
-    return Math.floor(event.amount);
-  }
   if (typeof event.likeCount === 'number' && Number.isFinite(event.likeCount) && event.likeCount > 0) {
     return Math.floor(event.likeCount);
   }
+  // When totalLikeCount is set without likeCount, event.amount carries cumulative total, NOT an increment
+  if (
+    typeof event.totalLikeCount === 'number' &&
+    Number.isFinite(event.totalLikeCount) &&
+    event.totalLikeCount >= 0
+  ) {
+    return 0;
+  }
+  if (typeof event.amount === 'number' && Number.isFinite(event.amount) && event.amount > 0) {
+    return Math.floor(event.amount);
+  }
   return 1;
+}
+
+export function applyLikeEventToCount(
+  currentCount: number,
+  event: StreamEvent | null | undefined,
+): number {
+  const safeCurrent =
+    typeof currentCount === 'number' && Number.isFinite(currentCount) && currentCount > 0
+      ? Math.floor(currentCount)
+      : 0;
+  if (!event || event.type !== 'like') {
+    return safeCurrent;
+  }
+  if (
+    typeof event.totalLikeCount === 'number' &&
+    Number.isFinite(event.totalLikeCount) &&
+    event.totalLikeCount >= 0
+  ) {
+    return Math.floor(event.totalLikeCount);
+  }
+  return safeCurrent + extractLikeIncrementFromEvent(event);
+}
+
+export function deriveInitialLikeCountFromHistory(events: readonly StreamEvent[]): number {
+  const chronological = [...deduplicateStreamEvents(events, 200)].reverse();
+  let count = 0;
+  for (const event of chronological) {
+    count = applyLikeEventToCount(count, event);
+  }
+  return count;
+}
+
+export function shouldPlayEventAlertSound(
+  properties: Record<string, unknown> | undefined | null,
+): boolean {
+  if (!properties || typeof properties !== 'object') return true;
+  if (properties.soundEnabled === false || properties.soundEffect === false) {
+    return false;
+  }
+  return true;
 }
 
 export type BrowserEmbedUrlValidation =
@@ -282,6 +337,101 @@ export function resolveSoundboardControlModel(
   };
 }
 
+const AUDIENCE_USER_EVENT_TYPES = new Set<StreamEvent['type']>([
+  'chat',
+  'gift',
+  'like',
+  'follow',
+  'share',
+  'join',
+  'donation',
+]);
+
+export function resolveLatestAudienceUserEvent(
+  events: readonly StreamEvent[],
+): StreamEvent | null {
+  for (const event of events) {
+    if (!event || !AUDIENCE_USER_EVENT_TYPES.has(event.type)) continue;
+    if (typeof event.username === 'string' && event.username.trim().length > 0) {
+      return event;
+    }
+  }
+  return null;
+}
+
+export function getLatestAudienceUsernameFromHistory(
+  events: readonly StreamEvent[],
+): string | null {
+  const latest = resolveLatestAudienceUserEvent(events);
+  return latest ? latest.username.trim() : null;
+}
+
+export interface StudioChatItem {
+  id: string;
+  user: string;
+  text: string;
+  badge?: string;
+}
+
+export function buildChatMessagesFromHistory(
+  events: readonly StreamEvent[],
+  maxItems = 20,
+): StudioChatItem[] {
+  const safeMax = Math.max(1, Math.min(50, Math.floor(maxItems)));
+  const uniqueEvents = deduplicateStreamEvents(events, 50);
+  const chronologicalChats = [...uniqueEvents]
+    .reverse()
+    .filter(
+      (event) =>
+        event.type === 'chat' &&
+        typeof event.username === 'string' &&
+        event.username.trim().length > 0 &&
+        typeof event.detail === 'string' &&
+        event.detail.trim().length > 0,
+    );
+
+  return chronologicalChats.slice(-safeMax).map((event) => ({
+    id: event.id,
+    user: event.username.trim(),
+    text: event.detail.trim(),
+    badge: 'LIVE',
+  }));
+}
+
+export function appendChatMessageFromEvent(
+  prev: readonly StudioChatItem[],
+  event: StreamEvent,
+  maxItems = 20,
+): StudioChatItem[] {
+  if (
+    !event ||
+    event.type !== 'chat' ||
+    typeof event.username !== 'string' ||
+    !event.username.trim() ||
+    typeof event.detail !== 'string' ||
+    !event.detail.trim()
+  ) {
+    return [...prev];
+  }
+  const safeMax = Math.max(1, Math.min(50, Math.floor(maxItems)));
+  const entryId =
+    typeof event.id === 'string' && event.id.trim()
+      ? event.id.trim()
+      : `c_${event.timestamp || Date.now()}`;
+  if (prev.some((item) => item.id === entryId)) {
+    return [...prev];
+  }
+  return [
+    ...prev,
+    {
+      id: entryId,
+      user: event.username.trim(),
+      text: event.detail.trim(),
+      badge: 'LIVE',
+    },
+  ].slice(-safeMax);
+}
+
 export function resolveActiveUsernameModel(
   events: readonly StreamEvent[],
   props: Record<string, unknown>,
@@ -295,9 +445,7 @@ export function resolveActiveUsernameModel(
 } {
   const prefix = typeof props.prefix === 'string' ? props.prefix : '';
   const badge = typeof props.badge === 'string' && props.badge.trim() ? props.badge.trim() : null;
-  const latest = events.find(
-    (event) => typeof event?.username === 'string' && event.username.trim().length > 0,
-  );
+  const latest = resolveLatestAudienceUserEvent(events);
 
   if (!latest) {
     return {
@@ -350,10 +498,8 @@ export function resolveDynamicAvatarModel(
       : 'circle';
   const borderGlow = props.borderGlow !== false;
 
-  const eventWithAvatar = events.find((event) => isSafeImageSrc(event?.userAvatar));
-  const latestUserEvent =
-    eventWithAvatar ||
-    events.find((event) => typeof event?.username === 'string' && event.username.trim().length > 0);
+  // Must strictly inspect the SAME latest audience interaction event (never pair an older user's avatar with the latest username)
+  const latestUserEvent = resolveLatestAudienceUserEvent(events);
 
   if (!latestUserEvent) {
     return {
@@ -365,11 +511,13 @@ export function resolveDynamicAvatarModel(
     };
   }
 
-  const cleanName = latestUserEvent.username?.trim() || null;
+  const cleanName = latestUserEvent.username.trim();
   const initial = cleanName ? cleanName.replace(/^@+/, '').charAt(0).toUpperCase() || '?' : '?';
 
   return {
-    avatarUrl: eventWithAvatar && isSafeImageSrc(eventWithAvatar.userAvatar) ? eventWithAvatar.userAvatar.trim() : null,
+    avatarUrl: isSafeImageSrc(latestUserEvent.userAvatar)
+      ? latestUserEvent.userAvatar.trim()
+      : null,
     username: cleanName,
     initial,
     shape,

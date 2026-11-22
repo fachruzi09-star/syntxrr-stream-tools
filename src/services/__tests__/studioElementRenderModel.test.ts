@@ -4,14 +4,19 @@
 import type { StreamEvent, StudioElement } from '../../types';
 import { normalizeStudioElementProperties } from '../studioElementCatalog';
 import {
+  appendChatMessageFromEvent,
   appendUniqueStreamEvent,
+  applyLikeEventToCount,
+  buildChatMessagesFromHistory,
   buildEventFeedItems,
   buildLeaderboardEntries,
   buildLiveTextRenderModel,
   computeProgressBarModel,
   deduplicateStreamEvents,
+  deriveInitialLikeCountFromHistory,
   extractLikeIncrementFromEvent,
   extractViewerCountFromEvent,
+  getLatestAudienceUsernameFromHistory,
   getLatestViewerCountFromHistory,
   resolveActiveUsernameModel,
   resolveDynamicAvatarModel,
@@ -20,6 +25,8 @@ import {
   resolveSoundboardControlModel,
   resolveStickerVisualModel,
   resolveViewerCounterDisplay,
+  shouldPlayEventAlertSound,
+  shouldShowViewerLiveBadge,
   validateSafeBrowserEmbedUrl,
 } from '../studioElementRenderModel';
 
@@ -351,8 +358,148 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(activeAvatar.shape, 'rounded', 'avatar respects shape');
   assertEqual(activeAvatar.borderGlow, false, 'avatar respects borderGlow');
 
+  // === FASE 1B TAHAP 2.1 CORRECTIVE TESTS ===
+
+  // 10.1 totalLikeCount treated as absolute total (NEVER summed as increment) & empty history starts at 0
+  assertEqual(deriveInitialLikeCountFromHistory([]), 0, 'empty history initializes Like count at 0 (no fake 1240)');
+
+  const totalLikePacket1: StreamEvent = {
+    id: 'tt_like_tot_1',
+    type: 'like',
+    username: 'PenontonA',
+    detail: 'total 15.000 like',
+    amount: 15000,
+    totalLikeCount: 15000,
+    timestamp: 1000,
+  };
+  const totalLikePacket2: StreamEvent = {
+    id: 'tt_like_tot_2',
+    type: 'like',
+    username: 'PenontonB',
+    detail: 'total 15.040 like',
+    amount: 15040,
+    totalLikeCount: 15040,
+    timestamp: 1005,
+  };
+  assertEqual(extractLikeIncrementFromEvent(totalLikePacket1), 0, 'cumulative totalLikeCount does not report as increment');
+  let runningLikes = deriveInitialLikeCountFromHistory([]);
+  runningLikes = applyLikeEventToCount(runningLikes, totalLikePacket1);
+  assertEqual(runningLikes, 15000, 'first totalLikeCount sets absolute total');
+  runningLikes = applyLikeEventToCount(runningLikes, totalLikePacket2);
+  assertEqual(runningLikes, 15040, 'second totalLikeCount updates to 15040 instead of summing 30040');
+  assertEqual(
+    deriveInitialLikeCountFromHistory([totalLikePacket2, totalLikePacket1]),
+    15040,
+    'chronological history replay returns latest totalLikeCount 15040 without double-summing',
+  );
+
+  // 10.2 likeCount increment works accurately & viewer event never alters Like count
+  const deltaLikePacket: StreamEvent = {
+    id: 'tt_like_delta_1',
+    type: 'like',
+    username: 'Tapper',
+    detail: 'mengirim 12 tap layar',
+    amount: 12,
+    likeCount: 12,
+    timestamp: 1010,
+  };
+  assertEqual(extractLikeIncrementFromEvent(deltaLikePacket), 12, 'extracts increment when likeCount is present');
+  runningLikes = applyLikeEventToCount(100, deltaLikePacket);
+  assertEqual(runningLikes, 112, 'increments existing Like count by likeCount=12');
+  runningLikes = applyLikeEventToCount(runningLikes, viewerEvent);
+  assertEqual(runningLikes, 112, 'viewer event never alters Like count');
+
+  // 10.3 Viewer event (username: 'TikTok LIVE') never becomes audience username / {username} / avatar
+  const tiktokSystemViewerEvent: StreamEvent = {
+    id: 'tt_viewer_sys',
+    type: 'viewer',
+    username: 'TikTok LIVE',
+    detail: '500 penonton aktif',
+    viewerCount: 500,
+    amount: 500,
+    timestamp: 2000,
+  };
+  assertEqual(
+    getLatestAudienceUsernameFromHistory([tiktokSystemViewerEvent]),
+    null,
+    'viewer event is ignored when resolving {username} for dynamic_text',
+  );
+  const usernameAfterOnlyViewer = resolveActiveUsernameModel([tiktokSystemViewerEvent], {
+    prefix: '⭐ ',
+    badge: 'VIP',
+  });
+  assertEqual(usernameAfterOnlyViewer.hasEvent, false, 'viewer event does not count as audience user');
+  assertEqual(usernameAfterOnlyViewer.username, null, 'TikTok LIVE viewer event never becomes username widget text');
+  const avatarAfterOnlyViewer = resolveDynamicAvatarModel([tiktokSystemViewerEvent], {});
+  assertEqual(avatarAfterOnlyViewer.username, null, 'viewer event never becomes avatar username');
+
+  // 10.4 Older user avatar is NEVER paired with a newer audience username lacking a photo
+  const olderUserWithPhoto: StreamEvent = {
+    id: 'ev_older_photo',
+    type: 'gift',
+    username: 'OldSupporter',
+    userAvatar: 'https://img.example.com/old-user.png',
+    detail: 'mengirim Mawar',
+    timestamp: 3000,
+  };
+  const newerUserNoPhoto: StreamEvent = {
+    id: 'ev_newer_nophoto',
+    type: 'chat',
+    username: 'NewChatter',
+    detail: 'Halo semua!',
+    timestamp: 3100,
+  };
+  const newestFirstEvents: StreamEvent[] = [tiktokSystemViewerEvent, newerUserNoPhoto, olderUserWithPhoto];
+  assertEqual(
+    getLatestAudienceUsernameFromHistory(newestFirstEvents),
+    'NewChatter',
+    'consistent audience resolver selects NewChatter over viewer event and older gift',
+  );
+  const pairedUsername = resolveActiveUsernameModel(newestFirstEvents, {});
+  const pairedAvatar = resolveDynamicAvatarModel(newestFirstEvents, {});
+  assertEqual(pairedUsername.username, 'NewChatter', 'username widget picks NewChatter');
+  assertEqual(pairedAvatar.username, 'NewChatter', 'avatar widget picks the SAME NewChatter');
+  assertEqual(pairedAvatar.initial, 'N', 'avatar falls back to NewChatter initial');
+  assertEqual(pairedAvatar.avatarUrl, null, 'older OldSupporter avatar is NOT paired with NewChatter');
+
+  // 10.5 Empty chat history produces zero fake users (no DimasGamer / SitiStream)
+  const emptyChats = buildChatMessagesFromHistory([], 20);
+  assertEqual(emptyChats.length, 0, 'empty chat history returns empty array without fake users');
+  const onlyViewerChats = buildChatMessagesFromHistory([tiktokSystemViewerEvent], 20);
+  assertEqual(onlyViewerChats.length, 0, 'non-chat history produces zero chat rows');
+  const appendedChats = appendChatMessageFromEvent(
+    appendChatMessageFromEvent(emptyChats, newerUserNoPhoto, 20),
+    newerUserNoPhoto,
+    20,
+  );
+  assertEqual(appendedChats.length, 1, 'chat append deduplicates by event ID');
+  assertEqual(appendedChats[0].user, 'NewChatter', 'chat item keeps real username');
+
+  // 10.6 Viewer fallback is NEVER marked as LIVE
+  assertEqual(
+    shouldShowViewerLiveBadge(true, viewerFallbackDisplay.hasLiveSample),
+    false,
+    'viewer fallback suppresses LIVE badge',
+  );
+  assertEqual(
+    shouldShowViewerLiveBadge(true, viewerLiveDisplay.hasLiveSample),
+    true,
+    'live viewer sample enables LIVE badge when liveBadge prop enabled',
+  );
+  assertEqual(
+    shouldShowViewerLiveBadge(false, viewerLiveDisplay.hasLiveSample),
+    false,
+    'explicit liveBadge=false hides LIVE badge even with live sample',
+  );
+
+  // 10.7 Event alert sound respects both soundEnabled and soundEffect aliases
+  assertEqual(shouldPlayEventAlertSound({ soundEnabled: true, soundEffect: true }), true, 'plays alert sound when enabled');
+  assertEqual(shouldPlayEventAlertSound({ soundEnabled: false, soundEffect: true }), false, 'mutes alert when soundEnabled=false');
+  assertEqual(shouldPlayEventAlertSound({ soundEnabled: true, soundEffect: false }), false, 'mutes alert when soundEffect=false');
+  assertEqual(shouldPlayEventAlertSound({}), true, 'defaults alert sound to enabled when flags omitted');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (dynamic text, progress bar, leaderboard currency isolation, browser embed URL security, viewer/like isolation, event deduplication, normalization & live_text).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 corrective checks).`,
   );
 }
 

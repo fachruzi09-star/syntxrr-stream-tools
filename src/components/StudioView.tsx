@@ -56,15 +56,19 @@ import {
 } from '../services/studioElementCatalog';
 import { soundboardEngine } from '../services/soundboardEngine';
 import {
+  appendChatMessageFromEvent,
   appendUniqueStreamEvent,
+  applyLikeEventToCount,
+  buildChatMessagesFromHistory,
   buildEventFeedItems,
   buildLeaderboardEntries,
   buildLiveTextRenderModel,
   computeProgressBarModel,
   deduplicateStreamEvents,
-  extractLikeIncrementFromEvent,
+  deriveInitialLikeCountFromHistory,
   extractViewerCountFromEvent,
   getActiveTargetTextFromElements,
+  getLatestAudienceUsernameFromHistory,
   getLatestViewerCountFromHistory,
   getTopDonorNameFromHistory,
   resolveActiveUsernameModel,
@@ -74,6 +78,9 @@ import {
   resolveSoundboardControlModel,
   resolveStickerVisualModel,
   resolveViewerCounterDisplay,
+  shouldPlayEventAlertSound,
+  shouldShowViewerLiveBadge,
+  type StudioChatItem,
   validateSafeBrowserEmbedUrl,
 } from '../services/studioElementRenderModel';
 import {
@@ -271,11 +278,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [latestViewerCount, setLatestViewerCount] = useState<number | null>(() =>
     getLatestViewerCountFromHistory(streamEventBus.getHistory()),
   );
-  const [simulatedLikes, setSimulatedLikes] = useState<number>(1240);
-  const [recentChatList, setRecentChatList] = useState<{ id: string; user: string; text: string; badge?: string }[]>([
-    { id: 'c1', user: 'DimasGamer', text: 'Keren banget gameplay-nya bang! 🔥', badge: 'VIP' },
-    { id: 'c2', user: 'SitiStream', text: 'Gaskeun win streak malam ini!', badge: 'SUB' },
-  ]);
+  const [simulatedLikes, setSimulatedLikes] = useState<number>(() =>
+    deriveInitialLikeCountFromHistory(streamEventBus.getHistory()),
+  );
+  const [recentChatList, setRecentChatList] = useState<StudioChatItem[]>(() =>
+    buildChatMessagesFromHistory(streamEventBus.getHistory(), 20),
+  );
 
   // Song Request Engine State Sync
   const [srState, setSrState] = useState<SongRequestState>(songRequestEngine.getState());
@@ -758,19 +766,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
           setLatestViewerCount(nextViewerCount);
         }
       } else if (event.type === 'like') {
-        const likeIncrement = extractLikeIncrementFromEvent(event);
-        if (likeIncrement > 0) {
-          setSimulatedLikes((prev) => prev + likeIncrement);
-        }
+        setSimulatedLikes((prev) => applyLikeEventToCount(prev, event));
       } else if (event.type === 'chat') {
-        const chatEntryId = event.id || `c_${now}`;
-        setRecentChatList((prev) => {
-          if (prev.some((item) => item.id === chatEntryId)) return prev;
-          return [
-            ...prev.slice(-4),
-            { id: chatEntryId, user: event.username, text: event.detail, badge: 'LIVE' },
-          ];
-        });
+        setRecentChatList((prev) => appendChatMessageFromEvent(prev, event, 20));
       }
 
       elementsRef.current.forEach((elem) => {
@@ -789,7 +787,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
           if (isMatch) {
             action = 'bounce';
             textOverride = `${event.username}: ${event.detail}`;
-            soundSynth.playAlertChime(event.type === 'gift' ? 'gift' : 'follower');
+            if (shouldPlayEventAlertSound(elem.properties)) {
+              soundSynth.playAlertChime(event.type === 'gift' ? 'gift' : 'follower');
+            }
           }
         } else if (elem.type === 'combo_counter') {
           if (event.type === 'gift' || event.type === 'like') {
@@ -1988,6 +1988,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               disabled={!sfxPlan.isSupported}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 if (!sfxPlan.isSupported) return;
@@ -2065,26 +2066,33 @@ export const StudioView: React.FC<StudioViewProps> = ({
           typeof props.fontSize === 'number' && Number.isFinite(props.fontSize) && props.fontSize > 0
             ? props.fontSize
             : 11;
+        const visibleChats = recentChatList.slice(-maxMessages);
         return (
           <div
             className={`w-full h-full p-2.5 space-y-1.5 overflow-hidden text-left bg-zinc-950/90 rounded-xl border border-zinc-800 transition-all ${animClass}`}
             style={{ backgroundColor: chatBg }}
           >
-            {recentChatList.slice(-maxMessages).map((chat) => (
-              <div
-                key={chat.id}
-                className="flex items-center gap-1.5 leading-tight"
-                style={{ fontSize: `${chatFontSize}px` }}
-              >
-                {props.showBadges !== false && chat.badge && (
-                  <span className="px-1 py-0.2 rounded bg-amber-500/20 text-[#F2C230] font-bold text-[8px]">
-                    {chat.badge}
-                  </span>
-                )}
-                <span className="font-bold text-[#F2C230]">@{chat.user}:</span>
-                <span className="text-zinc-200 truncate">{chat.text}</span>
+            {visibleChats.length === 0 ? (
+              <div className="w-full h-full flex items-center justify-center text-[10px] text-zinc-400 text-center">
+                Belum ada pesan chat masuk
               </div>
-            ))}
+            ) : (
+              visibleChats.map((chat) => (
+                <div
+                  key={chat.id}
+                  className="flex items-center gap-1.5 leading-tight"
+                  style={{ fontSize: `${chatFontSize}px` }}
+                >
+                  {props.showBadges !== false && chat.badge && (
+                    <span className="px-1 py-0.2 rounded bg-amber-500/20 text-[#F2C230] font-bold text-[8px]">
+                      {chat.badge}
+                    </span>
+                  )}
+                  <span className="font-bold text-[#F2C230]">@{chat.user}:</span>
+                  <span className="text-zinc-200 truncate">{chat.text}</span>
+                </div>
+              ))
+            )}
           </div>
         );
       }
@@ -2138,12 +2146,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
           liveViewerCount: latestViewerCount,
           fallbackPropertyValue: props.viewerCount,
         });
+        const showLiveBadge = shouldShowViewerLiveBadge(
+          props.liveBadge,
+          viewerDisplay.hasLiveSample,
+        );
         return (
           <div
             className={`w-full h-full rounded-xl bg-zinc-950/90 border border-zinc-800 px-3 py-1.5 flex items-center justify-between gap-2 text-xs transition-all ${animClass}`}
           >
             <div className="flex items-center gap-1.5 min-w-0">
-              {props.liveBadge !== false && (
+              {showLiveBadge && (
                 <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[8px] font-black tracking-wider shrink-0">
                   LIVE
                 </span>
@@ -2154,7 +2166,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </span>
             </div>
             <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider shrink-0">
-              Penonton
+              {viewerDisplay.hasLiveSample ? 'Penonton' : 'Penonton (Standby)'}
             </span>
           </div>
         );
@@ -2321,14 +2333,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
           minute: '2-digit',
           hour12: false,
         });
-        const latestUser = studioEventHistory.find(
-          (item) => typeof item.username === 'string' && item.username.trim().length > 0,
-        )?.username;
+        const latestUser = getLatestAudienceUsernameFromHistory(studioEventHistory);
         const dynamicResult = resolveDynamicTextOutput({
           template: props.template ?? props.text,
           fallback: props.fallback,
           context: {
-            latestUsername: latestUser || null,
+            latestUsername: latestUser,
             targetText: getActiveTargetTextFromElements(elements, props),
             currentTimeText: nowTimeText,
             durationText: null,
