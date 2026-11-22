@@ -53,6 +53,12 @@ import {
 } from '../services/studioPresetActions';
 import { exportPresetPackageFile, importPresetPackageFile } from '../services/presetTransfer';
 import { StudioPresetHub } from './studio/StudioPresetHub';
+import {
+  requestStudioDeviceOrientation,
+  resolveDeviceOrientationForPreset,
+  restoreStudioDeviceOrientation,
+  type StudioDeviceOrientation,
+} from '../services/studioOrientationBridge';
 import { SOURCE_CATALOG } from './SourcesLibraryView';
 import {
   createStudioElementFromSource,
@@ -190,6 +196,7 @@ interface StudioViewProps {
       'backgroundUri' | 'screensaver' | 'transitionIn' | 'transitionOut'
     >,
   ) => Promise<void> | void;
+  onFullscreenWorkspaceChange?: (isFullscreen: boolean) => void;
 }
 
 // Active trigger reaction state for canvas animation
@@ -280,6 +287,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   isModeBActionPending = false,
   onApplyLiveSceneToModeB,
   onUpdatePresetModeBSettings,
+  onFullscreenWorkspaceChange,
 }) => {
   // Selected Element & Group Selection
   const [selectedId, setSelectedId] = useState<string | null>(elements[0]?.id || null);
@@ -300,12 +308,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('all');
   const [marketplaceSearchQuery, setMarketplaceSearchQuery] = useState('');
 
-  // Canvas Pan & Zoom
+  // Canvas Pan, Zoom & Fullscreen Stage Sizing
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
-  const [isMonitorExpanded, setIsMonitorExpanded] = useState(false);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const stageContainerRef = useRef<HTMLDivElement | null>(null);
+  const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
 
   // Multi-Camera Stream Store (elementId -> MediaStream)
   const [activeCameraStreams, setActiveCameraStreams] = useState<Record<string, MediaStream>>({});
@@ -544,6 +553,90 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const isStrictModeBLocked = Boolean(
     isModeBSelected && isModeBMutationLocked && !isModeBLive,
   );
+
+  const hasRequestedNativeOrientationRef = useRef<boolean>(false);
+  const lastNativeOrientationRef = useRef<StudioDeviceOrientation | null>(null);
+  const isModeBMutationLockedRef = useRef<boolean>(isModeBMutationLocked);
+  isModeBMutationLockedRef.current = isModeBMutationLocked;
+  const targetDeviceOrientation = resolveDeviceOrientationForPreset(canvasOrientation);
+
+  // Hide global Header & BottomNav only while inside the active Studio editing workspace
+  useEffect(() => {
+    onFullscreenWorkspaceChange?.(!showPresetSelector);
+  }, [onFullscreenWorkspaceChange, showPresetSelector]);
+
+  useEffect(() => {
+    return () => {
+      onFullscreenWorkspaceChange?.(false);
+    };
+  }, [onFullscreenWorkspaceChange]);
+
+  // Request native Activity orientation inside workspace (16:9 -> landscape, 9:16 & 1:1 -> portrait)
+  // and restore initial orientation on exit/unmount without touching Mode B when locked.
+  useEffect(() => {
+    if (showPresetSelector) {
+      if (hasRequestedNativeOrientationRef.current && !isModeBMutationLocked) {
+        hasRequestedNativeOrientationRef.current = false;
+        lastNativeOrientationRef.current = null;
+        void restoreStudioDeviceOrientation();
+      }
+      return;
+    }
+
+    if (isModeBMutationLocked) {
+      return;
+    }
+
+    if (
+      !hasRequestedNativeOrientationRef.current ||
+      lastNativeOrientationRef.current !== targetDeviceOrientation
+    ) {
+      hasRequestedNativeOrientationRef.current = true;
+      lastNativeOrientationRef.current = targetDeviceOrientation;
+      void requestStudioDeviceOrientation(targetDeviceOrientation);
+    }
+  }, [showPresetSelector, targetDeviceOrientation, isModeBMutationLocked]);
+
+  useEffect(() => {
+    return () => {
+      if (hasRequestedNativeOrientationRef.current && !isModeBMutationLockedRef.current) {
+        hasRequestedNativeOrientationRef.current = false;
+        lastNativeOrientationRef.current = null;
+        void restoreStudioDeviceOrientation();
+      }
+    };
+  }, []);
+
+  // Dynamically measure interactive Stage bounds so Canvas fills available viewport accurately
+  useEffect(() => {
+    if (showPresetSelector) {
+      setStageSize(null);
+      return;
+    }
+    const node = stageContainerRef.current;
+    if (!node) return;
+
+    const updateSize = () => {
+      const width = Math.max(0, Math.floor(node.clientWidth));
+      const height = Math.max(0, Math.floor(node.clientHeight));
+      setStageSize((prev) =>
+        prev && prev.width === width && prev.height === height ? prev : { width, height },
+      );
+    };
+
+    updateSize();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        updateSize();
+      });
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, [showPresetSelector]);
 
   const activeGroups = activePreset?.groups || [];
   const activeSuperGroups = activePreset?.superGroups || [];
@@ -2749,19 +2842,37 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const getCanvasAspectClass = () => {
     if (canvasOrientation === '9:16') {
-      return isMonitorExpanded
-        ? 'aspect-[9/16] w-full max-w-[320px] min-[390px]:max-w-[344px] sm:max-w-[360px]'
-        : 'aspect-[9/16] w-full max-w-[250px] min-[380px]:max-w-[276px] sm:max-w-[300px] lg:max-w-[320px]';
+      return 'aspect-[9/16] w-full max-w-[340px]';
     }
     if (canvasOrientation === '16:9') {
-      return isMonitorExpanded
-        ? 'aspect-video w-full max-w-[660px]'
-        : 'aspect-video w-full max-w-[580px]';
+      return 'aspect-video w-full max-w-[660px]';
     }
-    return isMonitorExpanded
-      ? 'aspect-square w-full max-w-[330px] sm:max-w-[380px]'
-      : 'aspect-square w-full max-w-[268px] sm:max-w-[320px] lg:max-w-[340px]';
+    return 'aspect-square w-full max-w-[360px]';
   };
+
+  const fittedCanvasDimensions = (() => {
+    if (!stageSize) return null;
+    const availW = Math.max(120, stageSize.width - 16);
+    const availH = Math.max(120, stageSize.height - 16);
+    const ratio =
+      canvasOrientation === '9:16'
+        ? 9 / 16
+        : canvasOrientation === '16:9'
+          ? 16 / 9
+          : 1;
+
+    let width = availW;
+    let height = width / ratio;
+    if (height > availH) {
+      height = availH;
+      width = height * ratio;
+    }
+
+    return {
+      width: Math.max(120, Math.floor(width)),
+      height: Math.max(120, Math.floor(height)),
+    };
+  })();
 
   const filteredPresets = presets.filter((p) => {
     if (presetFilterCategory === 'favorites') return p.isFavorite;
@@ -3148,7 +3259,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
         : null;
 
   return (
-    <div className="space-y-3.5 pb-20 xl:pb-6">
+    <div
+      className={
+        showPresetSelector
+          ? 'space-y-3.5 pb-20 xl:pb-6'
+          : 'flex-1 h-full min-h-0 flex flex-col gap-1.5 sm:gap-2 p-1.5 sm:p-2.5 overflow-hidden'
+      }
+    >
       {/* Shared Hidden JSON Preset Import Picker */}
       <input
         ref={presetImportInputRef}
@@ -3222,7 +3339,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       /* === MAIN STUDIO CANVAS VIEW === */
       <>
       {/* Dual-Group Minimal Studio Header */}
-      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] px-2.5 py-2 sm:px-4 sm:py-2.5 space-y-2">
+      <header className="shrink-0 rounded-xl sm:rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] px-2 py-1.5 sm:px-3.5 sm:py-2 space-y-1.5">
         <div className="flex items-center justify-between gap-1.5 sm:gap-2.5 flex-nowrap">
           {/* Left Capsule: Back to Preset Hub + Title + Save State */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
@@ -3504,7 +3621,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       {/* Mode B Active Status / Lock / Live Apply Banner */}
       {isModeBSelected && isModeBMutationLocked && (
         <div
-          className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          className={`shrink-0 p-2.5 sm:p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
             isModeBLive
               ? 'bg-[var(--app-ok-soft)] border-emerald-500/35 text-[var(--app-text)]'
               : 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-text)]'
@@ -3548,34 +3665,50 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
       )}
 
-      {/* Main Studio Viewport Split (Canvas on Left, Consolidated Panel on Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      {/* Main Studio Viewport Split (Fullscreen Stage on Mobile/Tablet, Split with Side Dock on lg+) */}
+      <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 gap-2.5 lg:gap-4">
         {/* SECTION 1: CANVAS EDITOR */}
         <div
-          className="lg:col-span-7 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl p-3 sm:p-4 flex flex-col items-center justify-between space-y-3 overscroll-y-contain"
+          className="flex-1 min-h-0 lg:col-span-7 lg:h-full bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl sm:rounded-2xl p-2 sm:p-3 flex flex-col gap-2 overscroll-y-contain"
           style={{ overscrollBehaviorY: 'contain' }}
         >
           {/* Viewport Toolbar */}
-          <div className="w-full flex items-center justify-between gap-2 text-xs text-[var(--app-text-secondary)] border-b border-[var(--app-border)] pb-2.5">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="w-full shrink-0 flex items-center justify-between gap-1.5 text-xs text-[var(--app-text-secondary)] border-b border-[var(--app-border)] pb-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span className="w-2 h-2 rounded-full bg-[var(--app-accent)] shrink-0" />
-              <span className="font-bold text-[var(--app-text)] tabular-metrics truncate">
+              <span className="font-bold text-[var(--app-text)] tabular-metrics truncate text-[11px] sm:text-xs">
                 Kanvas {canvasOrientation} ({elements.length})
               </span>
-              <button
-                type="button"
-                onClick={() => setIsMonitorExpanded((v) => !v)}
-                className="lg:hidden min-h-[40px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-text)] shrink-0"
-              >
-                {isMonitorExpanded ? 'Ringkas' : 'Perbesar'}
-              </button>
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
+                onClick={() =>
+                  openStudioPanel(
+                    selectedElement
+                      ? 'properties'
+                      : activeSidePanel === 'properties'
+                        ? 'elements'
+                        : activeSidePanel,
+                  )
+                }
+                className={`lg:hidden btn-press min-h-[38px] px-2.5 rounded-xl border text-[11px] font-bold inline-flex items-center gap-1.5 transition-colors ${
+                  isMobilePanelOpen
+                    ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+                }`}
+                title="Buka panel alat Studio"
+                aria-label="Buka panel alat Studio"
+              >
+                <Sliders className="w-3.5 h-3.5 shrink-0" />
+                <span>Alat</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
-                className="btn-press min-h-[44px] min-w-[40px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Zoom Out"
                 aria-label="Zoom Out"
               >
@@ -3585,7 +3718,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
-                className="btn-press min-h-[44px] min-w-[40px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Zoom In"
                 aria-label="Zoom In"
               >
@@ -3597,7 +3730,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   setZoomLevel(100);
                   setPanOffset({ x: 0, y: 0 });
                 }}
-                className="btn-press min-h-[44px] min-w-[40px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Reset Posisi & Zoom"
                 aria-label="Reset Posisi dan Zoom"
               >
@@ -3608,9 +3741,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Interactive Screen Stage Container */}
           <div
-            className={`w-full overflow-hidden flex items-center justify-center p-2.5 sm:p-3 pb-16 sm:pb-16 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative select-none overscroll-y-contain ${
-              isMonitorExpanded ? 'min-h-[520px] sm:min-h-[580px]' : 'min-h-[420px] sm:min-h-[480px] lg:min-h-[540px]'
-            }`}
+            ref={stageContainerRef}
+            className="flex-1 min-h-0 w-full overflow-hidden flex items-center justify-center p-2 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative select-none overscroll-y-contain"
             style={{
               touchAction: 'none',
               overscrollBehaviorY: 'contain',
@@ -3639,12 +3771,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <div
               ref={canvasRef}
               style={{
+                ...(fittedCanvasDimensions
+                  ? {
+                      width: `${fittedCanvasDimensions.width}px`,
+                      height: `${fittedCanvasDimensions.height}px`,
+                    }
+                  : {}),
                 transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel / 100})`,
                 transformOrigin: 'center center',
                 touchAction: 'none',
                 overscrollBehaviorY: 'contain',
               }}
-              className={`relative bg-[#07080A] border-2 border-[var(--app-border-strong)] rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${getCanvasAspectClass()} overscroll-y-contain`}
+              className={`relative bg-[#07080A] border-2 border-[var(--app-border-strong)] rounded-2xl shadow-2xl transition-transform duration-75 overflow-hidden ${
+                fittedCanvasDimensions ? 'shrink-0' : getCanvasAspectClass()
+              } overscroll-y-contain`}
               onClick={() => {
                 setSelectedId(null);
                 setSelectedGroupId(null);
@@ -3907,42 +4047,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             )}
           </div>
 
-          {/* Mobile Thumb-Zone Action Dock (keeps Canvas primary on mobile, triggers slide-up Studio sheet) */}
-          <div className="w-full lg:hidden grid grid-cols-5 gap-1.5 pt-1">
-            {(
-              [
-                { id: 'properties', label: 'Properti', icon: <Sliders className="w-4 h-4" /> },
-                { id: 'elements', label: 'Elemen', icon: <Plus className="w-4 h-4" /> },
-                { id: 'layers', label: 'Lapisan', icon: <Layers className="w-4 h-4" /> },
-                { id: 'media', label: 'Media', icon: <ImageIcon className="w-4 h-4" /> },
-                { id: 'marketplace', label: 'Ekstra', icon: <ShoppingBag className="w-4 h-4" /> },
-              ] as const
-            ).map((dockItem) => {
-              const isHighlighted =
-                isMobilePanelOpen &&
-                (activeSidePanel === dockItem.id ||
-                  (dockItem.id === 'elements' && activeSidePanel === 'sources') ||
-                  (dockItem.id === 'marketplace' &&
-                    (activeSidePanel === 'presets' || activeSidePanel === 'simulator')));
-              return (
-                <button
-                  key={dockItem.id}
-                  type="button"
-                  onClick={() => openStudioPanel(dockItem.id)}
-                  className={`btn-press min-h-[52px] px-1.5 py-1.5 rounded-xl border flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-colors ${
-                    isHighlighted
-                      ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                      : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                  }`}
-                >
-                  {dockItem.icon}
-                  <span className="truncate max-w-full">{dockItem.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="w-full hidden lg:flex items-center justify-between gap-2 text-[11px] text-[var(--app-text-muted)] px-1">
+          <div className="w-full shrink-0 hidden lg:flex items-center justify-between gap-2 text-[11px] text-[var(--app-text-muted)] px-1">
             <span>Geser elemen bebas horizontal &amp; vertikal.</span>
             <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">1080p Produksi</span>
           </div>
@@ -3957,14 +4062,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
           />
         )}
 
-        {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL (Slide-up Sheet on <lg, Side Dock on lg+) */}
+        {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL (Bottom Sheet in Portrait, Right Drawer in Landscape, Side Dock on lg+) */}
         <div
           ref={sidePanelRef}
           className={`${
             isMobilePanelOpen
-              ? 'fixed inset-x-0 bottom-[calc(46px+env(safe-area-inset-bottom,0px))] z-40 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[62vh] flex flex-col anim-sheet-up'
+              ? 'fixed inset-x-0 bottom-0 pb-safe z-40 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[72dvh] landscape:top-0 landscape:bottom-0 landscape:right-0 landscape:left-auto landscape:w-[360px] landscape:max-w-[85vw] landscape:max-h-full landscape:rounded-none landscape:rounded-l-2xl landscape:border-t-0 landscape:border-l flex flex-col anim-sheet-up'
               : 'hidden lg:flex'
-          } lg:static lg:inset-auto lg:z-auto lg:col-span-5 lg:bg-[var(--app-surface)] lg:border lg:border-[var(--app-border)] lg:rounded-2xl lg:shadow-none lg:max-h-none overflow-hidden flex-col`}
+          } lg:static lg:inset-auto lg:w-auto lg:max-w-none lg:z-auto lg:col-span-5 lg:h-full lg:min-h-0 lg:bg-[var(--app-surface)] lg:border lg:border-[var(--app-border)] lg:rounded-2xl lg:shadow-none lg:max-h-none overflow-hidden flex-col`}
         >
           {/* Mobile Slide-Up Drag Handle & Header */}
           <div className="lg:hidden flex items-center justify-between px-4 pt-2.5 pb-1.5 border-b border-[var(--app-border)] shrink-0">
@@ -4101,7 +4206,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-5 flex-1 overflow-y-auto">
+          <div className="p-4 sm:p-5 flex-1 min-h-0 overflow-y-auto">
           {/* TAB 1: CONTEXTUAL PROPERTIES PANEL */}
           {activeSidePanel === 'properties' && (
             <div className="divide-y divide-[var(--app-border)]">

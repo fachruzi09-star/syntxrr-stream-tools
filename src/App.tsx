@@ -157,6 +157,14 @@ export default function App() {
   const [activeNav, setActiveNav] = useState<NavigationTab>('dashboard');
   const [legacySubview, setLegacySubview] = useState<LegacyCompatibilitySubview | null>(null);
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+  const [isStudioFullscreen, setIsStudioFullscreen] = useState(false);
+
+  // Restore global shell immediately whenever navigating outside Studio root view
+  useEffect(() => {
+    if (activeNav !== 'studio' || legacySubview !== null) {
+      setIsStudioFullscreen(false);
+    }
+  }, [activeNav, legacySubview]);
 
   // App Settings
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -2789,17 +2797,26 @@ export default function App() {
       : 'off'
     : modeBHeaderTone;
 
+  const isFullscreenStudioWorkspace =
+    activeNav === 'studio' && legacySubview === null && isStudioFullscreen;
+
   return (
     <I18nProvider language={settings.language || 'id-ID'}>
-      <div className="min-h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col font-sans overflow-x-clip">
-      {/* Top Header Bar */}
-      <Header
-        activeNav={activeNav}
-        activePreset={activePreset}
-        honestStatusLabel={headerStatusLabel}
-        honestStatusTone={headerStatusTone}
-        onNavigate={handleNavigate}
-      />
+      <div
+        className={`bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col font-sans overflow-x-clip ${
+          isFullscreenStudioWorkspace ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
+        }`}
+      >
+      {/* Top Header Bar (hidden during fullscreen Studio editing workspace) */}
+      {!isFullscreenStudioWorkspace && (
+        <Header
+          activeNav={activeNav}
+          activePreset={activePreset}
+          honestStatusLabel={headerStatusLabel}
+          honestStatusTone={headerStatusTone}
+          onNavigate={handleNavigate}
+        />
+      )}
 
       {/* In-app Confirmation Modal (Mode Switch, Confirm End Live & Reset Defaults) */}
       {pendingConfirmModal && (
@@ -2859,11 +2876,19 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-2.5 pt-3.5 pb-20 sm:px-6 sm:pt-5 lg:px-8 xl:pb-8">
+      <main
+        className={
+          isFullscreenStudioWorkspace
+            ? 'flex-1 w-full h-full min-h-0 flex flex-col overflow-hidden pt-safe pb-safe pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]'
+            : 'flex-1 max-w-6xl w-full mx-auto px-2.5 pt-3.5 pb-20 sm:px-6 sm:pt-5 lg:px-8 xl:pb-8'
+        }
+      >
         {modeBNoticeBanner && (
           <div
             role="status"
-            className="mb-3 p-2.5 sm:p-3 rounded-xl border text-xs flex items-center justify-between gap-3 anim-pop-in"
+            className={`${
+              isFullscreenStudioWorkspace ? 'mx-2 mt-1.5 mb-1 p-2' : 'mb-3 p-2.5 sm:p-3'
+            } rounded-xl border text-xs flex items-center justify-between gap-3 anim-pop-in shrink-0`}
             style={{
               backgroundColor: 'var(--app-warn-soft)',
               borderColor: 'color-mix(in srgb, var(--app-warn) 45%, transparent)',
@@ -2874,7 +2899,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setModeBNoticeBanner(null)}
-              className="btn-press min-h-[44px] min-w-[44px] px-3 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] shrink-0"
+              className="btn-press min-h-[40px] min-w-[40px] px-3 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] shrink-0"
             >
               Tutup
             </button>
@@ -2883,7 +2908,7 @@ export default function App() {
 
         <div
           key={`${activeNav}:${legacySubview || 'root'}`}
-          className="anim-view-enter"
+          className={`anim-view-enter ${isFullscreenStudioWorkspace ? 'flex-1 min-h-0 flex flex-col' : ''}`}
         >
           {activeNav === 'dashboard' && (
             <DashboardView
@@ -2969,6 +2994,7 @@ export default function App() {
               isModeBActionPending={isModeBActionPending}
               onApplyLiveSceneToModeB={handleApplyLiveSceneToModeB}
               onUpdatePresetModeBSettings={handleUpdatePresetModeBSettings}
+              onFullscreenWorkspaceChange={setIsStudioFullscreen}
             />
           )}
 
@@ -3058,11 +3084,13 @@ export default function App() {
         </div>
       </main>
 
-      {/* Mobile Bottom Navigation Bar */}
-      <BottomNav
-        activeNav={activeNav}
-        onNavigate={handleNavigate}
-      />
+      {/* Mobile Bottom Navigation Bar (hidden during fullscreen Studio editing workspace) */}
+      {!isFullscreenStudioWorkspace && (
+        <BottomNav
+          activeNav={activeNav}
+          onNavigate={handleNavigate}
+        />
+      )}
 
       {/* Fallback web: overlay native hanya ada di Android. Di Android toolbar/panel
           digambar langsung oleh FloatingHudManager di atas aplikasi lain. */}

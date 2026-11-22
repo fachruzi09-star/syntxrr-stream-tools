@@ -19,6 +19,7 @@ interface StudioPresetMiniPreviewProps {
   isActive?: boolean;
   hasBackground?: boolean;
   compact?: boolean;
+  size?: 'xs' | 'compact' | 'md';
 }
 
 function getPreviewElementVisual(type: SourceType): {
@@ -110,19 +111,28 @@ export const StudioPresetMiniPreview: React.FC<StudioPresetMiniPreviewProps> = (
   isActive = false,
   hasBackground = false,
   compact = false,
+  size,
 }) => {
+  const resolvedSize: 'xs' | 'compact' | 'md' = size ?? (compact ? 'compact' : 'md');
+
   const frameClass =
     orientation === '9:16'
-      ? compact
-        ? 'aspect-[9/16] h-[88px] w-auto'
-        : 'aspect-[9/16] h-[132px] sm:h-[144px] w-auto'
+      ? resolvedSize === 'xs'
+        ? 'aspect-[9/16] h-[62px] sm:h-[76px] w-auto'
+        : resolvedSize === 'compact'
+          ? 'aspect-[9/16] h-[74px] sm:h-[88px] w-auto'
+          : 'aspect-[9/16] h-[112px] sm:h-[132px] w-auto'
       : orientation === '16:9'
-        ? compact
-          ? 'aspect-video w-[124px] h-auto'
-          : 'aspect-video w-[196px] sm:w-[220px] h-auto'
-        : compact
-          ? 'aspect-square h-[88px] w-[88px]'
-          : 'aspect-square h-[126px] sm:h-[136px] w-auto';
+        ? resolvedSize === 'xs'
+          ? 'aspect-video w-[78px] sm:w-[98px] h-auto'
+          : resolvedSize === 'compact'
+            ? 'aspect-video w-[108px] sm:w-[124px] h-auto'
+            : 'aspect-video w-[176px] sm:w-[210px] h-auto'
+        : resolvedSize === 'xs'
+          ? 'aspect-square h-[56px] w-[56px] sm:h-[68px] sm:w-[68px]'
+          : resolvedSize === 'compact'
+            ? 'aspect-square h-[72px] w-[72px] sm:h-[84px] sm:w-[84px]'
+            : 'aspect-square h-[108px] sm:h-[124px] w-auto';
 
   const visibleElements = elements
     .filter((elem) => elem.visible !== false)
@@ -133,17 +143,16 @@ export const StudioPresetMiniPreview: React.FC<StudioPresetMiniPreviewProps> = (
   return (
     <div
       aria-hidden="true"
-      className={`${frameClass} relative rounded-xl overflow-hidden bg-[#07080A] border shadow-inner shrink-0 ${
+      className={`${frameClass} relative rounded-lg overflow-hidden bg-[#07080A] border shadow-inner shrink-0 ${
         isActive ? 'border-[var(--app-accent)]' : 'border-[var(--app-border-strong)]'
       }`}
     >
-      {/* Subtle studio canvas backdrop */}
       <div
         className="absolute inset-0 opacity-25 pointer-events-none"
         style={{
           backgroundImage:
             'radial-gradient(rgba(255,255,255,0.16) 1px, transparent 1px)',
-          backgroundSize: '10px 10px',
+          backgroundSize: '8px 8px',
         }}
       />
 
@@ -152,13 +161,15 @@ export const StudioPresetMiniPreview: React.FC<StudioPresetMiniPreviewProps> = (
       )}
 
       {visibleElements.length === 0 ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center">
-          <div className="w-5 h-5 rounded-md border border-dashed border-zinc-700 flex items-center justify-center mb-1">
-            <Layers className="w-3 h-3 text-zinc-600" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-1 text-center">
+          <div className="w-4 h-4 rounded border border-dashed border-zinc-700 flex items-center justify-center">
+            <Layers className="w-2.5 h-2.5 text-zinc-600" />
           </div>
-          <span className="text-[8px] font-medium text-zinc-500 leading-tight">
-            Kanvas Kosong
-          </span>
+          {resolvedSize !== 'xs' && (
+            <span className="text-[8px] font-medium text-zinc-500 leading-tight mt-0.5">
+              Kosong
+            </span>
+          )}
         </div>
       ) : (
         visibleElements.map((elem) => {
@@ -171,7 +182,7 @@ export const StudioPresetMiniPreview: React.FC<StudioPresetMiniPreviewProps> = (
           return (
             <div
               key={elem.id}
-              className={`absolute rounded-[4px] border flex items-center justify-center overflow-hidden px-0.5 ${visual.boxClass}`}
+              className={`absolute rounded-[3px] border flex items-center justify-center overflow-hidden px-0.5 ${visual.boxClass}`}
               style={{
                 left: `${safeX}%`,
                 top: `${safeY}%`,
@@ -182,14 +193,14 @@ export const StudioPresetMiniPreview: React.FC<StudioPresetMiniPreviewProps> = (
                 transform: elem.rotation ? `rotate(${elem.rotation}deg)` : undefined,
               }}
             >
-              {safeW >= 18 && safeH >= 10 && !compact ? (
+              {resolvedSize === 'md' && safeW >= 20 && safeH >= 12 ? (
                 <span className="inline-flex items-center gap-0.5 text-[7px] font-bold tracking-tight truncate max-w-full">
                   {visual.icon}
                   <span className="truncate">{visual.label}</span>
                 </span>
-              ) : (
+              ) : resolvedSize !== 'xs' ? (
                 visual.icon
-              )}
+              ) : null}
             </div>
           );
         })
