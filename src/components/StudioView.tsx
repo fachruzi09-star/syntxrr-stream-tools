@@ -11,6 +11,7 @@ import {
   PresetCategory,
   MarketplaceItem,
   MarketplaceCategory,
+  percentToUnitVolume,
   unitVolumeToPercent,
 } from '../types';
 import { streamEventBus } from '../services/eventBus';
@@ -4497,7 +4498,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                 updateElementProperty(
                                   selectedElement.id,
                                   'volume',
-                                  clampNumericRange(e.target.value, 0, 100, 90),
+                                  percentToUnitVolume(clampNumericRange(e.target.value, 0, 100, 90)),
                                 )
                               }
                               className="w-full mt-2 accent-pink-500 cursor-pointer"

@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { StudioElement } from '../../types';
+import { percentToUnitVolume, type StudioElement } from '../../types';
 import {
   createStudioElementFromSource,
   normalizeStudioElementProperties,
@@ -160,6 +160,14 @@ function runStudioInspectorControlsTests(): void {
     !soundboardSection.includes('soundboardEngine.play'),
     'soundboard inspector does not auto-play SFX on property changes',
   );
+  assert(
+    soundboardSection.includes('unitVolumeToPercent(selectedElement.properties.volume, 0.9)'),
+    'soundboard inspector displays slider value via unitVolumeToPercent',
+  );
+  assert(
+    /percentToUnitVolume\(\s*clampNumericRange\(/.test(soundboardSection),
+    'soundboard volume slider converts clamped percentage via percentToUnitVolume(clampNumericRange(...))',
+  );
 
   // 6, 7, 8. image, video, sticker Inspector controls
   const mediaSection = extractBetween(
@@ -259,6 +267,39 @@ function runStudioInspectorControlsTests(): void {
   const sbSynth = resolveSoundboardControlModel({ presetSfx: 'tada', volume: 65, audioUrl: '', title: '' });
   assertEqual(sbSynth.mode, 'synth', 'soundboard without audioUrl uses synth mode');
   assertEqual(sbSynth.volumePercent, 65, 'soundboard 0-100 volume reflected accurately');
+
+  // Boundary check: 0%, 1%, 65%, and 100% stored via percentToUnitVolume
+  assertEqual(percentToUnitVolume(0), 0, 'percentToUnitVolume(0) stores 0');
+  assertEqual(percentToUnitVolume(1), 0.01, 'percentToUnitVolume(1) stores 0.01');
+  assertEqual(percentToUnitVolume(65), 0.65, 'percentToUnitVolume(65) stores 0.65');
+  assertEqual(percentToUnitVolume(100), 1, 'percentToUnitVolume(100) stores 1');
+
+  const sbZero = resolveSoundboardControlModel({
+    presetSfx: 'horn',
+    volume: percentToUnitVolume(0),
+    audioUrl: '',
+    title: '',
+  });
+  assertEqual(sbZero.volumeUnit, 0, 'soundboard 0% resolves to volumeUnit 0');
+  assertEqual(sbZero.volumePercent, 0, 'soundboard 0% resolves to volumePercent 0');
+
+  const sbOnePercent = resolveSoundboardControlModel({
+    presetSfx: 'horn',
+    volume: percentToUnitVolume(1),
+    audioUrl: '',
+    title: '',
+  });
+  assertEqual(sbOnePercent.volumeUnit, 0.01, 'soundboard 1% resolves to volumeUnit 0.01 (not 100%)');
+  assertEqual(sbOnePercent.volumePercent, 1, 'soundboard 1% resolves to volumePercent 1');
+
+  const sbFull = resolveSoundboardControlModel({
+    presetSfx: 'horn',
+    volume: percentToUnitVolume(100),
+    audioUrl: '',
+    title: '',
+  });
+  assertEqual(sbFull.volumeUnit, 1, 'soundboard 100% resolves to volumeUnit 1');
+  assertEqual(sbFull.volumePercent, 100, 'soundboard 100% resolves to volumePercent 100');
 
   const sbCustom = resolveSoundboardControlModel({
     presetSfx: 'horn',
