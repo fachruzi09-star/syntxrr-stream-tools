@@ -144,6 +144,9 @@ import {
   Users,
   Award,
   Radio,
+  MoreVertical,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 
 interface StudioViewProps {
@@ -373,8 +376,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [isSavingCopy, setIsSavingCopy] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
-  // Preset Selector (entry screen before canvas)
-  const [showPresetSelector, setShowPresetSelector] = useState(true);
+  // Preset Selector (direct-to-canvas when active studio work already exists)
+  const hasActiveStudioWork = Boolean(
+    (typeof activePresetId === 'string' && activePresetId.trim().length > 0) ||
+      activePresetProp ||
+      presets.length > 0 ||
+      elements.length > 0,
+  );
+  const [showPresetSelector, setShowPresetSelector] = useState<boolean>(() => !hasActiveStudioWork);
+  const userOpenedPresetSelectorRef = useRef<boolean>(false);
+  const prevHasStudioWorkRef = useRef<boolean>(hasActiveStudioWork);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState<boolean>(false);
+  const headerMenuRef = useRef<HTMLDivElement | null>(null);
+  const sidePanelRef = useRef<HTMLDivElement | null>(null);
   const [selectorCreateModalOpen, setSelectorCreateModalOpen] = useState(false);
   const [selectorPresetName, setSelectorPresetName] = useState('');
   const [selectorCategory, setSelectorCategory] = useState<PresetCategory>('hp_screen');
@@ -541,6 +555,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
   };
   const selectedGroupIsLocked = selectedGroup ? isPresetGroupLocked(selectedGroup) : false;
+  const selectedElementIndex = selectedElement
+    ? elements.findIndex((element) => element.id === selectedElement.id)
+    : -1;
 
   const updatePresetStructure = (groups: StudioPresetGroup[], superGroups: StudioPresetSuperGroup[]) => {
     if (!onUpdateActivePreset || isStrictModeBLocked) return;
@@ -690,6 +707,23 @@ export const StudioView: React.FC<StudioViewProps> = ({
       group && activeSuperGroups.find((item) => item.groupIds.includes(group.id))?.locked,
     );
   };
+  const isSelectedElementGroupLocked = selectedElement
+    ? isElementLockedByGroup(selectedElement.id)
+    : false;
+  const isSelectedElementHiddenByGroup = selectedElement
+    ? isElementHiddenByGroup(selectedElement.id)
+    : false;
+  const canMutateSelectedElement = Boolean(
+    selectedElement && !isStrictModeBLocked && !isSelectedElementGroupLocked,
+  );
+  const canMoveSelectedLayerUp = Boolean(
+    canMutateSelectedElement &&
+      selectedElementIndex !== -1 &&
+      selectedElementIndex < elements.length - 1,
+  );
+  const canMoveSelectedLayerDown = Boolean(
+    canMutateSelectedElement && selectedElementIndex > 0,
+  );
 
   // A preset is a separate editing document: never carry selection or undo history across it.
   useEffect(() => {
@@ -737,6 +771,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setSelectedGroupId(null);
     }
   }, [activeGroups, selectedGroupId]);
+
+  useEffect(() => {
+    const hadWork = prevHasStudioWorkRef.current;
+    prevHasStudioWorkRef.current = hasActiveStudioWork;
+
+    if (!hadWork && hasActiveStudioWork && !userOpenedPresetSelectorRef.current) {
+      setShowPresetSelector(false);
+    } else if (hadWork && !hasActiveStudioWork) {
+      userOpenedPresetSelectorRef.current = false;
+      setShowPresetSelector(true);
+    }
+  }, [hasActiveStudioWork]);
+
+  useEffect(() => {
+    if (!isHeaderMenuOpen) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
+        setIsHeaderMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsHeaderMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isHeaderMenuOpen]);
 
   // Hydrate persisted Studio media assets (images & MP4/video blobs) from IndexedDB cleanly
   useEffect(() => {
@@ -2686,11 +2752,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const getCanvasAspectClass = () => {
     if (canvasOrientation === '9:16') {
       return isMonitorExpanded
-        ? 'aspect-[9/16] w-[260px] sm:w-[320px]'
-        : 'aspect-[9/16] w-[176px] sm:w-[270px] lg:w-[310px]';
+        ? 'aspect-[9/16] w-full max-w-[320px] min-[390px]:max-w-[344px] sm:max-w-[360px]'
+        : 'aspect-[9/16] w-full max-w-[250px] min-[380px]:max-w-[276px] sm:max-w-[300px] lg:max-w-[320px]';
     }
-    if (canvasOrientation === '16:9') return 'aspect-video w-full max-w-[580px]';
-    return isMonitorExpanded ? 'aspect-square w-[290px] sm:w-[320px]' : 'aspect-square w-[240px] sm:w-[300px]';
+    if (canvasOrientation === '16:9') {
+      return isMonitorExpanded
+        ? 'aspect-video w-full max-w-[660px]'
+        : 'aspect-video w-full max-w-[580px]';
+    }
+    return isMonitorExpanded
+      ? 'aspect-square w-full max-w-[330px] sm:max-w-[380px]'
+      : 'aspect-square w-full max-w-[268px] sm:max-w-[320px] lg:max-w-[340px]';
   };
 
   const filteredPresets = presets.filter((p) => {
@@ -2732,9 +2804,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   // --- Preset Selector & Save Handlers ---
+  const handleOpenPresetSelector = () => {
+    setIsHeaderMenuOpen(false);
+    userOpenedPresetSelectorRef.current = true;
+    setShowPresetSelector(true);
+  };
+
+  const handleClosePresetSelector = () => {
+    userOpenedPresetSelectorRef.current = false;
+    setShowPresetSelector(false);
+  };
+
   const handleSelectorSelectPreset = (presetId: string) => {
     setSelectorActionError(null);
     if (onSelectPreset) onSelectPreset(presetId);
+    userOpenedPresetSelectorRef.current = false;
     setShowPresetSelector(false);
   };
 
@@ -2756,6 +2840,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       setSelectedId(null);
       setSelectedGroupId(null);
+      userOpenedPresetSelectorRef.current = false;
       setShowPresetSelector(false);
     } finally {
       if (isMountedRef.current) {
@@ -2803,6 +2888,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setSelectorPresetName('');
       setSelectorDescription('');
       setSelectorCreateError(null);
+      userOpenedPresetSelectorRef.current = false;
       setShowPresetSelector(false);
     } finally {
       if (isMountedRef.current) {
@@ -2949,6 +3035,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {hasActiveStudioWork && (
+                  <button
+                    type="button"
+                    onClick={handleClosePresetSelector}
+                    className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] font-semibold text-xs inline-flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Kembali ke Kanvas</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -3300,99 +3396,193 @@ export const StudioView: React.FC<StudioViewProps> = ({
       ) : (
       /* === MAIN STUDIO CANVAS VIEW === */
       <>
-      {/* Compact Studio Toolbar Header */}
-      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-3 sm:px-4 sm:py-3 space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2.5 min-w-0">
+      {/* Compact Single-Row Studio Header */}
+      <header className="rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] p-2.5 sm:px-4 sm:py-3 space-y-2">
+        <div className="flex items-center justify-between gap-1.5 sm:gap-2.5 flex-nowrap">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
             <button
               type="button"
-              onClick={() => setShowPresetSelector(true)}
-              className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
-              title="Ganti Preset"
+              onClick={handleOpenPresetSelector}
+              className="btn-press min-h-[44px] min-w-0 max-w-full px-2.5 sm:px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-bold inline-flex items-center gap-1.5"
+              title={`Ganti Preset (${activePreset?.name || 'Studio Produksi'})`}
+              aria-label={`Pilih Preset: ${activePreset?.name || 'Studio Produksi'}`}
             >
-              <Layout className="w-4 h-4 text-[var(--app-accent-text)]" />
-              <span>Preset</span>
-            </button>
-            <div className="min-w-0">
-              <h1 className="font-display text-sm sm:text-base font-bold text-[var(--app-text)] tracking-tight truncate">
+              <Layout className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+              <span className="truncate font-display tracking-tight">
                 {activePreset?.name || 'Studio Produksi'}
-              </h1>
-              <div className="text-[11px] text-[var(--app-text-muted)] tabular-metrics truncate flex items-center gap-1.5">
-                <span>
-                  {canvasOrientation} · {elements.length} elemen
-                </span>
-                <span aria-hidden="true">·</span>
-                <span
-                  data-save-status={resolvedSaveStatus}
-                  className={
-                    resolvedSaveStatus === 'error'
-                      ? 'font-semibold text-rose-400'
-                      : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
-                        ? 'font-semibold text-[var(--app-accent-text)]'
-                        : 'text-[var(--app-ok)]'
-                  }
-                >
-                  {resolvedSaveStatus === 'saving'
-                    ? 'Menyimpan...'
-                    : resolvedSaveStatus === 'pending'
-                      ? 'Perubahan belum tersimpan'
-                      : resolvedSaveStatus === 'error'
-                        ? 'Gagal menyimpan'
-                        : 'Tersimpan'}
-                </span>
-              </div>
-            </div>
+              </span>
+            </button>
+
+            <span
+              data-save-status={resolvedSaveStatus}
+              title={
+                resolvedSaveStatus === 'saving'
+                  ? 'Menyimpan...'
+                  : resolvedSaveStatus === 'pending'
+                    ? 'Perubahan belum tersimpan'
+                    : resolvedSaveStatus === 'error'
+                      ? 'Gagal menyimpan'
+                      : 'Tersimpan'
+              }
+              aria-label={
+                resolvedSaveStatus === 'saving'
+                  ? 'Menyimpan preset'
+                  : resolvedSaveStatus === 'pending'
+                    ? 'Perubahan belum tersimpan'
+                    : resolvedSaveStatus === 'error'
+                      ? 'Gagal menyimpan preset'
+                      : 'Preset tersimpan'
+              }
+              className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 min-h-[28px] rounded-lg border text-[11px] font-semibold shrink-0 whitespace-nowrap ${
+                resolvedSaveStatus === 'error'
+                  ? 'border-rose-500/40 bg-rose-950/35 text-rose-300'
+                  : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
+                    ? 'border-[var(--app-accent-border)] bg-[var(--app-surface-muted)] text-[var(--app-accent-text)]'
+                    : 'border-[var(--app-border)] bg-[var(--app-surface-muted)] text-[var(--app-ok)]'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  resolvedSaveStatus === 'error'
+                    ? 'bg-rose-400'
+                    : resolvedSaveStatus === 'pending' || resolvedSaveStatus === 'saving'
+                      ? 'bg-[var(--app-accent)] animate-pulse'
+                      : 'bg-[var(--app-ok)]'
+                }`}
+              />
+              <span className="hidden sm:inline">
+                {resolvedSaveStatus === 'saving'
+                  ? 'Menyimpan...'
+                  : resolvedSaveStatus === 'pending'
+                    ? 'Belum tersimpan'
+                    : resolvedSaveStatus === 'error'
+                      ? 'Gagal'
+                      : 'Tersimpan'}
+              </span>
+            </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center p-1 bg-[var(--app-surface-muted)] rounded-xl border border-[var(--app-border)] text-xs font-bold">
-              {(
-                [
-                  { id: '9:16', label: '9:16' },
-                  { id: '16:9', label: '16:9' },
-                  { id: '1:1', label: '1:1' },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  disabled={isModeBMutationLocked}
-                  onClick={() => onChangeOrientation(opt.id)}
-                  className={`btn-press min-h-[44px] px-2.5 sm:px-3 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    canvasOrientation === opt.id
-                      ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
-                      : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={isStrictModeBLocked || history.length === 0}
+              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
+              title="Undo"
+              aria-label="Undo"
+            >
+              <Undo2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleRedo}
+              disabled={isStrictModeBLocked || redoStack.length === 0}
+              className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed"
+              title="Redo"
+              aria-label="Redo"
+            >
+              <Redo2 className="w-4 h-4" />
+            </button>
 
             {onSaveActivePreset && (
               <button
                 type="button"
                 disabled={isStrictModeBLocked || isSavingActivePreset}
                 onClick={() => void handleSaveActivePresetClick()}
-                className="btn-press min-h-[44px] px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                className="btn-press min-h-[44px] px-2.5 sm:px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 title="Simpan perubahan ke preset aktif"
+                aria-label={isSavingActivePreset ? 'Menyimpan preset' : 'Simpan preset'}
               >
-                <Check className="w-4 h-4" />
+                <Check className="w-4 h-4 shrink-0" />
                 <span>{isSavingActivePreset ? 'Menyimpan...' : 'Simpan'}</span>
               </button>
             )}
 
-            <button
-              type="button"
-              disabled={isModeBMutationLocked || isSavingCopy}
-              onClick={() => void handleSavePresetCopyClick()}
-              className="btn-press min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-              title="Simpan Sebagai Salinan"
-              aria-label="Simpan Sebagai Salinan"
-            >
-              <Copy className="w-4 h-4 text-[var(--app-accent-text)]" />
-              <span>{isSavingCopy ? 'Menyalin...' : 'Simpan Salinan'}</span>
-            </button>
+            <div className="relative" ref={headerMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsHeaderMenuOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={isHeaderMenuOpen}
+                aria-label="Menu tambahan Studio"
+                title="Menu tambahan"
+                className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border flex items-center justify-center transition-colors ${
+                  isHeaderMenuOpen
+                    ? 'bg-[var(--app-surface-elevated)] border-[var(--app-accent)] text-[var(--app-text)]'
+                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+
+              {isHeaderMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Opsi tambahan Studio"
+                  className="absolute right-0 mt-1.5 w-60 rounded-2xl bg-[var(--app-surface-elevated)] border border-[var(--app-border-strong)] shadow-2xl p-2 z-40 space-y-2"
+                >
+                  <div className="space-y-1">
+                    <div className="px-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                      Orientasi Kanvas
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs font-bold">
+                      {(
+                        [
+                          { id: '9:16', label: '9:16' },
+                          { id: '16:9', label: '16:9' },
+                          { id: '1:1', label: '1:1' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={canvasOrientation === opt.id}
+                          disabled={isModeBMutationLocked}
+                          onClick={() => {
+                            onChangeOrientation(opt.id);
+                            setIsHeaderMenuOpen(false);
+                          }}
+                          className={`btn-press min-h-[40px] px-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                            canvasOrientation === opt.id
+                              ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                              : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-[var(--app-border)] pt-1.5 space-y-1">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={isModeBMutationLocked || isSavingCopy}
+                      onClick={() => {
+                        setIsHeaderMenuOpen(false);
+                        void handleSavePresetCopyClick();
+                      }}
+                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Copy className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                      <span>{isSavingCopy ? 'Menyalin...' : 'Simpan Salinan'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={handleOpenPresetSelector}
+                      className="btn-press w-full min-h-[44px] px-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] text-xs font-semibold flex items-center gap-2"
+                    >
+                      <Layout className="w-4 h-4 text-[var(--app-accent-text)] shrink-0" />
+                      <span>Kelola Semua Preset</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -3479,7 +3669,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           style={{ overscrollBehaviorY: 'contain' }}
         >
           {/* Viewport Toolbar */}
-          <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--app-text-secondary)] border-b border-[var(--app-border)] pb-2.5">
+          <div className="w-full flex items-center justify-between gap-2 text-xs text-[var(--app-text-secondary)] border-b border-[var(--app-border)] pb-2.5">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2 h-2 rounded-full bg-[var(--app-accent)] shrink-0" />
               <span className="font-bold text-[var(--app-text)] tabular-metrics truncate">
@@ -3488,39 +3678,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsMonitorExpanded((v) => !v)}
-                className="lg:hidden min-h-[36px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text-secondary)]"
+                className="lg:hidden min-h-[40px] px-2.5 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-text)] shrink-0"
               >
                 {isMonitorExpanded ? 'Ringkas' : 'Perbesar'}
               </button>
             </div>
 
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleUndo}
-                disabled={history.length === 0}
-                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Undo"
-              >
-                <Undo2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleRedo}
-                disabled={redoStack.length === 0}
-                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Redo"
-              >
-                <Redo2 className="w-4 h-4" />
-              </button>
-
-              <div className="h-5 w-px bg-[var(--app-border)] mx-0.5" />
-
+            <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
-                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[44px] min-w-[40px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Zoom Out"
+                aria-label="Zoom Out"
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
@@ -3528,8 +3698,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
-                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[44px] min-w-[40px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Zoom In"
+                aria-label="Zoom In"
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
@@ -3539,8 +3710,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   setZoomLevel(100);
                   setPanOffset({ x: 0, y: 0 });
                 }}
-                className="btn-press min-h-[44px] min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
+                className="btn-press min-h-[44px] min-w-[40px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
                 title="Reset Posisi & Zoom"
+                aria-label="Reset Posisi dan Zoom"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
@@ -3549,8 +3721,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           {/* Interactive Screen Stage Container */}
           <div
-            className={`w-full overflow-hidden flex items-center justify-center p-2 sm:p-3 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative select-none overscroll-y-contain ${
-              isMonitorExpanded ? 'min-h-[380px] sm:min-h-[460px]' : 'min-h-[290px] sm:min-h-[400px] lg:min-h-[470px]'
+            className={`w-full overflow-hidden flex items-center justify-center p-2.5 sm:p-3 pb-16 sm:pb-16 bg-[var(--app-bg)] rounded-xl border border-[var(--app-border)] relative select-none overscroll-y-contain ${
+              isMonitorExpanded ? 'min-h-[520px] sm:min-h-[580px]' : 'min-h-[420px] sm:min-h-[480px] lg:min-h-[540px]'
             }`}
             style={{
               touchAction: 'none',
@@ -3714,6 +3886,140 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Floating Selection Quick-Bar (inside Stage, outside canvasRef) */}
+            {selectedElement && !selectedGroup && (
+              <div className="absolute bottom-2.5 inset-x-2 z-30 flex justify-center pointer-events-none">
+                <div
+                  role="toolbar"
+                  aria-label={`Tindakan cepat ${selectedElement.name}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  className="pointer-events-auto max-w-full overflow-x-auto no-scrollbar flex items-center gap-1 px-2 py-1.5 rounded-2xl bg-[var(--app-surface-elevated)]/95 backdrop-blur-md border border-[var(--app-border-strong)] shadow-2xl"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSidePanel('properties');
+                      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                        sidePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
+                    className="btn-press min-h-[40px] sm:min-h-[44px] px-2.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap"
+                    title="Edit Properti Elemen"
+                    aria-label="Edit Properti Elemen"
+                  >
+                    <Sliders className="w-3.5 h-3.5 shrink-0" />
+                    <span>Properti</span>
+                  </button>
+
+                  <div className="h-5 w-px bg-[var(--app-border)] mx-0.5 shrink-0" />
+
+                  <button
+                    type="button"
+                    onClick={() => handleMoveLayer(selectedElement.id, 'up')}
+                    disabled={!canMoveSelectedLayerUp}
+                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+                    title={
+                      isStrictModeBLocked || isSelectedElementGroupLocked
+                        ? 'Terkunci oleh grup atau Mode B'
+                        : 'Naikkan Layer'
+                    }
+                    aria-label="Naikkan Layer"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleMoveLayer(selectedElement.id, 'down')}
+                    disabled={!canMoveSelectedLayerDown}
+                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+                    title={
+                      isStrictModeBLocked || isSelectedElementGroupLocked
+                        ? 'Terkunci oleh grup atau Mode B'
+                        : 'Turunkan Layer'
+                    }
+                    aria-label="Turunkan Layer"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => updateElementField(selectedElement.id, 'visible', !selectedElement.visible)}
+                    disabled={!canMutateSelectedElement}
+                    className={`btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl border flex items-center justify-center shrink-0 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
+                      selectedElement.visible && !isSelectedElementHiddenByGroup
+                        ? 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                        : 'bg-[var(--app-error-soft)] border-rose-500/35 text-[var(--app-error)]'
+                    }`}
+                    title={
+                      isStrictModeBLocked || isSelectedElementGroupLocked
+                        ? 'Terkunci oleh grup atau Mode B'
+                        : selectedElement.visible
+                          ? 'Sembunyikan Elemen'
+                          : 'Tampilkan Elemen'
+                    }
+                    aria-label={selectedElement.visible ? 'Sembunyikan Elemen' : 'Tampilkan Elemen'}
+                  >
+                    {selectedElement.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => updateElementField(selectedElement.id, 'locked', !selectedElement.locked)}
+                    disabled={!canMutateSelectedElement}
+                    className={`btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl border flex items-center justify-center shrink-0 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
+                      selectedElement.locked || isSelectedElementGroupLocked
+                        ? 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-warn)]'
+                        : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+                    }`}
+                    title={
+                      isStrictModeBLocked || isSelectedElementGroupLocked
+                        ? 'Terkunci oleh grup atau Mode B'
+                        : selectedElement.locked
+                          ? 'Buka Kunci Elemen'
+                          : 'Kunci Elemen'
+                    }
+                    aria-label={selectedElement.locked ? 'Buka Kunci Elemen' : 'Kunci Elemen'}
+                  >
+                    {selectedElement.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDuplicate(selectedElement.id)}
+                    disabled={!canMutateSelectedElement}
+                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+                    title={
+                      isStrictModeBLocked || isSelectedElementGroupLocked
+                        ? 'Terkunci oleh grup atau Mode B'
+                        : 'Duplikat Elemen'
+                    }
+                    aria-label="Duplikat Elemen"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(selectedElement.id)}
+                    disabled={!canMutateSelectedElement}
+                    className="btn-press min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] rounded-xl bg-[var(--app-error-soft)] border border-rose-500/35 text-[var(--app-error)] hover:border-rose-500 flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+                    title={
+                      isStrictModeBLocked || isSelectedElementGroupLocked
+                        ? 'Terkunci oleh grup atau Mode B'
+                        : 'Hapus Elemen'
+                    }
+                    aria-label="Hapus Elemen"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="w-full flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--app-text-muted)] px-1">
@@ -3723,7 +4029,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
 
         {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL */}
-        <div className="lg:col-span-5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl overflow-hidden flex flex-col">
+        <div
+          ref={sidePanelRef}
+          className="lg:col-span-5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl overflow-hidden flex flex-col"
+        >
           {/* Main Module Tabs (Properties, Elements, Sources, Presets, Media, Layers, Simulator, Marketplace) */}
           <div
             className="flex overflow-x-auto no-scrollbar gap-1 p-1.5 bg-[var(--app-surface-muted)]/70 border-b border-[var(--app-border)] text-[11px] font-semibold select-none shrink-0"
