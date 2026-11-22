@@ -11,6 +11,7 @@ import {
   PresetCategory,
   MarketplaceItem,
   MarketplaceCategory,
+  unitVolumeToPercent,
 } from '../types';
 import { streamEventBus } from '../services/eventBus';
 import { soundSynth } from '../services/audioSimulator';
@@ -80,6 +81,7 @@ import {
   resolveViewerCounterDisplay,
   shouldPlayEventAlertSound,
   shouldShowViewerLiveBadge,
+  type SupportedSoundboardSfx,
   type StudioChatItem,
   validateSafeBrowserEmbedUrl,
 } from '../services/studioElementRenderModel';
@@ -203,6 +205,47 @@ interface LocalMediaItem {
   sizeBytes?: number;
   addedAt: number;
 }
+
+function toSafeHexColor(value: unknown, fallback: string): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed;
+    if (/^#[0-9a-fA-F]{3}$/.test(trimmed)) {
+      const r = trimmed[1];
+      const g = trimmed[2];
+      const b = trimmed[3];
+      return `#${r}${r}${g}${g}${b}${b}`;
+    }
+  }
+  return fallback;
+}
+
+function clampNumericRange(rawValue: string, min: number, max: number, fallback: number): number {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+const INSPECTOR_SOUNDBOARD_OPTIONS: ReadonlyArray<{ value: SupportedSoundboardSfx; label: string }> = [
+  { value: 'cheer', label: 'Cheer / Tepuk Tangan' },
+  { value: 'horn', label: 'Air Horn' },
+  { value: 'level_up', label: 'Level Up' },
+  { value: 'game_over', label: 'Game Over' },
+  { value: 'tada', label: 'Tada Fanfare' },
+  { value: 'bell', label: 'Crystal Bell' },
+];
+
+const INSPECTOR_STICKER_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: 'fire', label: '🔥 Fire Hype' },
+  { value: 'heart', label: '❤️ Love Tap' },
+  { value: 'love', label: '💖 Super Love' },
+  { value: 'star', label: '⭐ Star Vote' },
+  { value: 'clap', label: '👏 Applause' },
+  { value: 'rocket', label: '🚀 Boost' },
+  { value: 'laugh', label: '😂 LOL' },
+  { value: 'crown', label: '👑 VIP Crown' },
+  { value: 'gift', label: '🎁 Special Gift' },
+];
 
 export const StudioView: React.FC<StudioViewProps> = ({
   elements,
@@ -4048,7 +4091,449 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
-                    {/* Image / Video / Media Replacement */}
+                    {/* Text Static Inspector */}
+                    {selectedElement.type === 'text' && (
+                      <div className="py-4 space-y-3">
+                        <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                          <Type className="w-4 h-4" /> Pengaturan Teks Statis
+                        </span>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Isi Teks</label>
+                          <textarea
+                            rows={2}
+                            value={typeof selectedElement.properties.text === 'string' ? selectedElement.properties.text : ''}
+                            onChange={(e) => updateElementProperty(selectedElement.id, 'text', e.target.value)}
+                            placeholder="Masukkan teks overlay siaran..."
+                            className="w-full mt-1 px-3 py-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Ukuran Font (px)</label>
+                            <input
+                              type="number"
+                              min={8}
+                              max={96}
+                              value={
+                                typeof selectedElement.properties.fontSize === 'number' &&
+                                Number.isFinite(selectedElement.properties.fontSize)
+                                  ? selectedElement.properties.fontSize
+                                  : 16
+                              }
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'fontSize',
+                                  clampNumericRange(e.target.value, 8, 96, 16),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Ketebalan Font</label>
+                            <select
+                              value={selectedElement.properties.fontWeight === 'normal' ? 'normal' : 'bold'}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'fontWeight',
+                                  e.target.value as 'normal' | 'bold',
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            >
+                              <option value="bold">Bold (Tebal)</option>
+                              <option value="normal">Normal</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Warna Teks</label>
+                            <input
+                              type="color"
+                              value={toSafeHexColor(
+                                selectedElement.properties.textColor || selectedElement.properties.color,
+                                '#FFFFFF',
+                              )}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'textColor', e.target.value)}
+                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Latar Belakang</label>
+                              <button
+                                type="button"
+                                onClick={() => updateElementProperty(selectedElement.id, 'backgroundColor', 'transparent')}
+                                className="text-[10px] font-semibold text-[var(--app-accent-text)] hover:underline"
+                              >
+                                Transparan
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <input
+                                type="color"
+                                aria-label="Pilih warna latar teks"
+                                value={toSafeHexColor(selectedElement.properties.backgroundColor, '#0F131B')}
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'backgroundColor', e.target.value)}
+                                className="w-11 min-h-[44px] p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer shrink-0"
+                              />
+                              <input
+                                type="text"
+                                value={
+                                  typeof selectedElement.properties.backgroundColor === 'string'
+                                    ? selectedElement.properties.backgroundColor
+                                    : 'transparent'
+                                }
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'backgroundColor', e.target.value)}
+                                placeholder="transparent / #000000 / rgba(...)"
+                                className="w-full min-w-0 min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Shape Geometry Inspector */}
+                    {selectedElement.type === 'shape' && (
+                      <div className="py-4 space-y-3">
+                        <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                          <Square className="w-4 h-4" /> Pengaturan Bentuk Geometri
+                        </span>
+
+                        <div>
+                          <div className="flex items-center justify-between gap-1">
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Warna Latar (HEX / RGBA / transparent)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => updateElementProperty(selectedElement.id, 'backgroundColor', 'transparent')}
+                              className="text-[10px] font-semibold text-[var(--app-accent-text)] hover:underline"
+                            >
+                              Transparan
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <input
+                              type="color"
+                              aria-label="Pilih warna latar bentuk"
+                              value={toSafeHexColor(selectedElement.properties.backgroundColor, '#F2C230')}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'backgroundColor', e.target.value)}
+                              className="w-11 min-h-[44px] p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer shrink-0"
+                            />
+                            <input
+                              type="text"
+                              value={
+                                typeof selectedElement.properties.backgroundColor === 'string'
+                                  ? selectedElement.properties.backgroundColor
+                                  : 'rgba(242, 194, 48, 0.25)'
+                              }
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'backgroundColor', e.target.value)}
+                              placeholder="rgba(242, 194, 48, 0.25)"
+                              className="w-full min-h-[44px] px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Warna Border</label>
+                            <input
+                              type="color"
+                              value={toSafeHexColor(selectedElement.properties.borderColor, '#F2C230')}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'borderColor', e.target.value)}
+                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Tebal Border</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={20}
+                              value={
+                                typeof selectedElement.properties.borderWidth === 'number' &&
+                                Number.isFinite(selectedElement.properties.borderWidth)
+                                  ? selectedElement.properties.borderWidth
+                                  : 2
+                              }
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'borderWidth',
+                                  clampNumericRange(e.target.value, 0, 20, 2),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Radius Sudut</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={
+                                typeof selectedElement.properties.borderRadius === 'number' &&
+                                Number.isFinite(selectedElement.properties.borderRadius)
+                                  ? selectedElement.properties.borderRadius
+                                  : 12
+                              }
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'borderRadius',
+                                  clampNumericRange(e.target.value, 0, 100, 12),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Separator Inspector */}
+                    {selectedElement.type === 'separator' && (
+                      <div className="py-4 space-y-3">
+                        <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                          <Sliders className="w-4 h-4" /> Pengaturan Garis Pembatas
+                        </span>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Arah Garis</label>
+                          <select
+                            value={
+                              selectedElement.properties.orientation === 'vertical' ||
+                              selectedElement.properties.direction === 'vertical'
+                                ? 'vertical'
+                                : selectedElement.properties.orientation === 'horizontal' ||
+                                    selectedElement.properties.direction === 'horizontal'
+                                  ? 'horizontal'
+                                  : selectedElement.height > selectedElement.width
+                                    ? 'vertical'
+                                    : 'horizontal'
+                            }
+                            onChange={(e) =>
+                              updateElementProperty(
+                                selectedElement.id,
+                                'orientation',
+                                e.target.value as 'horizontal' | 'vertical',
+                              )
+                            }
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                          >
+                            <option value="horizontal">Horizontal (Mendatar)</option>
+                            <option value="vertical">Vertikal (Tegak)</option>
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Warna Garis</label>
+                            <input
+                              type="color"
+                              value={toSafeHexColor(
+                                selectedElement.properties.lineColor || selectedElement.properties.borderColor,
+                                '#F2C230',
+                              )}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'lineColor', e.target.value)}
+                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Ketebalan (px)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={
+                                typeof selectedElement.properties.thickness === 'number' &&
+                                Number.isFinite(selectedElement.properties.thickness)
+                                  ? selectedElement.properties.thickness
+                                  : typeof selectedElement.properties.borderWidth === 'number' &&
+                                      Number.isFinite(selectedElement.properties.borderWidth)
+                                    ? selectedElement.properties.borderWidth
+                                    : 2
+                              }
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'thickness',
+                                  clampNumericRange(e.target.value, 1, 20, 2),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-xs text-[var(--app-text-secondary)]">Efek Cahaya (Glow)</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateElementProperty(
+                                selectedElement.id,
+                                'glow',
+                                !(selectedElement.properties.glow !== false),
+                              )
+                            }
+                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                              selectedElement.properties.glow !== false
+                                ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                            }`}
+                          >
+                            {selectedElement.properties.glow !== false ? 'Aktif' : 'Nonaktif'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Browser Embed Inspector */}
+                    {selectedElement.type === 'browser_embed' && (() => {
+                      const embedValidation = validateSafeBrowserEmbedUrl(selectedElement.properties.url);
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-teal-400 flex items-center gap-1.5">
+                            <Globe className="w-4 h-4" /> Pengaturan Browser Embed
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              URL Widget / Web Eksternal
+                            </label>
+                            <input
+                              type="url"
+                              value={typeof selectedElement.properties.url === 'string' ? selectedElement.properties.url : ''}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'url', e.target.value)}
+                              placeholder="https://example.com/widget"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div
+                            className={`p-2.5 rounded-xl border text-[11px] flex items-center gap-2 ${
+                              embedValidation.isValid
+                                ? 'bg-[var(--app-ok-soft)] border-emerald-500/35 text-[var(--app-ok)]'
+                                : 'bg-[var(--app-error-soft)] border-rose-500/35 text-[var(--app-error)]'
+                            }`}
+                          >
+                            {embedValidation.isValid ? (
+                              <>
+                                <Check className="w-4 h-4 shrink-0" />
+                                <span className="truncate font-medium">
+                                  URL valid ({embedValidation.hostname})
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertCircle className="w-4 h-4 shrink-0" />
+                                <span>
+                                  {embedValidation.reason === 'empty'
+                                    ? 'URL kosong — masukkan tautan http:// atau https://.'
+                                    : 'URL tidak valid — hanya http:// dan https:// yang diizinkan.'}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Soundboard Inspector */}
+                    {selectedElement.type === 'soundboard' && (() => {
+                      const soundboardVolumePercent = unitVolumeToPercent(selectedElement.properties.volume, 0.9);
+                      const activePresetSfx =
+                        typeof selectedElement.properties.presetSfx === 'string' &&
+                        INSPECTOR_SOUNDBOARD_OPTIONS.some((opt) => opt.value === selectedElement.properties.presetSfx)
+                          ? selectedElement.properties.presetSfx
+                          : 'horn';
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-pink-400 flex items-center gap-1.5">
+                            <Music className="w-4 h-4" /> Pengaturan Soundboard Cues
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Efek Suara Bawaan</label>
+                            <select
+                              value={activePresetSfx}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'presetSfx', e.target.value)}
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            >
+                              {INSPECTOR_SOUNDBOARD_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              <span>Volume Soundboard</span>
+                              <span className="tabular-metrics text-pink-400">{soundboardVolumePercent}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              value={soundboardVolumePercent}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'volume',
+                                  clampNumericRange(e.target.value, 0, 100, 90),
+                                )
+                              }
+                              className="w-full mt-2 accent-pink-500 cursor-pointer"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              URL Audio Kustom (Opsional)
+                            </label>
+                            <input
+                              type="url"
+                              value={typeof selectedElement.properties.audioUrl === 'string' ? selectedElement.properties.audioUrl : ''}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'audioUrl', e.target.value)}
+                              placeholder="https://... (kosongkan untuk memakai SFX bawaan)"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Judul Audio Kustom (Opsional)
+                            </label>
+                            <input
+                              type="text"
+                              value={typeof selectedElement.properties.title === 'string' ? selectedElement.properties.title : ''}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'title', e.target.value)}
+                              placeholder="Contoh: Efek Ledakan / Intro"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Image / Video / Sticker Media Replacement & Visual Controls */}
                     {(selectedElement.type === 'image' || selectedElement.type === 'sticker' || selectedElement.type === 'video') && (
                       <div className="py-4 space-y-3">
                         <span className="text-xs font-bold text-[var(--app-ok)] flex items-center gap-1.5">
@@ -4081,6 +4566,171 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         >
                           <FolderOpen className="w-4 h-4" /> Pilih dari Media Library Lokal
                         </button>
+
+                        {/* Image Display Options */}
+                        {selectedElement.type === 'image' && (
+                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[var(--app-border)]">
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Mode Tampilan (Fit)</label>
+                              <select
+                                value={
+                                  selectedElement.properties.fit === 'cover' || selectedElement.properties.fit === 'fill'
+                                    ? selectedElement.properties.fit
+                                    : 'contain'
+                                }
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'fit',
+                                    e.target.value as 'contain' | 'cover' | 'fill',
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                              >
+                                <option value="contain">Contain (Utuh)</option>
+                                <option value="cover">Cover (Penuh)</option>
+                                <option value="fill">Fill (Regang)</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Radius Sudut (px)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={
+                                  typeof selectedElement.properties.borderRadius === 'number' &&
+                                  Number.isFinite(selectedElement.properties.borderRadius)
+                                    ? selectedElement.properties.borderRadius
+                                    : 8
+                                }
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'borderRadius',
+                                    clampNumericRange(e.target.value, 0, 100, 8),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Video Playback Options */}
+                        {selectedElement.type === 'video' && (
+                          <div className="space-y-2 pt-2 border-t border-[var(--app-border)]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Putar Otomatis (Autoplay)</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'autoplay',
+                                    !(selectedElement.properties.autoplay !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  selectedElement.properties.autoplay !== false
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {selectedElement.properties.autoplay !== false ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Putar Berulang (Loop)</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'loop',
+                                    !(selectedElement.properties.loop !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  selectedElement.properties.loop !== false
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {selectedElement.properties.loop !== false ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Bisukan Suara (Muted)</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'muted',
+                                    !(selectedElement.properties.muted !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  selectedElement.properties.muted !== false
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {selectedElement.properties.muted !== false ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sticker Visual Options */}
+                        {selectedElement.type === 'sticker' && (
+                          <div className="space-y-3 pt-2 border-t border-[var(--app-border)]">
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Ikon Stiker Reaksi</label>
+                              <select
+                                value={
+                                  typeof selectedElement.properties.stickerId === 'string' &&
+                                  selectedElement.properties.stickerId.trim()
+                                    ? selectedElement.properties.stickerId.trim().toLowerCase()
+                                    : 'fire'
+                                }
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'stickerId', e.target.value)}
+                                className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                              >
+                                {INSPECTOR_STICKER_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Efek Melayang (Float)</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'floatEffect',
+                                    !(selectedElement.properties.floatEffect !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  selectedElement.properties.floatEffect !== false
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {selectedElement.properties.floatEffect !== false ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
