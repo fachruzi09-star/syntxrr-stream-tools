@@ -2710,6 +2710,28 @@ export default function App() {
     };
   }, []);
 
+  const isFullscreenStudioWorkspace =
+    !loading && activeNav === 'studio' && legacySubview === null && isStudioFullscreen;
+
+  // Sembunyikan StatusBar atas Android saat workspace editing Studio aktif, pulihkan saat keluar
+  useEffect(() => {
+    if (!(Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android')) return;
+    if (isFullscreenStudioWorkspace) {
+      void StatusBar.hide().catch(() => {});
+    } else {
+      void StatusBar.show().catch(() => {});
+    }
+  }, [isFullscreenStudioWorkspace]);
+
+  // Pastikan StatusBar dipulihkan jika root App unmount
+  useEffect(() => {
+    return () => {
+      if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+        void StatusBar.show().catch(() => {});
+      }
+    };
+  }, []);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[var(--app-bg)] flex flex-col items-center justify-center space-y-4 px-6">
@@ -2796,9 +2818,6 @@ export default function App() {
       ? 'warn'
       : 'off'
     : modeBHeaderTone;
-
-  const isFullscreenStudioWorkspace =
-    activeNav === 'studio' && legacySubview === null && isStudioFullscreen;
 
   return (
     <I18nProvider language={settings.language || 'id-ID'}>

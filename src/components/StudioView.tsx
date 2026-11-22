@@ -105,9 +105,6 @@ import {
   Unlock,
   Eye,
   EyeOff,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
   Camera,
   MessageSquare,
   Bell,
@@ -391,9 +388,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [hasEnteredCanvasSession, setHasEnteredCanvasSession] = useState<boolean>(false);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState<boolean>(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState<boolean>(false);
-  const [isZoomMenuOpen, setIsZoomMenuOpen] = useState<boolean>(false);
+  const [isCanvasLivePreview, setIsCanvasLivePreview] = useState<boolean>(false);
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
-  const zoomMenuRef = useRef<HTMLDivElement | null>(null);
   const sidePanelRef = useRef<HTMLDivElement | null>(null);
   const presetImportInputRef = useRef<HTMLInputElement | null>(null);
   const isPresetTransferringRef = useRef<boolean>(false);
@@ -836,6 +832,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setActiveReactions({});
     setZoomLevel(100);
     setPanOffset({ x: 0, y: 0 });
+    setIsCanvasLivePreview(false);
     setNewPresetModalOpen(false);
     setSidebarCreateError(null);
     setSaveFeedback(null);
@@ -891,24 +888,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, [isHeaderMenuOpen]);
 
   useEffect(() => {
-    if (!isZoomMenuOpen) return;
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      if (zoomMenuRef.current && !zoomMenuRef.current.contains(event.target as Node)) {
-        setIsZoomMenuOpen(false);
-      }
-    };
+    if (!isCanvasLivePreview) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsZoomMenuOpen(false);
+        setIsCanvasLivePreview(false);
       }
     };
-    document.addEventListener('pointerdown', handleOutsidePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('pointerdown', handleOutsidePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isZoomMenuOpen]);
+  }, [isCanvasLivePreview]);
 
   // Hydrate persisted Studio media assets (images & MP4/video blobs) from IndexedDB cleanly
   useEffect(() => {
@@ -1456,7 +1446,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // UNIFIED POINTER DRAG & RESIZE SYSTEM (FIXES HORIZONTAL & VERTICAL MOVEMENT)
   const handleElementPointerDown = (e: React.PointerEvent, elem: StudioElement) => {
-    if (elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
+    if (isCanvasLivePreview || elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
     if (e.button !== 0) return; // Only primary button
     e.stopPropagation();
     setSelectedGroupId(null);
@@ -1484,7 +1474,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleResizePointerDown = (e: React.PointerEvent, elem: StudioElement, handle: string) => {
-    if (elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
+    if (isCanvasLivePreview || elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
     if (e.button !== 0) return;
     e.stopPropagation();
     setSelectedGroupId(null);
@@ -1517,7 +1507,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     mode: 'move' | 'resize',
     handle: string | null = null,
   ) => {
-    if (e.button !== 0 || isPresetGroupLocked(group)) return;
+    if (isCanvasLivePreview || e.button !== 0 || isPresetGroupLocked(group)) return;
     const bounds = getPresetGroupBounds(group, elementsRef.current);
     if (!bounds) return;
     e.preventDefault();
@@ -2953,8 +2943,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const handleOpenPresetSelector = () => {
     setIsHeaderMenuOpen(false);
-    setIsZoomMenuOpen(false);
     setIsMobilePanelOpen(false);
+    setIsCanvasLivePreview(false);
     setShowPresetSelector(true);
   };
 
@@ -3378,13 +3368,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
           backgroundSize: '20px 20px',
         }}
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) {
+          if (!isCanvasLivePreview && e.target === e.currentTarget) {
             setIsPanning(true);
             panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
           }
         }}
         onMouseMove={(e) => {
-          if (isPanning) {
+          if (isPanning && !isCanvasLivePreview) {
             setPanOffset({
               x: e.clientX - panStartRef.current.x,
               y: e.clientY - panStartRef.current.y,
@@ -3413,22 +3403,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
             fittedCanvasDimensions ? 'shrink-0' : getCanvasAspectClass()
           } overscroll-y-contain`}
               onClick={() => {
+                if (isCanvasLivePreview) return;
                 setSelectedId(null);
                 setSelectedGroupId(null);
               }}
             >
-              {/* Safe-Zone Guide Margins for TikTok / Live Stream */}
-              <div className="absolute inset-x-2 top-2 h-6 border border-dashed border-[var(--app-accent-border)] rounded flex items-center justify-center pointer-events-none">
-                <span className="text-[8px] font-mono text-[var(--app-accent)]/60">SAFE ZONE HEADER</span>
-              </div>
-              <div className="absolute inset-x-2 bottom-2 h-8 border border-dashed border-rose-500/30 rounded flex items-center justify-center pointer-events-none">
-                <span className="text-[8px] font-mono text-rose-400/60">SAFE ZONE FOOTER</span>
-              </div>
+              {/* Safe-Zone Guide Margins for TikTok / Live Stream (hidden during Preview LIVE) */}
+              {!isCanvasLivePreview && (
+                <>
+                  <div className="absolute inset-x-2 top-2 h-6 border border-dashed border-[var(--app-accent-border)] rounded flex items-center justify-center pointer-events-none">
+                    <span className="text-[8px] font-mono text-[var(--app-accent)]/60">SAFE ZONE HEADER</span>
+                  </div>
+                  <div className="absolute inset-x-2 bottom-2 h-8 border border-dashed border-rose-500/30 rounded flex items-center justify-center pointer-events-none">
+                    <span className="text-[8px] font-mono text-rose-400/60">SAFE ZONE FOOTER</span>
+                  </div>
+                </>
+              )}
 
               {/* Elements Layer Rendering with UNIFIED POINTER EVENTS */}
               {elements.map((elem) => {
                 if (!elem.visible || isElementHiddenByGroup(elem.id)) return null;
-                const isSelected = selectedId === elem.id;
+                const isSelected = !isCanvasLivePreview && selectedId === elem.id;
 
                 return (
                   <div
@@ -3449,10 +3444,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       touchAction: 'none',
                       userSelect: 'none',
                     }}
-                    className={`group cursor-move transition-shadow ${
-                      isSelected
-                        ? 'ring-2 ring-[var(--app-accent)] ring-offset-1 ring-offset-black'
-                        : 'hover:ring-1 hover:ring-[var(--app-accent)]/60'
+                    className={`group transition-shadow ${
+                      isCanvasLivePreview
+                        ? 'cursor-default'
+                        : isSelected
+                          ? 'cursor-move ring-2 ring-[var(--app-accent)] ring-offset-1 ring-offset-black'
+                          : 'cursor-move hover:ring-1 hover:ring-[var(--app-accent)]/60'
                     }`}
                   >
                     {renderElementContent(elem)}
@@ -3495,7 +3492,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 );
               })}
 
-              {selectedGroup && selectedGroupBounds && (
+              {!isCanvasLivePreview && selectedGroup && selectedGroupBounds && (
                 <div
                   className="absolute border-2 border-[var(--app-accent)] rounded-sm pointer-events-none"
                   style={{
@@ -3545,53 +3542,74 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
       </div>
 
-      {/* FLOATING TOP HEADER CAPSULES (overlaid above Canvas without eating permanent height) */}
-      <header className="pointer-events-none absolute top-2 inset-x-2 sm:top-3 sm:inset-x-3 z-30 flex items-start justify-between gap-2">
-        {/* Top-Left Capsule: Back + Undo + Redo + Preset Name & Resolution + Save State */}
+      {/* FLOATING RETURN TO EDITOR BUTTON WHEN PREVIEW LIVE IS ACTIVE */}
+      {isCanvasLivePreview && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          className="pointer-events-auto flex items-center gap-0.5 sm:gap-1 p-1 rounded-2xl bg-[var(--app-surface)]/90 backdrop-blur-md border border-[var(--app-border-strong)]/80 shadow-2xl min-w-0 flex-1 max-w-[440px]"
+          className="pointer-events-auto fixed top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 z-40"
+        >
+          <button
+            type="button"
+            onClick={() => setIsCanvasLivePreview(false)}
+            className="btn-press min-h-[36px] px-3 rounded-full bg-[var(--app-surface)]/88 hover:bg-[var(--app-surface-elevated)] backdrop-blur-md border border-[var(--app-border-strong)] text-[var(--app-text)] text-[11px] font-bold inline-flex items-center gap-1.5 shadow-2xl"
+            title="Kembali ke Editor Studio"
+            aria-label="Kembali ke Editor"
+          >
+            <EyeOff className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
+            <span>Kembali ke Editor</span>
+          </button>
+        </div>
+      )}
+
+      {/* FLOATING TOP HEADER CAPSULES (overlaid above Canvas without eating permanent height) */}
+      {!isCanvasLivePreview && (
+      <header className="pointer-events-none absolute top-2 inset-x-2 sm:top-2.5 sm:inset-x-3 z-30 flex items-start justify-between gap-2">
+        {/* Top-Left Compact Capsule: Back + Undo + Redo + Preset Name & Resolution + Save State */}
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="pointer-events-auto inline-flex items-center gap-0.5 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl bg-[var(--app-surface)]/82 backdrop-blur-md border border-[var(--app-border-strong)]/75 shadow-lg min-w-0 w-fit max-w-[calc(100%-132px)] min-[440px]:max-w-[calc(100%-178px)] sm:max-w-[290px]"
         >
           <button
             type="button"
             onClick={handleOpenPresetSelector}
-            className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text)] flex items-center justify-center shrink-0"
+            className="btn-press min-h-[34px] min-w-[32px] sm:min-h-[36px] sm:min-w-[34px] rounded-lg sm:rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text)] flex items-center justify-center shrink-0"
             title={`Kembali ke Preset Hub (${activePreset?.name || 'Studio Produksi'})`}
             aria-label={`Kembali ke Daftar Preset: ${activePreset?.name || 'Studio Produksi'}`}
           >
-            <ArrowLeft className="w-4 h-4 text-[var(--app-accent-text)]" />
+            <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[var(--app-accent-text)]" />
           </button>
 
           <button
             type="button"
             onClick={handleUndo}
             disabled={isStrictModeBLocked || history.length === 0}
-            className="btn-press min-h-[38px] min-w-[36px] sm:min-h-[42px] sm:min-w-[40px] rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+            className="btn-press min-h-[34px] min-w-[30px] sm:min-h-[36px] sm:min-w-[32px] rounded-lg sm:rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
             title="Undo"
             aria-label="Undo"
           >
-            <Undo2 className="w-4 h-4" />
+            <Undo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
           <button
             type="button"
             onClick={handleRedo}
             disabled={isStrictModeBLocked || redoStack.length === 0}
-            className="btn-press min-h-[38px] min-w-[36px] sm:min-h-[42px] sm:min-w-[40px] rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
+            className="btn-press min-h-[34px] min-w-[30px] sm:min-h-[36px] sm:min-w-[32px] rounded-lg sm:rounded-xl hover:bg-[var(--app-surface-hover)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center shrink-0 disabled:opacity-35 disabled:cursor-not-allowed"
             title="Redo"
             aria-label="Redo"
           >
-            <Redo2 className="w-4 h-4" />
+            <Redo2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
-          <div className="h-5 w-px bg-[var(--app-border)] mx-0.5 shrink-0" />
+          <div className="h-4 w-px bg-[var(--app-border)] mx-0.5 shrink-0" />
 
-          <div className="min-w-0 pr-2 pl-1 flex flex-col justify-center leading-tight">
-            <span className="truncate font-display text-[11px] sm:text-xs font-bold text-[var(--app-text)]">
+          <div className="min-w-0 pr-1.5 pl-0.5 flex flex-col justify-center leading-none gap-0.5">
+            <span className="truncate font-display text-[10px] sm:text-[11px] font-bold text-[var(--app-text)] max-w-[115px] min-[400px]:max-w-[140px] sm:max-w-[165px]">
               {activePreset?.name || 'Studio Produksi'}
             </span>
-            <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] tabular-metrics text-[var(--app-text-muted)] truncate">
+            <div className="flex items-center gap-1 text-[9px] tabular-metrics text-[var(--app-text-muted)] whitespace-nowrap">
               <span className="shrink-0">{canvasResolutionLabel}</span>
               <span
                 data-save-status={resolvedSaveStatus}
@@ -3630,11 +3648,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         : 'bg-[var(--app-ok)]'
                   }`}
                 />
-                <span className="hidden sm:inline">
+                <span>
                   {resolvedSaveStatus === 'saving'
-                    ? 'Menyimpan...'
+                    ? 'Menyimpan…'
                     : resolvedSaveStatus === 'pending'
-                      ? 'Belum tersimpan'
+                      ? 'Belum'
                       : resolvedSaveStatus === 'error'
                         ? 'Gagal'
                         : 'Tersimpan'}
@@ -3644,24 +3662,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
         </div>
 
-        {/* Top-Right Capsule: Uji Live + Overflow Menu + Simpan */}
+        {/* Top-Right Capsule: Preview LIVE + Overflow Menu + Simpan */}
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          className="pointer-events-auto flex items-center gap-0.5 sm:gap-1 p-1 rounded-2xl bg-[var(--app-surface)]/90 backdrop-blur-md border border-[var(--app-border-strong)]/80 shadow-2xl shrink-0"
+          className="pointer-events-auto flex items-center gap-0.5 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl bg-[var(--app-surface)]/82 backdrop-blur-md border border-[var(--app-border-strong)]/75 shadow-lg shrink-0"
         >
           <button
             type="button"
-            onClick={() => openStudioPanel('simulator')}
-            className={`btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl flex items-center justify-center transition-colors ${
-              isMobilePanelOpen && activeSidePanel === 'simulator'
-                ? 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)]'
-                : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
-            }`}
-            title="Uji Live Simulator"
-            aria-label="Buka Uji Live Simulator"
+            onClick={() => {
+              setIsHeaderMenuOpen(false);
+              setIsMobilePanelOpen(false);
+              setIsPanning(false);
+              setIsCanvasLivePreview(true);
+            }}
+            className="btn-press min-h-[34px] min-w-[34px] sm:min-h-[36px] sm:min-w-[36px] rounded-lg sm:rounded-xl flex items-center justify-center transition-colors text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]"
+            title="Preview LIVE"
+            aria-label="Preview LIVE"
           >
-            <Zap className="w-4 h-4" />
+            <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
           <div className="relative" ref={headerMenuRef}>
@@ -3672,13 +3691,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
               aria-expanded={isHeaderMenuOpen}
               aria-label="Menu tambahan Studio"
               title="Menu tambahan"
-              className={`btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] sm:min-w-[42px] rounded-xl flex items-center justify-center transition-colors ${
+              className={`btn-press min-h-[34px] min-w-[34px] sm:min-h-[36px] sm:min-w-[36px] rounded-lg sm:rounded-xl flex items-center justify-center transition-colors ${
                 isHeaderMenuOpen
                   ? 'bg-[var(--app-surface-elevated)] text-[var(--app-accent-text)]'
                   : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
               }`}
             >
-              <MoreVertical className="w-4 h-4" />
+              <MoreVertical className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             {isHeaderMenuOpen && (
@@ -3798,11 +3817,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
               type="button"
               disabled={isStrictModeBLocked || isSavingActivePreset}
               onClick={() => void handleSaveActivePresetClick()}
-              className="btn-press min-h-[38px] min-w-[38px] sm:min-h-[42px] px-2.5 sm:px-3.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              className="btn-press min-h-[34px] min-w-[34px] sm:min-h-[36px] px-2 sm:px-3 rounded-lg sm:rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-[11px] font-bold inline-flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               title="Simpan perubahan ke preset aktif"
               aria-label={isSavingActivePreset ? 'Menyimpan preset' : 'Simpan preset'}
             >
-              <Check className="w-4 h-4 shrink-0" />
+              <Check className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden min-[440px]:inline">
                 {isSavingActivePreset ? 'Menyimpan...' : 'Simpan'}
               </span>
@@ -3810,10 +3829,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
           )}
         </div>
       </header>
+      )}
 
-      {/* FLOATING SAVE TOAST / MODE B LOCK NOTICE (only visible when active) */}
-      {(resolvedSaveError || saveFeedback?.tone === 'ok' || (isModeBSelected && isModeBMutationLocked)) && (
-        <div className="pointer-events-none absolute top-14 sm:top-[68px] inset-x-2 sm:inset-x-3 z-20 flex flex-col items-center gap-1.5">
+      {/* FLOATING SAVE TOAST / MODE B LOCK NOTICE (only visible when active and not in Preview LIVE) */}
+      {!isCanvasLivePreview && (resolvedSaveError || saveFeedback?.tone === 'ok' || (isModeBSelected && isModeBMutationLocked)) && (
+        <div className="pointer-events-none absolute top-14 sm:top-[62px] inset-x-2 sm:inset-x-3 z-20 flex flex-col items-center gap-1.5">
           {(resolvedSaveError || saveFeedback?.tone === 'ok') && (
             <div
               role={resolvedSaveError ? 'alert' : 'status'}
@@ -3884,55 +3904,56 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
       )}
 
-      {/* FLOATING BOTTOM WORKSPACE CONTROLS (Elemen, Marketplace, Lapisan, Alat, Zoom) */}
-      <div className="pointer-events-none absolute bottom-2 inset-x-2 sm:bottom-3 sm:inset-x-3 z-30 flex items-end justify-between gap-2">
+      {/* COMPACT FLOATING BOTTOM-LEFT WORKSPACE DOCK (Elemen, Marketplace, Lapisan, Alat, Zoom 100%/50%) */}
+      {!isCanvasLivePreview && (
+      <div className="pointer-events-none absolute bottom-2 left-2 sm:bottom-3 sm:left-3 z-30 max-w-[calc(100%-16px)]">
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          className="pointer-events-auto flex items-center gap-1.5 max-w-full"
+          className="pointer-events-auto inline-flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl bg-[var(--app-surface)]/84 backdrop-blur-md border border-[var(--app-border-strong)]/75 shadow-lg overflow-x-auto no-scrollbar max-w-full"
         >
           <button
             type="button"
             onClick={() => openStudioPanel('elements')}
-            className={`btn-press min-h-[42px] sm:min-h-[44px] px-3.5 rounded-2xl text-xs font-bold inline-flex items-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+            className={`btn-press min-h-[34px] sm:min-h-[38px] px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[11px] font-bold inline-flex items-center gap-1 shrink-0 transition-colors ${
               isMobilePanelOpen && (activeSidePanel === 'elements' || activeSidePanel === 'sources')
-                ? 'bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] ring-2 ring-white/40'
+                ? 'bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] ring-1 ring-white/40'
                 : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
             }`}
             title="Tambah Elemen & Sumber"
             aria-label="Tambah Elemen"
           >
-            <Plus className="w-4 h-4 shrink-0" />
+            <Plus className="w-3.5 h-3.5 shrink-0" />
             <span>Elemen</span>
           </button>
 
           <button
             type="button"
             onClick={() => openStudioPanel('marketplace')}
-            className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] px-2.5 sm:px-3.5 rounded-2xl border backdrop-blur-md text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+            className={`btn-press min-h-[34px] min-w-[34px] sm:min-h-[38px] px-2 sm:px-2.5 rounded-lg sm:rounded-xl text-[11px] font-semibold inline-flex items-center justify-center gap-1 shrink-0 transition-colors ${
               isMobilePanelOpen && activeSidePanel === 'marketplace'
-                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
-                : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+                ? 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)]'
+                : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
             }`}
             title="Buka Marketplace Overlay"
             aria-label="Marketplace"
           >
-            <ShoppingBag className="w-4 h-4 shrink-0 text-[var(--app-accent-text)]" />
-            <span className="hidden min-[440px]:inline">Marketplace</span>
+            <ShoppingBag className="w-3.5 h-3.5 shrink-0 text-[var(--app-accent-text)]" />
+            <span className="hidden md:inline">Marketplace</span>
           </button>
 
           <button
             type="button"
             onClick={() => openStudioPanel('layers')}
-            className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] sm:px-3 rounded-2xl border backdrop-blur-md text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+            className={`btn-press min-h-[34px] min-w-[34px] sm:min-h-[38px] px-2 sm:px-2.5 rounded-lg sm:rounded-xl text-[11px] font-semibold inline-flex items-center justify-center gap-1 shrink-0 transition-colors ${
               isMobilePanelOpen && activeSidePanel === 'layers'
-                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
-                : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+                ? 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)]'
+                : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
             }`}
             title="Lapisan & Grup"
             aria-label="Lapisan"
           >
-            <Layers className="w-4 h-4 shrink-0" />
+            <Layers className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden md:inline">Lapisan</span>
           </button>
 
@@ -3947,85 +3968,49 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     : activeSidePanel,
               )
             }
-            className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] px-2.5 sm:px-3 rounded-2xl border backdrop-blur-md text-xs font-bold inline-flex items-center justify-center gap-1.5 shadow-2xl shrink-0 transition-colors ${
+            className={`btn-press min-h-[34px] min-w-[34px] sm:min-h-[38px] px-2 sm:px-2.5 rounded-lg sm:rounded-xl text-[11px] font-bold inline-flex items-center justify-center gap-1 shrink-0 transition-colors ${
               isMobilePanelOpen && activeSidePanel === 'properties'
-                ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
                 : selectedElement
-                  ? 'bg-[var(--app-surface)]/92 border-[var(--app-accent-border)] text-[var(--app-accent-text)] hover:bg-[var(--app-surface-hover)]'
-                  : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+                  ? 'text-[var(--app-accent-text)] hover:bg-[var(--app-surface-hover)]'
+                  : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
             }`}
             title="Buka panel alat Studio & Properti"
             aria-label="Buka panel alat Studio"
           >
-            <Sliders className="w-4 h-4 shrink-0" />
+            <Sliders className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden min-[380px]:inline">Alat</span>
           </button>
 
-          {/* Compact Zoom Trigger + Floating Popover */}
-          <div className="relative shrink-0" ref={zoomMenuRef}>
-            <button
-              type="button"
-              onClick={() => setIsZoomMenuOpen((open) => !open)}
-              aria-expanded={isZoomMenuOpen}
-              aria-label={`Kontrol Zoom (${zoomLevel}%)`}
-              title={`Zoom Kanvas (${zoomLevel}%)`}
-              className={`btn-press min-h-[42px] min-w-[42px] sm:min-h-[44px] px-2.5 rounded-2xl border backdrop-blur-md text-[11px] tabular-metrics font-bold inline-flex items-center justify-center gap-1 shadow-2xl transition-colors ${
-                isZoomMenuOpen || zoomLevel !== 100
-                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent-border)] text-[var(--app-accent-text)]'
-                  : 'bg-[var(--app-surface)]/90 border-[var(--app-border-strong)]/80 text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
-              }`}
-            >
-              <Search className="w-4 h-4 shrink-0" />
-              {zoomLevel !== 100 && <span>{zoomLevel}%</span>}
-            </button>
-
-            {isZoomMenuOpen && (
-              <div
-                role="toolbar"
-                aria-label="Pengaturan Zoom dan Posisi Kanvas"
-                className="absolute bottom-full right-0 sm:left-0 sm:right-auto mb-2 flex items-center gap-1 p-1.5 rounded-2xl bg-[var(--app-surface-elevated)] border border-[var(--app-border-strong)] shadow-2xl z-40"
-              >
-                <button
-                  type="button"
-                  onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
-                  className="btn-press min-h-[38px] min-w-[38px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center"
-                  title="Zoom Out"
-                  aria-label="Zoom Out"
-                >
-                  <ZoomOut className="w-4 h-4" />
-                </button>
-                <span className="tabular-metrics text-[11px] font-bold px-2 text-[var(--app-text)] min-w-[46px] text-center">
-                  {zoomLevel}%
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setZoomLevel((z) => Math.min(180, z + 10))}
-                  className="btn-press min-h-[38px] min-w-[38px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center"
-                  title="Zoom In"
-                  aria-label="Zoom In"
-                >
-                  <ZoomIn className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setZoomLevel(100);
-                    setPanOffset({ x: 0, y: 0 });
-                  }}
-                  className="btn-press min-h-[38px] min-w-[38px] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center"
-                  title="Reset Posisi & Zoom"
-                  aria-label="Reset Posisi dan Zoom"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Direct 100% / 50% Canvas Zoom Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              setPanOffset({ x: 0, y: 0 });
+              setZoomLevel((z) => (z === 50 ? 100 : 50));
+            }}
+            aria-pressed={zoomLevel === 50}
+            aria-label={zoomLevel === 50 ? 'Kembalikan Zoom ke 100%' : 'Perkecil Kanvas ke 50%'}
+            title={
+              zoomLevel === 50
+                ? 'Zoom 50% — ketuk untuk kembali ke 100%'
+                : 'Zoom 100% — ketuk untuk perkecil ke 50%'
+            }
+            className={`btn-press min-h-[34px] min-w-[34px] sm:min-h-[38px] px-2 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] tabular-metrics font-bold inline-flex items-center justify-center gap-1 shrink-0 transition-colors ${
+              zoomLevel === 50
+                ? 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)]'
+                : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
+            }`}
+          >
+            <Search className="w-3.5 h-3.5 shrink-0" />
+            {zoomLevel === 50 && <span>50%</span>}
+          </button>
         </div>
       </div>
+      )}
 
       {/* Overlay Backdrop */}
-      {isMobilePanelOpen && (
+      {!isCanvasLivePreview && isMobilePanelOpen && (
         <div
           aria-hidden="true"
           onClick={() => setIsMobilePanelOpen(false)}
@@ -4037,7 +4022,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       <div
         ref={sidePanelRef}
         className={`${
-          isMobilePanelOpen
+          !isCanvasLivePreview && isMobilePanelOpen
             ? 'fixed inset-x-0 bottom-0 pb-safe z-50 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[74dvh] landscape:inset-y-0 landscape:right-0 landscape:left-auto landscape:w-[360px] landscape:sm:w-[400px] landscape:max-w-[88vw] landscape:max-h-full landscape:rounded-none landscape:rounded-l-2xl landscape:border-t-0 landscape:border-l md:inset-y-0 md:right-0 md:left-auto md:w-[400px] md:max-w-[88vw] md:max-h-full md:rounded-none md:rounded-l-2xl md:border-t-0 md:border-l flex flex-col overflow-hidden anim-sheet-up'
             : 'hidden'
         }`}
