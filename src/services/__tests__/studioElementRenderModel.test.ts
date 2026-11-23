@@ -585,8 +585,45 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(emptyTemplateResult.usedFallback, true, 'empty template triggers fallback safely');
   assertEqual(emptyTemplateResult.text, 'Fallback aman', 'empty template returns trimmed fallback');
 
+  // === A2.1 EVENT FEED BOUNDS & LIVE VIEWER COUNTER PRIORITY CHECKS ===
+  const twentyFiveEvents: StreamEvent[] = Array.from({ length: 25 }, (_, idx) => ({
+    id: `ev_feed_${idx}`,
+    type: 'chat',
+    username: `User${idx}`,
+    detail: `Pesan ${idx}`,
+    timestamp: 5000 + idx,
+  }));
+  assertEqual(buildEventFeedItems(twentyFiveEvents, 25).length, 20, 'event_feed clamps maxItems > 20 to 20');
+  assertEqual(buildEventFeedItems(twentyFiveEvents, 0).length, 4, 'event_feed falls back to default 4 when maxItems <= 0');
+  assertEqual(buildEventFeedItems(twentyFiveEvents, 7.9).length, 7, 'event_feed floors fractional maxItems to integer');
+  assertEqual(buildEventFeedItems([], 10).length, 0, 'event_feed returns empty array when no real events exist');
+
+  const liveZeroOverridesFallback = resolveViewerCounterDisplay({
+    liveViewerCount: 0,
+    fallbackPropertyValue: 5000,
+  });
+  assertEqual(liveZeroOverridesFallback.count, 0, 'liveViewerCount=0 still overrides fallbackPropertyValue');
+  assertEqual(liveZeroOverridesFallback.hasLiveSample, true, 'liveViewerCount=0 counts as valid LIVE sample');
+  assertEqual(
+    shouldShowViewerLiveBadge(true, liveZeroOverridesFallback.hasLiveSample),
+    true,
+    'LIVE badge displays when live sample 0 is active and liveBadge=true',
+  );
+
+  const standbyZeroFallback = resolveViewerCounterDisplay({
+    liveViewerCount: null,
+    fallbackPropertyValue: 0,
+  });
+  assertEqual(standbyZeroFallback.count, 0, 'non-negative integer fallback 0 is accepted when LIVE sample absent');
+  assertEqual(standbyZeroFallback.hasLiveSample, false, 'zero fallback remains standby (not LIVE)');
+  assertEqual(
+    shouldShowViewerLiveBadge(true, standbyZeroFallback.hasLiveSample),
+    false,
+    'LIVE badge remains hidden during standby even if liveBadge=true',
+  );
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 checks).`,
   );
 }
 

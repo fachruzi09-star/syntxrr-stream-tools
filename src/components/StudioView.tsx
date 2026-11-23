@@ -5993,6 +5993,169 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </div>
                     )}
 
+                    {/* Event Feed Inspector */}
+                    {selectedElement.type === 'event_feed' && (() => {
+                      const currentMaxItems =
+                        typeof selectedElement.properties.maxItems === 'number' &&
+                        Number.isFinite(selectedElement.properties.maxItems) &&
+                        selectedElement.properties.maxItems > 0
+                          ? Math.max(1, Math.min(20, Math.floor(selectedElement.properties.maxItems)))
+                          : 4;
+                      const slideTransitionEnabled = selectedElement.properties.slideAnimation !== false;
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-orange-400 flex items-center gap-1.5">
+                            <Zap className="w-4 h-4" /> Pengaturan Event Feed
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Jumlah Maksimal Aktivitas (1–20)
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              step={1}
+                              value={currentMaxItems}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'maxItems',
+                                  clampNumericRange(e.target.value, 1, 20, 4),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                            <p className="text-[10px] text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                              Membatasi jumlah baris aktivitas terbaru yang ditampilkan pada feed (default 4, rentang 1–20).
+                            </p>
+                          </div>
+
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Transisi CSS Item</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'slideAnimation',
+                                    !(selectedElement.properties.slideAnimation !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  slideTransitionEnabled
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {slideTransitionEnabled ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Mengontrol kelas transisi CSS pada setiap baris item saat daftar diperbarui.
+                            </p>
+                          </div>
+
+                          <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                            Sumber data berasal langsung dari riwayat aktivitas penonton aktual tanpa event simulasi palsu.
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Live Viewer Counter Inspector */}
+                    {selectedElement.type === 'live_viewer_counter' && (() => {
+                      const currentFallbackViewerCount =
+                        typeof selectedElement.properties.viewerCount === 'number' &&
+                        Number.isFinite(selectedElement.properties.viewerCount) &&
+                        selectedElement.properties.viewerCount >= 0
+                          ? Math.floor(selectedElement.properties.viewerCount)
+                          : 1420;
+                      const liveBadgeEnabled = selectedElement.properties.liveBadge !== false;
+                      const viewerPreview = resolveViewerCounterDisplay({
+                        liveViewerCount: latestViewerCount,
+                        fallbackPropertyValue: currentFallbackViewerCount,
+                      });
+                      const previewShowsLiveBadge = shouldShowViewerLiveBadge(
+                        selectedElement.properties.liveBadge,
+                        viewerPreview.hasLiveSample,
+                      );
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                            <Users className="w-4 h-4" /> Pengaturan Penghitung Penonton
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Angka Cadangan (Standby)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={currentFallbackViewerCount}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'viewerCount',
+                                  clampNumericRange(e.target.value, 0, 999999999, 1420),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                            <p className="text-[10px] text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                              Hanya digunakan sebagai angka cadangan ketika belum ada sampel penonton LIVE. Data penonton LIVE aktual tetap diprioritaskan dan tidak akan tertimpa.
+                            </p>
+                          </div>
+
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Badge LIVE</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'liveBadge',
+                                    !(selectedElement.properties.liveBadge !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  liveBadgeEnabled
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {liveBadgeEnabled ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Badge LIVE hanya tampil di layar jika sampel jumlah penonton LIVE yang valid tersedia dan opsi ini aktif.
+                            </p>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] space-y-0.5">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              Status Tampilan Saat Ini ({viewerPreview.hasLiveSample ? 'Data LIVE Aktual' : 'Standby / Cadangan'})
+                            </div>
+                            <div className="font-semibold text-[var(--app-text)] tabular-metrics flex items-center gap-1.5">
+                              {previewShowsLiveBadge && (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[9px] font-black tracking-wider">
+                                  LIVE
+                                </span>
+                              )}
+                              <span>{viewerPreview.formattedCount} penonton</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Common Geometry & Transform (Editable X, Y, Width, Height) */}
                     <div className="py-4 space-y-3">
                       <div className="flex items-center justify-between text-xs font-bold text-[var(--app-text)]">

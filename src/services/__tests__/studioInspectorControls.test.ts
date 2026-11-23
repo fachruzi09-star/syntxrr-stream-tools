@@ -632,6 +632,76 @@ function runStudioInspectorControlsTests(): void {
     'Inspector header preserves selected element title and close panel button',
   );
 
+  // 14. A2.1 Dynamic Inspector: event_feed & live_viewer_counter
+  const eventFeedSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'event_feed'",
+    "selectedElement.type === 'live_viewer_counter'",
+    'event_feed inspector',
+  );
+  for (const prop of ['maxItems', 'slideAnimation']) {
+    assert(
+      updatesProp(eventFeedSection, prop),
+      `event_feed inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    eventFeedSection.includes('min={1}') &&
+      eventFeedSection.includes('max={20}') &&
+      eventFeedSection.includes('step={1}') &&
+      eventFeedSection.includes('clampNumericRange(e.target.value, 1, 20, 4)'),
+    'event_feed inspector enforces maxItems integer bounds 1..20 with default 4',
+  );
+  assert(
+    eventFeedSection.includes('!(selectedElement.properties.slideAnimation !== false)'),
+    'event_feed inspector toggles boolean slideAnimation with active default (!== false)',
+  );
+  assert(
+    eventFeedSection.includes('Transisi CSS Item') &&
+      !eventFeedSection.includes('auto-scroll'),
+    'event_feed inspector describes CSS item transition honestly without promising auto-scroll',
+  );
+
+  const eventFeedRendererSection = extractBetween(
+    studioSource,
+    "case 'event_feed': {",
+    "case 'progress_bar': {",
+    'event_feed renderer',
+  );
+  assert(
+    eventFeedRendererSection.includes('buildEventFeedItems(studioEventHistory, props.maxItems)') &&
+      eventFeedRendererSection.includes('props.slideAnimation !== false'),
+    'event_feed renderer stays bound to real studioEventHistory and slideAnimation property',
+  );
+
+  const viewerIdx = inspectorSection.indexOf("selectedElement.type === 'live_viewer_counter'");
+  assert(viewerIdx !== -1, 'live_viewer_counter inspector section exists');
+  const viewerCounterSection = inspectorSection.slice(viewerIdx);
+  for (const prop of ['viewerCount', 'liveBadge']) {
+    assert(
+      updatesProp(viewerCounterSection, prop),
+      `live_viewer_counter inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    viewerCounterSection.includes('min={0}') &&
+      viewerCounterSection.includes('step={1}') &&
+      viewerCounterSection.includes('clampNumericRange(e.target.value, 0, 999999999, 1420)'),
+    'live_viewer_counter inspector enforces non-negative integer viewerCount fallback with default 1420',
+  );
+  assert(
+    viewerCounterSection.includes('!(selectedElement.properties.liveBadge !== false)'),
+    'live_viewer_counter inspector toggles boolean liveBadge with active default (!== false)',
+  );
+  assert(
+    viewerCounterSection.includes('Angka Cadangan') &&
+      viewerCounterSection.includes('Data penonton LIVE aktual tetap diprioritaskan') &&
+      viewerCounterSection.includes('resolveViewerCounterDisplay(') &&
+      viewerCounterSection.includes('shouldShowViewerLiveBadge(') &&
+      !viewerCounterSection.includes('setLatestViewerCount('),
+    'live_viewer_counter inspector documents LIVE priority and never mutates latestViewerCount',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 
