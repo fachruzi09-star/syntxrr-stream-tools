@@ -21,12 +21,24 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
 
 /**
  * Native, transparent Studio overlay rendered into RootEncoder's GL output.
@@ -71,6 +83,17 @@ public final class StudioOverlayView extends View {
     private boolean cameraTransferPending;
     private final boolean deferCameraOwnerForTransfer;
     private int cameraFacingConflictCount;
+    private static final int MAX_FAILED_AVATAR_URLS = 64;
+    private static final int MAX_AVATAR_FETCH_QUEUE = 16;
+    private static final ModeBAvatarPolicy.Disposer<Bitmap> AVATAR_BITMAP_DISPOSER = bitmap -> {
+        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+    };
+    private boolean hasAvatarElement;
+    private final ModeBAvatarPolicy.BoundedAvatarCache<Bitmap> avatarCache = new ModeBAvatarPolicy.BoundedAvatarCache<>();
+    private final Set<String> inFlightAvatarUrls = new HashSet<>();
+    private final LinkedHashMap<String, Long> failedAvatarUrls = new LinkedHashMap<>();
+    private final Object avatarFetchLock = new Object();
+    private ExecutorService avatarExecutor;
     private volatile boolean assetsReleased;
     private final List<String> videoLoadFailures = new ArrayList<>();
     private long imageCachePixels;
@@ -203,11 +226,14 @@ public final class StudioOverlayView extends View {
             String id = object.optString("id", "").trim();
             String type = object.optString("type", "").trim().toLowerCase();
             if (id.isEmpty() || type.isEmpty()) return;
+            String rawAvatar = safeText(object.optString("userAvatar", ""), ModeBAvatarPolicy.MAX_AVATAR_URL_LENGTH);
+            String validatedAvatar = ModeBAvatarPolicy.validateAvatarUrl(rawAvatar);
             LiveEvent event = new LiveEvent(
                     id,
                     type,
                     safeText(object.optString("username", ""), 80),
                     safeText(object.optString("detail", ""), 500),
+                    validatedAvatar,
                     optionalNumber(object, "amount", -1d),
                     optionalNumber(object, "viewerCount", -1d),
                     optionalNumber(object, "totalLikeCount", -1d),
@@ -235,6 +261,11 @@ public final class StudioOverlayView extends View {
                 accepted = true;
             }
             if (accepted) {
+                if (hasAvatarElement && validatedAvatar != null
+                        && ModeBDynamicOverlayResolver.isAudienceUserEventType(type)
+                        && !event.username.trim().isEmpty()) {
+                    scheduleAvatarFetchIfNeeded(validatedAvatar);
+                }
                 postInvalidate();
             }
         } catch (JSONException ignored) {
@@ -263,6 +294,7 @@ public final class StudioOverlayView extends View {
             viewerSnapshot = lastViewerCount;
             likesSnapshot = latestTotalLikes;
         }
+        String prefetchAvatarUrl = null;
         synchronized (target.liveEvents) {
             if (target.assetsReleased) return;
             target.liveEvents.clear();
@@ -274,6 +306,15 @@ public final class StudioOverlayView extends View {
             target.donationTotal = donationSnapshot;
             target.lastViewerCount = viewerSnapshot;
             target.latestTotalLikes = likesSnapshot;
+            if (target.hasAvatarElement) {
+                ModeBDynamicOverlayResolver.AvatarResolution latestAvatar =
+                        ModeBDynamicOverlayResolver.resolveDynamicAvatar(
+                                target.buildAudienceEventRecordsLocked(), "circle", Boolean.TRUE);
+                prefetchAvatarUrl = latestAvatar.avatarUrl;
+            }
+        }
+        if (prefetchAvatarUrl != null) {
+            target.scheduleAvatarFetchIfNeeded(prefetchAvatarUrl);
         }
         target.postInvalidate();
     }
@@ -385,6 +426,9 @@ public final class StudioOverlayView extends View {
                     elements.add(element);
                     supportedCount++;
                 } else if (isSupported(element.type, element.properties)) {
+                    if ("avatar".equals(element.type)) {
+                        hasAvatarElement = true;
+                    }
                     elements.add(element);
                     supportedCount++;
                 } else {
@@ -478,7 +522,7 @@ public final class StudioOverlayView extends View {
 
     private boolean isSupported(String type, JSONObject properties) {
         if ("shape".equals(type) || "separator".equals(type)) return true;
-        if ("dynamic_text".equals(type) || "username".equals(type)) return true;
+        if ("dynamic_text".equals(type) || "username".equals(type) || "avatar".equals(type)) return true;
         if ("text".equals(type) || "running_text".equals(type) || "live_text".equals(type)) {
             return firstNonEmpty(properties.optString("text", ""), properties.optString("content", ""),
                     properties.optString("sampleText", ""), properties.optString("label", "")).length() > 0;
@@ -498,12 +542,16 @@ public final class StudioOverlayView extends View {
     }
 
     private void drawOverlayFrame(Canvas canvas) {
-        super.onDraw(canvas);
-        if (assetsReleased || elements.isEmpty()) return;
-        // Scene-wide opacity is deliberately not baked into this producer frame. The paired
-        // GL filters apply one shared opacity snapshot to background and overlay in the same
-        // RootEncoder compositor pass, even when their View workers have different frame rates.
-        for (OverlayElement element : elements) drawElement(canvas, element, 1f);
+        try {
+            super.onDraw(canvas);
+            if (assetsReleased || elements.isEmpty()) return;
+            // Scene-wide opacity is deliberately not baked into this producer frame. The paired
+            // GL filters apply one shared opacity snapshot to background and overlay in the same
+            // RootEncoder compositor pass, even when their View workers have different frame rates.
+            for (OverlayElement element : elements) drawElement(canvas, element, 1f);
+        } finally {
+            avatarCache.drainRetired(AVATAR_BITMAP_DISPOSER);
+        }
     }
 
     private void drawElement(Canvas canvas, OverlayElement element, float frameSceneOpacity) {
@@ -545,6 +593,8 @@ public final class StudioOverlayView extends View {
             drawDynamicTextElement(canvas, bounds, element, alpha);
         } else if ("username".equals(type)) {
             drawUsernameElement(canvas, bounds, element, alpha);
+        } else if ("avatar".equals(type)) {
+            drawAvatarElement(canvas, bounds, element, alpha);
         } else if ("running_text".equals(type)) {
             drawRunningText(canvas, bounds, element, alpha);
         } else {
@@ -782,6 +832,16 @@ public final class StudioOverlayView extends View {
             }
             imageMemoryReservations.clear();
             imageCachePixels = 0L;
+
+            synchronized (avatarFetchLock) {
+                if (avatarExecutor != null) {
+                    avatarExecutor.shutdownNow();
+                    avatarExecutor = null;
+                }
+                inFlightAvatarUrls.clear();
+                failedAvatarUrls.clear();
+            }
+            avatarCache.clearAll(AVATAR_BITMAP_DISPOSER);
 
             if (workerOwnedByView && visualWorker != null) {
                 visualWorker.shutdownAfterQueuedTasks();
@@ -1296,12 +1356,323 @@ public final class StudioOverlayView extends View {
         canvas.drawText(fitText(model.displayText, maxTextWidth, paint), bounds.left + padding, baseline, paint);
     }
 
+    private void drawAvatarElement(Canvas canvas, RectF bounds, OverlayElement element, int alpha) {
+        JSONObject properties = element.properties;
+        String shapeRaw = properties.has("shape") && !properties.isNull("shape")
+                ? properties.optString("shape", "circle")
+                : "circle";
+        Boolean borderGlowProp = properties.has("borderGlow") && !properties.isNull("borderGlow")
+                ? Boolean.valueOf(properties.optBoolean("borderGlow", true))
+                : Boolean.TRUE;
+
+        List<ModeBDynamicOverlayResolver.AudienceEventRecord> audienceRecords;
+        synchronized (liveEvents) {
+            audienceRecords = buildAudienceEventRecordsLocked();
+        }
+        ModeBDynamicOverlayResolver.AvatarResolution model =
+                ModeBDynamicOverlayResolver.resolveDynamicAvatar(audienceRecords, shapeRaw, borderGlowProp);
+
+        float pad = Math.max(2f, Math.min(bounds.width(), bounds.height()) * 0.05f);
+        RectF frame = new RectF(
+                bounds.left + pad,
+                bounds.top + pad,
+                Math.max(bounds.left + pad + 2f, bounds.right - pad),
+                Math.max(bounds.top + pad + 2f, bounds.bottom - pad));
+
+        float roundedCorner = Math.max(6f, Math.min(frame.width(), frame.height()) * 0.18f);
+        Path clipPath = new Path();
+        if ("square".equals(model.shape)) {
+            clipPath.addRect(frame, Path.Direction.CW);
+        } else if ("rounded".equals(model.shape)) {
+            clipPath.addRoundRect(frame, roundedCorner, roundedCorner, Path.Direction.CW);
+        } else {
+            clipPath.addOval(frame, Path.Direction.CW);
+        }
+
+        Bitmap avatarBitmap = null;
+        if (model.avatarUrl != null) {
+            avatarBitmap = avatarCache.get(model.avatarUrl);
+            if (avatarBitmap == null || avatarBitmap.isRecycled()) {
+                avatarBitmap = null;
+                scheduleAvatarFetchIfNeeded(model.avatarUrl);
+            }
+        }
+
+        int clipSave = canvas.save();
+        canvas.clipPath(clipPath);
+
+        if (avatarBitmap != null) {
+            float sourceWidth = avatarBitmap.getWidth();
+            float sourceHeight = avatarBitmap.getHeight();
+            float targetWidth = frame.width();
+            float targetHeight = frame.height();
+            Rect source = new Rect(0, 0, avatarBitmap.getWidth(), avatarBitmap.getHeight());
+            float sourceRatio = sourceWidth / Math.max(1f, sourceHeight);
+            float targetRatio = targetWidth / Math.max(1f, targetHeight);
+            if (sourceRatio > targetRatio) {
+                int cropWidth = Math.max(1, Math.min(avatarBitmap.getWidth(), Math.round(sourceHeight * targetRatio)));
+                int cropLeft = (avatarBitmap.getWidth() - cropWidth) / 2;
+                source = new Rect(cropLeft, 0, cropLeft + cropWidth, avatarBitmap.getHeight());
+            } else if (sourceRatio < targetRatio) {
+                int cropHeight = Math.max(1, Math.min(avatarBitmap.getHeight(), Math.round(sourceWidth / targetRatio)));
+                int cropTop = (avatarBitmap.getHeight() - cropHeight) / 2;
+                source = new Rect(0, cropTop, avatarBitmap.getWidth(), cropTop + cropHeight);
+            }
+            paint.setColor(Color.WHITE);
+            paint.setAlpha(alpha);
+            paint.setFilterBitmap(true);
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawBitmap(avatarBitmap, source, frame, paint);
+        } else {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFF18181B);
+            paint.setAlpha(alpha);
+            canvas.drawRect(frame, paint);
+
+            if (model.hasEvent && model.initial != null && !model.initial.isEmpty()) {
+                float initialSize = Math.max(12f, Math.min(frame.width(), frame.height()) * 0.44f);
+                paint.setColor(0xFFF2C230);
+                paint.setAlpha(alpha);
+                paint.setTextAlign(Paint.Align.CENTER);
+                paint.setTextSize(initialSize);
+                paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+                Paint.FontMetrics metrics = paint.getFontMetrics();
+                float baseline = frame.centerY() - (metrics.ascent + metrics.descent) / 2f;
+                canvas.drawText(model.initial, frame.centerX(), baseline, paint);
+                paint.setTextAlign(Paint.Align.LEFT);
+            } else {
+                // Neutral user silhouette placeholder when no valid audience event exists yet
+                float unit = Math.min(frame.width(), frame.height());
+                paint.setColor(0xFF71717A);
+                paint.setAlpha(alpha);
+                paint.setStyle(Paint.Style.FILL);
+                canvas.drawCircle(frame.centerX(), frame.centerY() - unit * 0.12f, unit * 0.16f, paint);
+                RectF shoulders = new RectF(
+                        frame.centerX() - unit * 0.28f,
+                        frame.centerY() + unit * 0.08f,
+                        frame.centerX() + unit * 0.28f,
+                        frame.centerY() + unit * 0.56f);
+                canvas.drawOval(shoulders, paint);
+            }
+        }
+        canvas.restoreToCount(clipSave);
+
+        float strokeWidth = model.borderGlow
+                ? Math.max(2f, 2.2f * previewScale)
+                : Math.max(1.2f, 1.4f * previewScale);
+        if (model.borderGlow) {
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(0x55F2C230);
+            paint.setAlpha(Math.round(Color.alpha(0x55F2C230) * (alpha / 255f)));
+            paint.setStrokeWidth(strokeWidth * 2.1f);
+            drawAvatarBorderShape(canvas, frame, model.shape, roundedCorner, paint);
+        }
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setColor(model.borderGlow ? 0xFFF2C230 : 0xFF3F3F46);
+        paint.setAlpha(alpha);
+        paint.setStrokeWidth(strokeWidth);
+        drawAvatarBorderShape(canvas, frame, model.shape, roundedCorner, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+    }
+
+    private void drawAvatarBorderShape(Canvas canvas, RectF frame, String shape, float roundedCorner, Paint borderPaint) {
+        if ("square".equals(shape)) {
+            canvas.drawRect(frame, borderPaint);
+        } else if ("rounded".equals(shape)) {
+            canvas.drawRoundRect(frame, roundedCorner, roundedCorner, borderPaint);
+        } else {
+            canvas.drawOval(frame, borderPaint);
+        }
+    }
+
+    private void scheduleAvatarFetchIfNeeded(String rawUrl) {
+        if (!hasAvatarElement || assetsReleased) return;
+        final String safeUrl = ModeBAvatarPolicy.validateAvatarUrl(rawUrl);
+        if (safeUrl == null) return;
+        Bitmap cached = avatarCache.get(safeUrl);
+        if (cached != null && !cached.isRecycled()) return;
+
+        ExecutorService executorToSubmit;
+        long nowMs = System.currentTimeMillis();
+        synchronized (avatarFetchLock) {
+            if (assetsReleased || !hasAvatarElement) return;
+            if (inFlightAvatarUrls.contains(safeUrl)) return;
+            Long failedAt = failedAvatarUrls.get(safeUrl);
+            if (failedAt != null) {
+                if ((nowMs - failedAt.longValue()) < 30_000L) {
+                    return;
+                }
+                failedAvatarUrls.remove(safeUrl);
+            }
+            if (avatarExecutor == null || avatarExecutor.isShutdown()) {
+                ThreadFactory daemonFactory = runnable -> {
+                    Thread thread = new Thread(runnable, "syntxrr-avatar-fetch");
+                    thread.setDaemon(true);
+                    return thread;
+                };
+                avatarExecutor = new ThreadPoolExecutor(
+                        1, 2, 15L, TimeUnit.SECONDS,
+                        new LinkedBlockingQueue<>(MAX_AVATAR_FETCH_QUEUE),
+                        daemonFactory,
+                        new ThreadPoolExecutor.AbortPolicy());
+            }
+            inFlightAvatarUrls.add(safeUrl);
+            executorToSubmit = avatarExecutor;
+        }
+
+        try {
+            executorToSubmit.execute(() -> fetchAndDecodeAvatar(safeUrl));
+        } catch (RuntimeException rejected) {
+            synchronized (avatarFetchLock) {
+                inFlightAvatarUrls.remove(safeUrl);
+            }
+        }
+    }
+
+    private void fetchAndDecodeAvatar(String initialSafeUrl) {
+        String currentUrl = initialSafeUrl;
+        boolean succeeded = false;
+        try {
+            for (int redirectCount = 0; redirectCount <= ModeBAvatarPolicy.MAX_AVATAR_REDIRECTS; redirectCount++) {
+                if (assetsReleased || Thread.currentThread().isInterrupted()) return;
+                String validatedHop = ModeBAvatarPolicy.validateAvatarUrl(currentUrl);
+                if (validatedHop == null) return;
+
+                URL parsed = new URL(validatedHop);
+                String host = parsed.getHost();
+                if (!verifyPublicHostDns(host)) return;
+
+                HttpsURLConnection connection = null;
+                try {
+                    connection = (HttpsURLConnection) parsed.openConnection();
+                    connection.setInstanceFollowRedirects(false);
+                    connection.setUseCaches(false);
+                    connection.setConnectTimeout(ModeBAvatarPolicy.CONNECT_TIMEOUT_MS);
+                    connection.setReadTimeout(ModeBAvatarPolicy.READ_TIMEOUT_MS);
+                    connection.setRequestMethod("GET");
+                    connection.setRequestProperty("Accept", "image/jpeg,image/png,image/webp,image/gif");
+
+                    int status = connection.getResponseCode();
+                    if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+                        if (redirectCount >= ModeBAvatarPolicy.MAX_AVATAR_REDIRECTS) return;
+                        String location = connection.getHeaderField("Location");
+                        String nextUrl = ModeBAvatarPolicy.validateRedirectTarget(validatedHop, location);
+                        if (nextUrl == null) return;
+                        currentUrl = nextUrl;
+                        continue;
+                    }
+
+                    if (status != 200) return;
+                    if (!ModeBAvatarPolicy.isSupportedResponseMime(connection.getContentType())) return;
+                    long contentLength = connection.getContentLengthLong();
+                    if (contentLength > ModeBAvatarPolicy.MAX_AVATAR_BYTES) return;
+
+                    byte[] payload;
+                    try (InputStream stream = connection.getInputStream()) {
+                        payload = ModeBAvatarPolicy.readBoundedStream(stream, ModeBAvatarPolicy.MAX_AVATAR_BYTES);
+                    }
+                    if (payload == null || assetsReleased) return;
+                    if (ModeBAvatarPolicy.detectImageMimeFromBytes(payload, payload.length) == null) return;
+
+                    Bitmap decoded = decodeBoundedAvatarBitmap(payload);
+                    if (decoded == null) return;
+                    if (assetsReleased) {
+                        if (!decoded.isRecycled()) decoded.recycle();
+                        return;
+                    }
+
+                    long pixels = (long) decoded.getWidth() * (long) decoded.getHeight();
+                    if (!avatarCache.put(initialSafeUrl, decoded, pixels)) {
+                        if (!decoded.isRecycled()) decoded.recycle();
+                        return;
+                    }
+                    succeeded = true;
+                    postInvalidate();
+                    return;
+                } finally {
+                    if (connection != null) {
+                        connection.disconnect();
+                    }
+                }
+            }
+        } catch (IOException | SecurityException | OutOfMemoryError | RuntimeException ignored) {
+            // Do not log avatar URL or username/PII on fetch failures; fallback initial stays visible.
+        } finally {
+            synchronized (avatarFetchLock) {
+                inFlightAvatarUrls.remove(initialSafeUrl);
+                if (!succeeded && !assetsReleased) {
+                    if (failedAvatarUrls.size() >= MAX_FAILED_AVATAR_URLS) {
+                        String oldestKey = failedAvatarUrls.keySet().iterator().next();
+                        failedAvatarUrls.remove(oldestKey);
+                    }
+                    failedAvatarUrls.put(initialSafeUrl, System.currentTimeMillis());
+                }
+            }
+        }
+    }
+
+    private static boolean verifyPublicHostDns(String host) {
+        if (host == null || host.trim().isEmpty()) return false;
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host.trim());
+            if (addresses == null || addresses.length == 0) return false;
+            for (InetAddress address : addresses) {
+                if (!ModeBAvatarPolicy.isSafePublicAddress(address)) return false;
+            }
+            return true;
+        } catch (IOException | SecurityException ignored) {
+            return false;
+        }
+    }
+
+    private static Bitmap decodeBoundedAvatarBitmap(byte[] payload) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(payload, 0, payload.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+
+        int maxDim = Math.max(bounds.outWidth, bounds.outHeight);
+        int sampleSize = 1;
+        while ((maxDim / sampleSize) > ModeBAvatarPolicy.MAX_AVATAR_DIMENSION_PX * 2) {
+            sampleSize *= 2;
+        }
+
+        BitmapFactory.Options decodeOpts = new BitmapFactory.Options();
+        decodeOpts.inSampleSize = sampleSize;
+        decodeOpts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        Bitmap decoded = BitmapFactory.decodeByteArray(payload, 0, payload.length, decodeOpts);
+        if (decoded == null) return null;
+
+        int width = decoded.getWidth();
+        int height = decoded.getHeight();
+        if (width <= 0 || height <= 0) {
+            if (!decoded.isRecycled()) decoded.recycle();
+            return null;
+        }
+        if (width <= ModeBAvatarPolicy.MAX_AVATAR_DIMENSION_PX
+                && height <= ModeBAvatarPolicy.MAX_AVATAR_DIMENSION_PX) {
+            return decoded;
+        }
+
+        float scale = Math.min(
+                ModeBAvatarPolicy.MAX_AVATAR_DIMENSION_PX / (float) width,
+                ModeBAvatarPolicy.MAX_AVATAR_DIMENSION_PX / (float) height);
+        int targetW = Math.max(1, Math.round(width * scale));
+        int targetH = Math.max(1, Math.round(height * scale));
+        Bitmap scaled = Bitmap.createScaledBitmap(decoded, targetW, targetH, true);
+        if (scaled != decoded && !decoded.isRecycled()) {
+            decoded.recycle();
+        }
+        return scaled;
+    }
+
     private List<ModeBDynamicOverlayResolver.AudienceEventRecord> buildAudienceEventRecordsLocked() {
         List<ModeBDynamicOverlayResolver.AudienceEventRecord> records = new ArrayList<>(liveEvents.size());
         for (LiveEvent event : liveEvents) {
             if (event == null) continue;
             records.add(new ModeBDynamicOverlayResolver.AudienceEventRecord(
-                    event.id, event.type, event.username, event.timestamp));
+                    event.id, event.type, event.username, event.userAvatar, event.timestamp));
         }
         return records;
     }
@@ -1434,18 +1805,20 @@ public final class StudioOverlayView extends View {
         final String type;
         final String username;
         final String detail;
+        final String userAvatar;
         final double amount;
         final double viewerCount;
         final double totalLikeCount;
         final double repeatCount;
         final long timestamp;
 
-        LiveEvent(String id, String type, String username, String detail, double amount,
+        LiveEvent(String id, String type, String username, String detail, String userAvatar, double amount,
                   double viewerCount, double totalLikeCount, double repeatCount, long timestamp) {
             this.id = id;
             this.type = type;
             this.username = username;
             this.detail = detail;
+            this.userAvatar = userAvatar;
             this.amount = amount;
             this.viewerCount = viewerCount;
             this.totalLikeCount = totalLikeCount;

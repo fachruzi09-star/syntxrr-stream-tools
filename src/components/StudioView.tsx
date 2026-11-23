@@ -95,6 +95,15 @@ import {
   validateSafeBrowserEmbedUrl,
 } from '../services/studioElementRenderModel';
 import {
+  canMutateStudioElementField,
+  classifyCanvasElementPointerMove,
+  isInteractiveCanvasChildTarget,
+  isStudioElementReadOnly,
+  resolveCanvasElementPointerUp,
+  shouldClosePropertiesOnCanvasBackgroundClick,
+  type PendingCanvasElementGesture,
+} from '../services/studioCanvasGesture';
+import {
   Tv,
   Layers,
   Plus,
@@ -447,33 +456,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
 
-  // UNIFIED POINTER DRAG & RESIZE REFS
+  // UNIFIED POINTER TAP, DRAG & RESIZE REFS
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{
-    isDragging: boolean;
-    isResizing: boolean;
-    resizeHandle: string | null;
-    elementId: string | null;
-    pointerId: number | null;
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-    origW: number;
-    origH: number;
-  }>({
-    isDragging: false,
-    isResizing: false,
-    resizeHandle: null,
-    elementId: null,
-    pointerId: null,
-    startX: 0,
-    startY: 0,
-    origX: 0,
-    origY: 0,
-    origW: 0,
-    origH: 0,
-  });
+  const pendingElementGestureRef = useRef<PendingCanvasElementGesture | null>(null);
+  const suppressNextCanvasClickRef = useRef<boolean>(false);
 
   // Refs for performant live-drag (avoid per-move history pushes + stale closures)
   const elementsRef = useRef(elements);
@@ -807,8 +793,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const isSelectedElementHiddenByGroup = selectedElement
     ? isElementHiddenByGroup(selectedElement.id)
     : false;
-  const canMutateSelectedElement = Boolean(
+  const isSelectedElementLocked = Boolean(selectedElement?.locked);
+  const isSelectedElementReadOnly = isStudioElementReadOnly({
+    elementLocked: isSelectedElementLocked,
+    isElementGroupLocked: isSelectedElementGroupLocked,
+    isStrictModeBLocked,
+  });
+  const canToggleSelectedElementLock = Boolean(
     selectedElement && !isStrictModeBLocked && !isSelectedElementGroupLocked,
+  );
+  const canMutateSelectedElement = Boolean(
+    selectedElement && !isSelectedElementReadOnly,
   );
   const canMoveSelectedLayerUp = Boolean(
     canMutateSelectedElement &&
@@ -823,10 +818,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
   useEffect(() => {
     if (previousPresetIdRef.current === activePresetId) return;
     previousPresetIdRef.current = activePresetId;
-    setSelectedId(elementsRef.current[0]?.id || null);
+    setSelectedId(null);
     setSelectedLayerElementIds([]);
     setSelectedLayerGroupIds([]);
     setSelectedGroupId(null);
+    setIsMobilePanelOpen(false);
     setHistory([]);
     setRedoStack([]);
     setActiveReactions({});
@@ -838,10 +834,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setSaveFeedback(null);
     isLiveDragRef.current = false;
     preDragElementsRef.current = null;
-    dragRef.current.isDragging = false;
-    dragRef.current.isResizing = false;
-    dragRef.current.elementId = null;
-    dragRef.current.pointerId = null;
+    pendingElementGestureRef.current = null;
+    suppressNextCanvasClickRef.current = false;
     groupTransformRef.current = {
       mode: null,
       group: null,
@@ -854,6 +848,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
       originalElements: [],
     };
   }, [activePresetId]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!elements.some((elem) => elem.id === selectedId)) {
+      setSelectedId(null);
+      setIsMobilePanelOpen((open) => (activeSidePanel === 'properties' ? false : open));
+    }
+  }, [elements, selectedId, activeSidePanel]);
 
   useEffect(() => {
     if (saveState?.status === 'pending') {
@@ -1115,7 +1117,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementField = (id: string, field: keyof StudioElement, value: any) => {
-    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const targetElem = elementsRef.current.find((elem) => elem.id === id);
+    if (!targetElem) return;
+    if (
+      !canMutateStudioElementField({
+        elementLocked: targetElem.locked,
+        isElementGroupLocked: isElementLockedByGroup(id),
+        isStrictModeBLocked,
+        field: String(field),
+      })
+    ) {
+      return;
+    }
     const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
         return { ...elem, [field]: value };
@@ -1126,7 +1139,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementProperty = (id: string, key: string, value: any) => {
-    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const targetElem = elementsRef.current.find((elem) => elem.id === id);
+    if (
+      !targetElem ||
+      isStudioElementReadOnly({
+        elementLocked: targetElem.locked,
+        isElementGroupLocked: isElementLockedByGroup(id),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
         const nextProperties = {
@@ -1150,7 +1173,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const updateElementTrigger = (id: string, partial: any) => {
-    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const targetElem = elementsRef.current.find((elem) => elem.id === id);
+    if (
+      !targetElem ||
+      isStudioElementReadOnly({
+        elementLocked: targetElem.locked,
+        isElementGroupLocked: isElementLockedByGroup(id),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
         return {
@@ -1392,9 +1425,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleDuplicate = (id: string) => {
-    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
     const target = elements.find((e) => e.id === id);
-    if (!target) return;
+    if (
+      !target ||
+      isStudioElementReadOnly({
+        elementLocked: target.locked,
+        isElementGroupLocked: isElementLockedByGroup(id),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     const clone: StudioElement = {
       ...target,
       id: `elem_${target.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1409,7 +1450,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const target = elements.find((e) => e.id === id);
+    if (
+      !target ||
+      isStudioElementReadOnly({
+        elementLocked: target.locked,
+        isElementGroupLocked: isElementLockedByGroup(id),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     if (activeCameraStreams[id]) {
       activeCameraStreams[id].getTracks().forEach((t) => t.stop());
       setActiveCameraStreams((prev) => {
@@ -1423,12 +1474,23 @@ export const StudioView: React.FC<StudioViewProps> = ({
     commitElements(updated);
     if (selectedId === id) {
       setSelectedGroupId(null);
-      setSelectedId(updated[0]?.id || null);
+      setSelectedId(null);
+      setIsMobilePanelOpen((open) => (activeSidePanel === 'properties' ? false : open));
     }
   };
 
   const handleMoveLayer = (id: string, direction: 'up' | 'down') => {
-    if (isStrictModeBLocked || isElementLockedByGroup(id)) return;
+    const target = elements.find((e) => e.id === id);
+    if (
+      !target ||
+      isStudioElementReadOnly({
+        elementLocked: target.locked,
+        isElementGroupLocked: isElementLockedByGroup(id),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     const index = elements.findIndex((e) => e.id === id);
     if (index === -1) return;
     if (direction === 'up' && index === elements.length - 1) return;
@@ -1444,24 +1506,29 @@ export const StudioView: React.FC<StudioViewProps> = ({
     commitElements(reordered);
   };
 
-  // UNIFIED POINTER DRAG & RESIZE SYSTEM (FIXES HORIZONTAL & VERTICAL MOVEMENT)
+  // UNIFIED POINTER TAP, DRAG & RESIZE SYSTEM (TAP <= 8px OPENS INSPECTOR, DRAG > 8px MOVES ELEMENT)
   const handleElementPointerDown = (e: React.PointerEvent, elem: StudioElement) => {
-    if (isCanvasLivePreview || elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
-    if (e.button !== 0) return; // Only primary button
+    if (isCanvasLivePreview || e.button !== 0) return;
+    if (isInteractiveCanvasChildTarget(e.target, e.currentTarget)) return;
+
     e.stopPropagation();
-    setSelectedGroupId(null);
-    setSelectedId(elem.id);
+    setIsPanning(false);
 
     const targetEl = e.currentTarget as HTMLElement;
     try {
       targetEl.setPointerCapture(e.pointerId);
     } catch (_) {}
 
-    preDragElementsRef.current = elementsRef.current;
-    dragRef.current = {
-      isDragging: true,
-      isResizing: false,
-      resizeHandle: null,
+    const canDrag = !isStudioElementReadOnly({
+      elementLocked: elem.locked,
+      isElementGroupLocked: isElementLockedByGroup(elem.id),
+      isStrictModeBLocked,
+    });
+
+    isLiveDragRef.current = false;
+    preDragElementsRef.current = null;
+    pendingElementGestureRef.current = {
+      kind: 'pending_tap',
       elementId: elem.id,
       pointerId: e.pointerId,
       startX: e.clientX,
@@ -1470,13 +1537,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
       origY: elem.y,
       origW: elem.width,
       origH: elem.height,
+      canDrag,
+      resizeHandle: null,
     };
   };
 
   const handleResizePointerDown = (e: React.PointerEvent, elem: StudioElement, handle: string) => {
-    if (isCanvasLivePreview || elem.locked || isElementLockedByGroup(elem.id) || isStrictModeBLocked) return;
-    if (e.button !== 0) return;
+    if (
+      isCanvasLivePreview ||
+      e.button !== 0 ||
+      isStudioElementReadOnly({
+        elementLocked: elem.locked,
+        isElementGroupLocked: isElementLockedByGroup(elem.id),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     e.stopPropagation();
+    setIsPanning(false);
     setSelectedGroupId(null);
     setSelectedId(elem.id);
 
@@ -1486,10 +1565,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
     } catch (_) {}
 
     preDragElementsRef.current = elementsRef.current;
-    dragRef.current = {
-      isDragging: false,
-      isResizing: true,
-      resizeHandle: handle,
+    isLiveDragRef.current = false;
+    pendingElementGestureRef.current = {
+      kind: 'resizing',
       elementId: elem.id,
       pointerId: e.pointerId,
       startX: e.clientX,
@@ -1498,6 +1576,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
       origY: elem.y,
       origW: elem.width,
       origH: elem.height,
+      canDrag: true,
+      resizeHandle: handle,
     };
   };
 
@@ -1578,53 +1658,81 @@ export const StudioView: React.FC<StudioViewProps> = ({
       onUpdateElements(updated);
       groupTransform.lastBounds = target;
       isLiveDragRef.current = true;
+      suppressNextCanvasClickRef.current = true;
       return;
     }
 
-    if (!canvasRef.current || !dragRef.current.elementId) return;
-    if (!dragRef.current.isDragging && !dragRef.current.isResizing) return;
-    if (dragRef.current.pointerId !== null && e.pointerId !== dragRef.current.pointerId) return;
+    const gesture = pendingElementGestureRef.current;
+    if (!canvasRef.current || !gesture || gesture.pointerId !== e.pointerId) return;
+
+    const classification = classifyCanvasElementPointerMove({
+      gesture,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+
+    if (classification.outcome === 'still_pending') {
+      return;
+    }
+
+    if (classification.outcome === 'ignore') {
+      if (gesture.kind === 'pending_tap' && !gesture.canDrag) {
+        gesture.kind = 'cancelled_locked_move';
+      }
+      return;
+    }
 
     e.preventDefault();
     const rect = canvasRef.current.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
 
-    // Accurate calculation relative to canvas screen dimensions
-    // rect.width and rect.height already reflect zoom/scale on the viewport
-    const deltaX = ((e.clientX - dragRef.current.startX) / rect.width) * 100;
-    const deltaY = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
-
-    if (dragRef.current.isDragging) {
-      const newX = Math.round((dragRef.current.origX + deltaX) * 10) / 10;
-      const newY = Math.round((dragRef.current.origY + deltaY) * 10) / 10;
+    if (classification.outcome === 'confirm_drag') {
+      gesture.kind = 'dragging';
+      preDragElementsRef.current = elementsRef.current;
       isLiveDragRef.current = true;
-      updateElementLive(dragRef.current.elementId, { x: newX, y: newY });
-    } else if (dragRef.current.isResizing) {
-      const handle = dragRef.current.resizeHandle || 'bottom-right';
-      let newW = dragRef.current.origW;
-      let newH = dragRef.current.origH;
-      let newX = dragRef.current.origX;
-      let newY = dragRef.current.origY;
+      suppressNextCanvasClickRef.current = true;
+      setSelectedGroupId(null);
+      setSelectedId(gesture.elementId);
+      if (classification.shouldClosePropertiesInspector) {
+        setIsMobilePanelOpen((open) => (activeSidePanel === 'properties' ? false : open));
+      }
+    }
+
+    const deltaX = ((e.clientX - gesture.startX) / rect.width) * 100;
+    const deltaY = ((e.clientY - gesture.startY) / rect.height) * 100;
+
+    if (gesture.kind === 'dragging') {
+      const newX = Math.round((gesture.origX + deltaX) * 10) / 10;
+      const newY = Math.round((gesture.origY + deltaY) * 10) / 10;
+      isLiveDragRef.current = true;
+      updateElementLive(gesture.elementId, { x: newX, y: newY });
+    } else if (gesture.kind === 'resizing') {
+      const handle = gesture.resizeHandle || 'bottom-right';
+      let newW = gesture.origW;
+      let newH = gesture.origH;
+      let newX = gesture.origX;
+      let newY = gesture.origY;
 
       if (handle.includes('right')) {
-        newW = Math.max(5, Math.round((dragRef.current.origW + deltaX) * 10) / 10);
+        newW = Math.max(5, Math.round((gesture.origW + deltaX) * 10) / 10);
       }
       if (handle.includes('bottom')) {
-        newH = Math.max(3, Math.round((dragRef.current.origH + deltaY) * 10) / 10);
+        newH = Math.max(3, Math.round((gesture.origH + deltaY) * 10) / 10);
       }
       if (handle.includes('left')) {
-        const proposedW = Math.max(5, Math.round((dragRef.current.origW - deltaX) * 10) / 10);
-        newX = Math.round((dragRef.current.origX + (dragRef.current.origW - proposedW)) * 10) / 10;
+        const proposedW = Math.max(5, Math.round((gesture.origW - deltaX) * 10) / 10);
+        newX = Math.round((gesture.origX + (gesture.origW - proposedW)) * 10) / 10;
         newW = proposedW;
       }
       if (handle.includes('top')) {
-        const proposedH = Math.max(3, Math.round((dragRef.current.origH - deltaY) * 10) / 10);
-        newY = Math.round((dragRef.current.origY + (dragRef.current.origH - proposedH)) * 10) / 10;
+        const proposedH = Math.max(3, Math.round((gesture.origH - deltaY) * 10) / 10);
+        newY = Math.round((gesture.origY + (gesture.origH - proposedH)) * 10) / 10;
         newH = proposedH;
       }
 
       isLiveDragRef.current = true;
-      updateElementLive(dragRef.current.elementId, { x: newX, y: newY, width: newW, height: newH });
+      suppressNextCanvasClickRef.current = true;
+      updateElementLive(gesture.elementId, { x: newX, y: newY, width: newW, height: newH });
     }
   };
 
@@ -1658,22 +1766,96 @@ export const StudioView: React.FC<StudioViewProps> = ({
       return;
     }
 
-    if (dragRef.current.pointerId !== null && e.pointerId === dragRef.current.pointerId) {
+    const gesture = pendingElementGestureRef.current;
+    if (!gesture || gesture.pointerId !== e.pointerId) return;
+
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+
+    pendingElementGestureRef.current = null;
+    const resolution = resolveCanvasElementPointerUp({
+      gesture,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+
+    if (resolution.outcome === 'open_inspector' && resolution.targetElementId) {
+      isLiveDragRef.current = false;
+      preDragElementsRef.current = null;
+      suppressNextCanvasClickRef.current = false;
+      const targetExists = elementsRef.current.some((item) => item.id === resolution.targetElementId);
+      if (targetExists) {
+        setSelectedGroupId(null);
+        setSelectedId(resolution.targetElementId);
+        setActiveSidePanel('properties');
+        setIsMobilePanelOpen(true);
+      }
+      return;
+    }
+
+    if (resolution.outcome === 'commit_drag_or_resize') {
+      if (isLiveDragRef.current && preDragElementsRef.current) {
+        const savedSnapshot = preDragElementsRef.current;
+        setHistory((prev) => [...prev.slice(-15), savedSnapshot]);
+        setRedoStack([]);
+        suppressNextCanvasClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextCanvasClickRef.current = false;
+        }, 0);
+      }
+      isLiveDragRef.current = false;
+      preDragElementsRef.current = null;
+      return;
+    }
+
+    isLiveDragRef.current = false;
+    preDragElementsRef.current = null;
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    const groupTransform = groupTransformRef.current;
+    if (groupTransform.mode && groupTransform.pointerId !== null && e.pointerId === groupTransform.pointerId) {
       try {
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch (_) {}
-      if (isLiveDragRef.current && preDragElementsRef.current) {
-        const savedSnapshot = preDragElementsRef.current;
-        isLiveDragRef.current = false;
-        preDragElementsRef.current = null;
-        setHistory((prev) => [...prev.slice(-15), savedSnapshot]);
-        setRedoStack([]);
+      if (isLiveDragRef.current) {
+        elementsRef.current = groupTransform.originalElements;
+        onUpdateElements(groupTransform.originalElements);
       }
-      dragRef.current.isDragging = false;
-      dragRef.current.isResizing = false;
-      dragRef.current.elementId = null;
-      dragRef.current.pointerId = null;
+      isLiveDragRef.current = false;
+      preDragElementsRef.current = null;
+      suppressNextCanvasClickRef.current = false;
+      groupTransformRef.current = {
+        mode: null,
+        group: null,
+        pointerId: null,
+        handle: null,
+        startX: 0,
+        startY: 0,
+        startBounds: null,
+        lastBounds: null,
+        originalElements: [],
+      };
+      return;
     }
+
+    const gesture = pendingElementGestureRef.current;
+    if (!gesture || gesture.pointerId !== e.pointerId) return;
+
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+
+    if (isLiveDragRef.current && preDragElementsRef.current) {
+      const restoreSnapshot = preDragElementsRef.current;
+      elementsRef.current = restoreSnapshot;
+      onUpdateElements(restoreSnapshot);
+    }
+    pendingElementGestureRef.current = null;
+    isLiveDragRef.current = false;
+    preDragElementsRef.current = null;
+    suppressNextCanvasClickRef.current = false;
   };
 
   // LOCAL MEDIA IMPORT HANDLERS (PERSISTED TO INDEXEDDB FOR STUDIO & MODE B NATIVE)
@@ -3416,8 +3598,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
           } overscroll-y-contain`}
               onClick={() => {
                 if (isCanvasLivePreview) return;
+                if (suppressNextCanvasClickRef.current) {
+                  suppressNextCanvasClickRef.current = false;
+                  return;
+                }
                 setSelectedId(null);
                 setSelectedGroupId(null);
+                if (
+                  shouldClosePropertiesOnCanvasBackgroundClick({
+                    isCanvasLivePreview,
+                    isMobilePanelOpen,
+                    activeSidePanel,
+                  })
+                ) {
+                  setIsMobilePanelOpen(false);
+                }
               }}
             >
               {/* Safe-Zone Guide Margins for TikTok / Live Stream (hidden during Preview LIVE) */}
@@ -3443,7 +3638,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     onPointerDown={(e) => handleElementPointerDown(e, elem)}
                     onPointerMove={handlePointerMove}
                     onPointerUp={handlePointerUp}
-                    onPointerCancel={handlePointerUp}
+                    onPointerCancel={handlePointerCancel}
+                    onClick={(e) => {
+                      if (!isCanvasLivePreview) e.stopPropagation();
+                    }}
                     style={{
                       position: 'absolute',
                       left: `${elem.x}%`,
@@ -3470,24 +3668,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <>
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-right')}
+                          onClick={(e) => e.stopPropagation()}
                           style={{ touchAction: 'none' }}
                           className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-[var(--app-accent)] border-2 border-white rounded-full cursor-se-resize shadow-md z-30"
                           title="Resize Sudut Kanan-Bawah"
                         />
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-right')}
+                          onClick={(e) => e.stopPropagation()}
                           style={{ touchAction: 'none' }}
                           className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-[var(--app-accent)] border border-white rounded-full cursor-ne-resize shadow-sm z-30"
                           title="Resize Sudut Kanan-Atas"
                         />
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'bottom-left')}
+                          onClick={(e) => e.stopPropagation()}
                           style={{ touchAction: 'none' }}
                           className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-[var(--app-accent)] border border-white rounded-full cursor-sw-resize shadow-sm z-30"
                           title="Resize Sudut Kiri-Bawah"
                         />
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, elem, 'top-left')}
+                          onClick={(e) => e.stopPropagation()}
                           style={{ touchAction: 'none' }}
                           className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-[var(--app-accent)] border border-white rounded-full cursor-nw-resize shadow-sm z-30"
                           title="Resize Sudut Kiri-Atas"
@@ -3519,7 +3721,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     onPointerDown={(e) => handleGroupPointerDown(e, selectedGroup, 'move')}
                     onPointerMove={handlePointerMove}
                     onPointerUp={handlePointerUp}
-                    onPointerCancel={handlePointerUp}
+                    onPointerCancel={handlePointerCancel}
                     onClick={(e) => e.stopPropagation()}
                     style={{ pointerEvents: 'auto', touchAction: 'none' }}
                     className="absolute -top-6 left-0 px-2 py-1 rounded-t-md bg-[var(--app-accent)] text-[var(--app-accent-ink)] text-[9px] font-bold whitespace-nowrap cursor-move select-none"
@@ -3536,7 +3738,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           onPointerDown={(e) => handleGroupPointerDown(e, selectedGroup, 'resize', handle)}
                           onPointerMove={handlePointerMove}
                           onPointerUp={handlePointerUp}
-                          onPointerCancel={handlePointerUp}
+                          onPointerCancel={handlePointerCancel}
                           onClick={(e) => e.stopPropagation()}
                           style={{ pointerEvents: 'auto', touchAction: 'none' }}
                           className={`absolute w-3.5 h-3.5 bg-[var(--app-accent)] border-2 border-white rounded-full shadow-md ${
@@ -4021,21 +4223,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
       </div>
       )}
 
-      {/* Overlay Backdrop */}
+      {/* Overlay Backdrop (hidden on landscape/desktop when contextual Properties Inspector is active so Canvas remains directly interactive) */}
       {!isCanvasLivePreview && isMobilePanelOpen && (
         <div
           aria-hidden="true"
           onClick={() => setIsMobilePanelOpen(false)}
-          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px]"
+          className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px] ${
+            activeSidePanel === 'properties' ? 'landscape:hidden md:hidden' : ''
+          }`}
         />
       )}
 
-      {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL (Bottom Sheet on Portrait, Right Drawer on Landscape / md+) */}
+      {/* SECTION 2-6: CONSOLIDATED STUDIO TOOL PANEL (Bottom Sheet on Portrait, Left Contextual Drawer for Properties / Right Drawer for Other Tabs on Landscape & md+) */}
       <div
         ref={sidePanelRef}
         className={`${
           !isCanvasLivePreview && isMobilePanelOpen
-            ? 'fixed inset-x-0 bottom-0 pb-safe z-50 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[74dvh] landscape:inset-y-0 landscape:right-0 landscape:left-auto landscape:w-[360px] landscape:sm:w-[400px] landscape:max-w-[88vw] landscape:max-h-full landscape:rounded-none landscape:rounded-l-2xl landscape:border-t-0 landscape:border-l md:inset-y-0 md:right-0 md:left-auto md:w-[400px] md:max-w-[88vw] md:max-h-full md:rounded-none md:rounded-l-2xl md:border-t-0 md:border-l flex flex-col overflow-hidden anim-sheet-up'
+            ? activeSidePanel === 'properties'
+              ? 'fixed inset-x-0 bottom-0 pb-safe z-50 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[74dvh] landscape:inset-y-0 landscape:left-0 landscape:right-auto landscape:w-[340px] landscape:sm:w-[360px] landscape:max-w-[42vw] landscape:max-h-full landscape:rounded-none landscape:rounded-r-2xl landscape:border-t-0 landscape:border-l-0 landscape:border-r md:inset-y-0 md:left-0 md:right-auto md:w-[360px] md:max-w-[42vw] md:max-h-full md:rounded-none md:rounded-r-2xl md:border-t-0 md:border-l-0 md:border-r flex flex-col overflow-hidden anim-sheet-up'
+              : 'fixed inset-x-0 bottom-0 pb-safe z-50 rounded-t-3xl border-t border-x border-[var(--app-accent-border)] bg-[var(--app-surface-elevated)] shadow-2xl max-h-[74dvh] landscape:inset-y-0 landscape:right-0 landscape:left-auto landscape:w-[360px] landscape:sm:w-[400px] landscape:max-w-[88vw] landscape:max-h-full landscape:rounded-none landscape:rounded-l-2xl landscape:border-t-0 landscape:border-l md:inset-y-0 md:right-0 md:left-auto md:w-[400px] md:max-w-[88vw] md:max-h-full md:rounded-none md:rounded-l-2xl md:border-t-0 md:border-l flex flex-col overflow-hidden anim-sheet-up'
             : 'hidden'
         }`}
       >
@@ -4208,7 +4414,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <button
                         type="button"
                         onClick={() => updateElementField(selectedElement.id, 'locked', !selectedElement.locked)}
-                        disabled={!canMutateSelectedElement}
+                        disabled={!canToggleSelectedElementLock}
                         className={`btn-press min-h-[44px] min-w-[44px] rounded-xl border text-xs flex items-center justify-center transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
                           selectedElement.locked || isSelectedElementGroupLocked
                             ? 'bg-[var(--app-warn-soft)] border-amber-500/35 text-[var(--app-warn)]'
@@ -4239,8 +4445,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     </div>
                   </div>
 
+                  {isSelectedElementReadOnly && (
+                    <div className="my-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 flex items-center gap-2">
+                      <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        {isStrictModeBLocked
+                          ? 'Mode B sedang sibuk — mode baca-saja sementara.'
+                          : isSelectedElementGroupLocked
+                            ? 'Elemen berada di grup terkunci (mode baca-saja).'
+                            : 'Elemen terkunci (baca-saja). Ketuk ikon gembok di atas untuk membuka edit.'}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Contextual Form Body strictly tailored to Selected Type */}
-                  <div className="divide-y divide-[var(--app-border)] lg:max-h-[500px] lg:overflow-y-auto lg:pr-1">
+                  <fieldset
+                    disabled={isSelectedElementReadOnly}
+                    className={`min-w-0 w-full border-0 p-0 m-0 divide-y divide-[var(--app-border)] lg:max-h-[500px] lg:overflow-y-auto lg:pr-1 ${
+                      isSelectedElementReadOnly ? 'opacity-70' : ''
+                    }`}
+                  >
                     {/* Camera */}
                     {selectedElement.type === 'camera' && (
                       <div className="py-4 space-y-3">
@@ -5875,7 +6099,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </fieldset>
                 </>
               ) : (
                 <div className="py-12 px-4 text-center space-y-2">

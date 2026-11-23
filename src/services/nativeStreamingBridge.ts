@@ -66,6 +66,7 @@ export interface NativeModeBLiveEvent {
   id: string;
   type: string;
   username: string;
+  userAvatar?: string;
   detail: string;
   amount?: number;
   viewerCount?: number;
@@ -671,12 +672,144 @@ export async function prepareModeBOverlayAssets(
   }
 }
 
+const MAX_NATIVE_AVATAR_URL_LENGTH = 300;
+
+function isPrivateOrLocalIpv4Tuple(a: number, b: number, c: number): boolean {
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  if (a === 203 && b === 0 && c === 113) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+
+function parseIpv6Hextets(cleanIp: string): number[] | null {
+  let addr = cleanIp;
+  const zoneIdx = addr.indexOf('%');
+  if (zoneIdx >= 0) {
+    addr = addr.slice(0, zoneIdx);
+  }
+  const doubleColonParts = addr.split('::');
+  if (doubleColonParts.length > 2) return null;
+
+  const parseSegment = (segment: string): number[] | null => {
+    if (!segment) return [];
+    const tokens = segment.split(':');
+    const out: number[] = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      const token = tokens[i];
+      if (!token) return null;
+      if (token.includes('.')) {
+        if (i !== tokens.length - 1) return null;
+        const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(token);
+        if (!ipv4) return null;
+        const octets = [Number(ipv4[1]), Number(ipv4[2]), Number(ipv4[3]), Number(ipv4[4])];
+        if (octets.some((o) => o < 0 || o > 255)) return null;
+        out.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+      } else {
+        if (!/^[0-9a-f]{1,4}$/i.test(token)) return null;
+        out.push(parseInt(token, 16));
+      }
+    }
+    return out;
+  };
+
+  if (doubleColonParts.length === 1) {
+    const groups = parseSegment(addr);
+    return groups && groups.length === 8 ? groups : null;
+  }
+
+  const left = parseSegment(doubleColonParts[0]);
+  const right = parseSegment(doubleColonParts[1]);
+  if (!left || !right) return null;
+  const missing = 8 - (left.length + right.length);
+  if (missing < 1) return null;
+  return [...left, ...new Array<number>(missing).fill(0), ...right];
+}
+
+function isPrivateOrLocalHostname(hostname: string): boolean {
+  let lower = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  while (lower.endsWith('.')) {
+    lower = lower.slice(0, -1);
+  }
+  if (
+    !lower ||
+    lower === 'localhost' ||
+    lower.endsWith('.localhost') ||
+    lower.endsWith('.local') ||
+    lower.endsWith('.internal') ||
+    lower.endsWith('.arpa') ||
+    lower.endsWith('.home') ||
+    lower.endsWith('.lan')
+  ) {
+    return true;
+  }
+
+  if (lower.includes(':')) {
+    const hextets = parseIpv6Hextets(lower);
+    if (!hextets) return true;
+    const isAllZeroPrefix = (count: number) => hextets.slice(0, count).every((h) => h === 0);
+    // Unspecified (::) or Loopback (::1)
+    if (isAllZeroPrefix(7) && (hextets[7] === 0 || hextets[7] === 1)) return true;
+    // Multicast ff00::/8, Link-local fe80::/10, ULA fc00::/7
+    const h0 = hextets[0];
+    if ((h0 & 0xff00) === 0xff00) return true;
+    if ((h0 & 0xffc0) === 0xfe80) return true;
+    if ((h0 & 0xfe00) === 0xfc00) return true;
+    // NAT64 64:ff9b::/96, Documentation 2001:db8::/32, Teredo 2001::/32
+    if (h0 === 0x0064 && hextets[1] === 0xff9b && hextets[2] === 0 && hextets[3] === 0) return true;
+    if (h0 === 0x2001 && (hextets[1] === 0x0db8 || hextets[1] === 0x0000)) return true;
+    // 6to4 2002::/16 embedded IPv4
+    if (h0 === 0x2002) {
+      return isPrivateOrLocalIpv4Tuple((hextets[1] >> 8) & 0xff, hextets[1] & 0xff, (hextets[2] >> 8) & 0xff);
+    }
+    // IPv4-mapped ::ffff:0:0/96 or IPv4-compatible ::/96
+    if (isAllZeroPrefix(5) && (hextets[5] === 0xffff || hextets[5] === 0)) {
+      const a = (hextets[6] >> 8) & 0xff;
+      const b = hextets[6] & 0xff;
+      const c = (hextets[7] >> 8) & 0xff;
+      return isPrivateOrLocalIpv4Tuple(a, b, c);
+    }
+    return false;
+  }
+
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(lower);
+  if (ipv4Match) {
+    return isPrivateOrLocalIpv4Tuple(Number(ipv4Match[1]), Number(ipv4Match[2]), Number(ipv4Match[3]));
+  }
+  return false;
+}
+
+/** Validates external avatar URLs for Mode B native delivery (HTTPS only, max 300 chars). */
+export function sanitizeNativeAvatarUrl(rawUrl: unknown): string | undefined {
+  if (typeof rawUrl !== 'string') return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.length > MAX_NATIVE_AVATAR_URL_LENGTH) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:') return undefined;
+    if (parsed.username || parsed.password) return undefined;
+    if (parsed.port && parsed.port !== '443') return undefined;
+    if (isPrivateOrLocalHostname(parsed.hostname)) return undefined;
+    const normalized = parsed.toString();
+    return normalized.length <= MAX_NATIVE_AVATAR_URL_LENGTH ? normalized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildNativeLiveEventPayload(event: StreamEvent): NativeModeBLiveEvent | null {
   if (!event || event.isSimulation) return null;
+  const safeAvatar = sanitizeNativeAvatarUrl(event.userAvatar);
   const payload: NativeModeBLiveEvent = {
     id: String(event.id || '').slice(0, 120),
     type: String(event.type || 'custom').slice(0, 40),
     username: String(event.username || '').slice(0, 80),
+    ...(safeAvatar ? { userAvatar: safeAvatar } : {}),
     detail: String(event.detail || '').slice(0, 500),
     timestamp: Number.isFinite(event.timestamp) ? event.timestamp : Date.now(),
   };
@@ -709,7 +842,7 @@ function buildNativeLiveEventPayload(event: StreamEvent): NativeModeBLiveEvent |
   return payload;
 }
 
-/** Explicit wrapper for `NativeStreaming.pushOverlayEvent` with payload size enforcement. */
+/** Explicit wrapper for `NativeStreaming.pushOverlayEvent` with payload size and URL sanitization enforcement. */
 export async function pushModeBOverlayEvent(
   payload: NativeModeBLiveEvent,
 ): Promise<{ accepted: boolean; message?: string }> {
@@ -719,11 +852,18 @@ export async function pushModeBOverlayEvent(
   if (!payload || typeof payload !== 'object') {
     return { accepted: false, message: 'Data event overlay tidak valid.' };
   }
-  if (JSON.stringify(payload).length > MAX_MODE_B_EVENT_JSON_LENGTH) {
+  const safeAvatar = sanitizeNativeAvatarUrl(payload.userAvatar);
+  const sanitizedPayload: NativeModeBLiveEvent = { ...payload };
+  if (safeAvatar) {
+    sanitizedPayload.userAvatar = safeAvatar;
+  } else {
+    delete sanitizedPayload.userAvatar;
+  }
+  if (JSON.stringify(sanitizedPayload).length > MAX_MODE_B_EVENT_JSON_LENGTH) {
     return { accepted: false, message: 'Data event terlalu besar untuk overlay siaran.' };
   }
   try {
-    const result = await getNativeStreamingPlugin().pushOverlayEvent(payload);
+    const result = await getNativeStreamingPlugin().pushOverlayEvent(sanitizedPayload);
     return { accepted: result?.accepted === true };
   } catch (error) {
     return {

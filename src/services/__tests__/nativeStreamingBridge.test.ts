@@ -16,6 +16,7 @@ import {
   pushModeBOverlayEvent,
   replaceModeBLiveOverlayScene,
   requestModeBScreenReshare,
+  sanitizeNativeAvatarUrl,
   setModeBHostWait,
   startModeBStream,
   stopModeBStream,
@@ -244,6 +245,36 @@ async function runTests(): Promise<void> {
   assertEqual(dynamicSnapshot[2].properties.textColor, '#FFFFFF', 'username textColor forwarded');
   assertEqual(dynamicSnapshot[2].properties.backgroundColor, '#111827', 'username backgroundColor forwarded');
   assertEqual(dynamicSnapshot[2].properties['avatarUrl'], undefined, 'username rejects arbitrary avatarUrl');
+
+  // A1.3: avatar Mode B native snapshot allowlist & exclusion of arbitrary URL props
+  const avatarSnapshot = createModeBOverlaySnapshot([
+    {
+      id: 'avatar_1',
+      name: 'Avatar Penonton',
+      type: 'avatar',
+      x: 8,
+      y: 10,
+      width: 16,
+      height: 16,
+      layer: 4,
+      visible: true,
+      opacity: 100,
+      rotation: 0,
+      properties: {
+        shape: 'rounded',
+        borderGlow: false,
+        userAvatar: 'https://evil.example/a.png',
+        avatarUrl: 'https://evil.example/b.png',
+        imageUrl: 'https://evil.example/c.png',
+      },
+    },
+  ]);
+  assertEqual(avatarSnapshot.length, 1, 'avatar element included in Mode B native snapshot');
+  assertEqual(avatarSnapshot[0].properties.shape, 'rounded', 'avatar shape forwarded to native snapshot');
+  assertEqual(avatarSnapshot[0].properties.borderGlow, false, 'avatar borderGlow forwarded to native snapshot');
+  assertEqual(avatarSnapshot[0].properties['userAvatar'], undefined, 'avatar element rejects arbitrary userAvatar prop');
+  assertEqual(avatarSnapshot[0].properties['avatarUrl'], undefined, 'avatar element rejects arbitrary avatarUrl prop');
+  assertEqual(avatarSnapshot[0].properties['imageUrl'], undefined, 'avatar element rejects arbitrary imageUrl prop');
 
   const manyElements = Array.from({ length: 60 }, (_, index) => ({
     ...element,
@@ -567,6 +598,71 @@ async function runTests(): Promise<void> {
   await subB?.remove();
   assertEqual(mock.getHandleRemovedCount(), 1, 'native handle removed once all subscribers unsubscribe');
   assertEqual(mock.getListenerCount(), 0, 'no leaked native listeners remain');
+
+  // 7. A1.3 LiveEvent userAvatar sanitization & forwarding
+  assertEqual(
+    sanitizeNativeAvatarUrl('  https://p16-sign.tiktokcdn.com/u/avatar.jpg  '),
+    'https://p16-sign.tiktokcdn.com/u/avatar.jpg',
+    'valid public HTTPS userAvatar preserved & trimmed',
+  );
+  for (const unsafeUrl of [
+    'http://cdn.example.com/a.png',
+    'file:///sdcard/a.png',
+    'content://media/external/images/1',
+    'blob:https://example.com/123',
+    'data:image/png;base64,AAAA',
+    'https://user:pass@cdn.example.com/a.png',
+    'https://cdn.example.com:8443/a.png',
+    'https://localhost/a.png',
+    'https://device.local/a.png',
+    'https://meta.internal/a.png',
+    'https://127.0.0.1/a.png',
+    'https://10.0.0.2/a.png',
+    'https://172.16.0.5/a.png',
+    'https://192.168.1.10/a.png',
+    'https://169.254.169.254/latest/meta-data',
+    'https://100.64.0.1/a.png',
+    'https://[::1]/a.png',
+    'https://[fe80::1]/a.png',
+    'https://[::ffff:127.0.0.1]/a.png',
+    'https://[::ffff:7f00:1]/a.png',
+    'https://[::ffff:10.0.0.1]/a.png',
+    'https://[64:ff9b::127.0.0.1]/a.png',
+    `https://cdn.example.com/${'a'.repeat(300)}`,
+  ]) {
+    assertEqual(sanitizeNativeAvatarUrl(unsafeUrl), undefined, `unsafe userAvatar rejected: ${unsafeUrl}`);
+  }
+
+  __setNativeStreamingBridgeTestAdapter({ plugin: mock.plugin, isNativeAvailable: true });
+  mock.calls.length = 0;
+  await pushModeBOverlayEvent({
+    id: 'avatar_valid_1',
+    type: 'chat',
+    username: 'nadia',
+    detail: 'halo',
+    userAvatar: 'https://p16-sign.tiktokcdn.com/avatar.webp',
+    timestamp: 4000,
+  });
+  await pushModeBOverlayEvent({
+    id: 'avatar_unsafe_2',
+    type: 'chat',
+    username: 'budi',
+    detail: 'test',
+    userAvatar: 'http://127.0.0.1/bad.png',
+    timestamp: 4001,
+  });
+  const pushCalls = mock.calls.filter((c) => c.method === 'pushOverlayEvent');
+  assertEqual(pushCalls.length, 2, 'both real events forwarded to native overlay');
+  assertEqual(
+    (pushCalls[0].args as { userAvatar?: string }).userAvatar,
+    'https://p16-sign.tiktokcdn.com/avatar.webp',
+    'validated HTTPS userAvatar included in pushOverlayEvent payload',
+  );
+  assertEqual(
+    (pushCalls[1].args as { userAvatar?: string }).userAvatar,
+    undefined,
+    'unsafe HTTP/private userAvatar stripped cleanly while retaining chat event',
+  );
 
   await __resetNativeStreamingBridgeForTests();
   const browserFallbackStatus = await getModeBStreamStatus();

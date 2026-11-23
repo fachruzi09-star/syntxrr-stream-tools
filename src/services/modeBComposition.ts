@@ -53,7 +53,7 @@ const NATIVE_OVERLAY_PROPERTY_KEYS = [
   'durationSec', 'countType', 'prefix', 'suffix', 'badge', 'showBadges', 'title', 'maxItems', 'speed',
   'alertTitle', 'accentColor', 'badgeColor', 'comboLabel', 'giftName', 'targetGoal',
   'targetAmount', 'target', 'currency', 'barColor', 'imageAssetId', 'imageFit', 'objectFit',
-  'videoAssetId', 'videoFit', 'loop', 'facingMode', 'cameraFit', 'mirror',
+  'videoAssetId', 'videoFit', 'loop', 'facingMode', 'cameraFit', 'mirror', 'borderGlow',
 ] as const;
 
 /**

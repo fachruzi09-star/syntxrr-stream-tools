@@ -42,12 +42,18 @@ public final class ModeBDynamicOverlayResolver {
         public final String id;
         public final String type;
         public final String username;
+        public final String userAvatar;
         public final long timestamp;
 
         public AudienceEventRecord(String id, String type, String username, long timestamp) {
+            this(id, type, username, null, timestamp);
+        }
+
+        public AudienceEventRecord(String id, String type, String username, String userAvatar, long timestamp) {
             this.id = id == null ? "" : id;
             this.type = type == null ? "" : type.trim().toLowerCase(Locale.ROOT);
             this.username = username == null ? "" : username;
+            this.userAvatar = trimToNull(userAvatar);
             this.timestamp = timestamp;
         }
     }
@@ -110,6 +116,27 @@ public final class ModeBDynamicOverlayResolver {
             this.username = username;
             this.prefix = prefix;
             this.badge = badge;
+            this.eventType = eventType;
+        }
+    }
+
+    public static final class AvatarResolution {
+        public final boolean hasEvent;
+        public final String avatarUrl;
+        public final String username;
+        public final String initial;
+        public final String shape;
+        public final boolean borderGlow;
+        public final String eventType;
+
+        public AvatarResolution(boolean hasEvent, String avatarUrl, String username, String initial,
+                String shape, boolean borderGlow, String eventType) {
+            this.hasEvent = hasEvent;
+            this.avatarUrl = avatarUrl;
+            this.username = username;
+            this.initial = initial;
+            this.shape = shape;
+            this.borderGlow = borderGlow;
             this.eventType = eventType;
         }
     }
@@ -367,6 +394,17 @@ public final class ModeBDynamicOverlayResolver {
         return new DynamicTextResolution(finalClean, false);
     }
 
+    private static AudienceEventRecord resolveLatestAudienceEvent(List<AudienceEventRecord> events) {
+        if (events == null || events.isEmpty()) return null;
+        for (AudienceEventRecord event : events) {
+            if (event == null || !isAudienceUserEventType(event.type)) continue;
+            if (trimToNull(event.username) != null) {
+                return event;
+            }
+        }
+        return null;
+    }
+
     /**
      * Mirrors resolveActiveUsernameModel() in studioElementRenderModel.ts.
      */
@@ -377,16 +415,7 @@ public final class ModeBDynamicOverlayResolver {
         String prefix = prefixRaw == null ? "" : prefixRaw;
         String badge = trimToNull(badgeRaw);
 
-        AudienceEventRecord latest = null;
-        if (events != null) {
-            for (AudienceEventRecord event : events) {
-                if (event == null || !isAudienceUserEventType(event.type)) continue;
-                if (trimToNull(event.username) != null) {
-                    latest = event;
-                    break;
-                }
-            }
-        }
+        AudienceEventRecord latest = resolveLatestAudienceEvent(events);
 
         if (latest == null) {
             return new UsernameResolution(
@@ -405,6 +434,56 @@ public final class ModeBDynamicOverlayResolver {
                 cleanUsername,
                 prefix,
                 badge,
+                latest.type);
+    }
+
+    /**
+     * Extracts uppercase initial for avatar fallback, stripping leading '@' prefixes.
+     * Returns "?" if no usable character remains.
+     */
+    public static String extractUsernameInitial(String username) {
+        String clean = trimToNull(username);
+        if (clean == null) return "?";
+        int idx = 0;
+        while (idx < clean.length() && clean.charAt(idx) == '@') {
+            idx++;
+        }
+        if (idx >= clean.length()) return "?";
+        String first = clean.substring(idx, idx + 1).toUpperCase(Locale.ROOT);
+        return first.trim().isEmpty() ? "?" : first;
+    }
+
+    /**
+     * Mirrors resolveDynamicAvatarModel() in studioElementRenderModel.ts.
+     * Strictly resolves avatarUrl from the SAME latest valid audience event as username.
+     * Never falls back to an older event's avatar when the latest event lacks a valid HTTPS avatar.
+     */
+    public static AvatarResolution resolveDynamicAvatar(
+            List<AudienceEventRecord> events,
+            String shapeRaw,
+            Boolean borderGlowProp) {
+        String normalizedShape = shapeRaw == null ? "" : shapeRaw.trim().toLowerCase(Locale.ROOT);
+        String shape = ("square".equals(normalizedShape) || "rounded".equals(normalizedShape))
+                ? normalizedShape
+                : "circle";
+        boolean borderGlow = borderGlowProp == null || borderGlowProp.booleanValue();
+
+        AudienceEventRecord latest = resolveLatestAudienceEvent(events);
+        if (latest == null) {
+            return new AvatarResolution(false, null, null, null, shape, borderGlow, null);
+        }
+
+        String cleanUsername = latest.username.trim();
+        String initial = extractUsernameInitial(cleanUsername);
+        String safeAvatarUrl = ModeBAvatarPolicy.validateAvatarUrl(latest.userAvatar);
+
+        return new AvatarResolution(
+                true,
+                safeAvatarUrl,
+                cleanUsername,
+                initial,
+                shape,
+                borderGlow,
                 latest.type);
     }
 

@@ -15,6 +15,17 @@ import {
   resolveStickerVisualModel,
   validateSafeBrowserEmbedUrl,
 } from '../studioElementRenderModel';
+import {
+  STUDIO_TAP_MOVE_THRESHOLD_PX,
+  canMutateStudioElementField,
+  classifyCanvasElementPointerMove,
+  hasExceededTapThreshold,
+  isInteractiveCanvasChildTarget,
+  isStudioElementReadOnly,
+  resolveCanvasElementPointerUp,
+  shouldClosePropertiesOnCanvasBackgroundClick,
+  type PendingCanvasElementGesture,
+} from '../studioCanvasGesture';
 
 let assertionCount = 0;
 
@@ -388,6 +399,162 @@ function runStudioInspectorControlsTests(): void {
   assert(
     avatarSection.includes('!(selectedElement.properties.borderGlow !== false)'),
     'avatar inspector toggles boolean borderGlow properly with !== false default',
+  );
+
+  // 12. A1.3 Canvas Tap-to-Inspect gesture separation & behavioral policies
+  assertEqual(STUDIO_TAP_MOVE_THRESHOLD_PX, 8, 'Canvas tap threshold is strictly 8px');
+  assertEqual(hasExceededTapThreshold(100, 100, 100, 100), false, '0px move stays within tap threshold');
+  assertEqual(hasExceededTapThreshold(100, 100, 104.8, 106.4), false, 'exact 8px diagonal stays tap');
+  assertEqual(hasExceededTapThreshold(100, 100, 106, 106.1), true, '>8px move crosses drag threshold');
+
+  const unlockedTapGesture: PendingCanvasElementGesture = {
+    kind: 'pending_tap',
+    elementId: 'elem_1',
+    pointerId: 1,
+    startX: 100,
+    startY: 120,
+    origX: 10,
+    origY: 20,
+    origW: 30,
+    origH: 15,
+    canDrag: true,
+    resizeHandle: null,
+  };
+  assertEqual(
+    classifyCanvasElementPointerMove({ gesture: unlockedTapGesture, clientX: 103, clientY: 124 }).outcome,
+    'still_pending',
+    'small jitter <= 8px keeps pending tap',
+  );
+  assertEqual(
+    resolveCanvasElementPointerUp({ gesture: unlockedTapGesture, clientX: 103, clientY: 124 }).outcome,
+    'open_inspector',
+    'tap release within 8px opens Inspector',
+  );
+
+  const dragTrigger = classifyCanvasElementPointerMove({
+    gesture: unlockedTapGesture,
+    clientX: 112,
+    clientY: 120,
+  });
+  assertEqual(dragTrigger.outcome, 'confirm_drag', '>8px move confirms drag');
+  assertEqual(dragTrigger.shouldClosePropertiesInspector, true, 'confirming drag requests closing open Properties panel');
+  const confirmedDragGesture: PendingCanvasElementGesture = { ...unlockedTapGesture, kind: 'dragging' };
+  assertEqual(
+    resolveCanvasElementPointerUp({ gesture: confirmedDragGesture, clientX: 112, clientY: 120 }).outcome,
+    'commit_drag_or_resize',
+    'drag release commits drag without opening Inspector',
+  );
+
+  const resizeGesture: PendingCanvasElementGesture = {
+    ...unlockedTapGesture,
+    kind: 'resizing',
+    resizeHandle: 'bottom-right',
+  };
+  assertEqual(
+    resolveCanvasElementPointerUp({ gesture: resizeGesture, clientX: 100, clientY: 120 }).outcome,
+    'commit_drag_or_resize',
+    'resize gesture never triggers tap-to-inspect',
+  );
+
+  const lockedTapGesture: PendingCanvasElementGesture = { ...unlockedTapGesture, canDrag: false };
+  assertEqual(
+    resolveCanvasElementPointerUp({ gesture: lockedTapGesture, clientX: 102, clientY: 122 }).outcome,
+    'open_inspector',
+    'locked element tap within 8px opens read-only Inspector',
+  );
+  assertEqual(
+    classifyCanvasElementPointerMove({ gesture: lockedTapGesture, clientX: 120, clientY: 120 }).outcome,
+    'ignore',
+    'locked element move > 8px never starts drag',
+  );
+  assertEqual(
+    resolveCanvasElementPointerUp({
+      gesture: { ...lockedTapGesture, kind: 'cancelled_locked_move' },
+      clientX: 100,
+      clientY: 120,
+    }).outcome,
+    'noop',
+    'locked element moved >8px and dragged back never fires accidental tap on release',
+  );
+
+  const containerNode = { tagName: 'DIV' };
+  const buttonInside = { tagName: 'BUTTON', parentElement: containerNode };
+  const spanInsideButton = { tagName: 'SPAN', parentElement: buttonInside };
+  const plainSpan = { tagName: 'SPAN', parentElement: containerNode };
+  const roleButtonDiv = {
+    tagName: 'DIV',
+    getAttribute: (name: string) => (name === 'role' ? 'button' : null),
+    parentElement: containerNode,
+  };
+  assertEqual(
+    isInteractiveCanvasChildTarget(spanInsideButton, containerNode),
+    true,
+    'nested child inside <button> is treated as interactive control',
+  );
+  assertEqual(
+    isInteractiveCanvasChildTarget(roleButtonDiv, containerNode),
+    true,
+    'role="button" child is treated as interactive control',
+  );
+  assertEqual(
+    isInteractiveCanvasChildTarget(plainSpan, containerNode),
+    false,
+    'ordinary display span triggers canvas tap/drag normally',
+  );
+
+  assertEqual(isStudioElementReadOnly({ elementLocked: true }), true, 'locked element sets Inspector read-only');
+  assertEqual(
+    canMutateStudioElementField({ elementLocked: true, field: 'x' }),
+    false,
+    'locked element blocks geometry/property field mutation',
+  );
+  assertEqual(
+    canMutateStudioElementField({ elementLocked: true, field: 'locked' }),
+    true,
+    'locked element allows toggling unlock from Inspector header when group/ModeB allow',
+  );
+  assertEqual(
+    canMutateStudioElementField({ elementLocked: true, isElementGroupLocked: true, field: 'locked' }),
+    false,
+    'group-locked element blocks unlock toggle',
+  );
+  assertEqual(
+    shouldClosePropertiesOnCanvasBackgroundClick({
+      isCanvasLivePreview: false,
+      isMobilePanelOpen: true,
+      activeSidePanel: 'properties',
+    }),
+    true,
+    'canvas background click closes open contextual Properties panel',
+  );
+
+  // StudioView integration contracts for Tap-to-Inspect, bubbling guard, cancel, cleanup, & left contextual panel
+  assert(
+    studioSource.includes('if (!isCanvasLivePreview) e.stopPropagation();'),
+    'StudioView stops click bubbling on element wrappers during editing',
+  );
+  assert(
+    studioSource.includes('onPointerCancel={handlePointerCancel}') &&
+      studioSource.includes('const handlePointerCancel ='),
+    'StudioView wires dedicated handlePointerCancel without faking undo/tap',
+  );
+  assert(
+    studioSource.includes('<fieldset') && studioSource.includes('disabled={isSelectedElementReadOnly}'),
+    'StudioView wraps Inspector form body in fieldset disabled={isSelectedElementReadOnly}',
+  );
+  assert(
+    studioSource.includes('disabled={!canToggleSelectedElementLock}'),
+    'StudioView keeps Inspector header Lock/Unlock button interactive for element-locked elements',
+  );
+  assert(
+    studioSource.includes("activeSidePanel === 'properties' ? 'landscape:hidden md:hidden' : ''") &&
+      studioSource.includes('landscape:left-0 landscape:right-auto') &&
+      studioSource.includes('md:left-0 md:right-auto'),
+    'StudioView positions contextual Properties Inspector on the left in landscape/desktop without blocking backdrop',
+  );
+  assert(
+    studioSource.includes("setIsMobilePanelOpen((open) => (activeSidePanel === 'properties' ? false : open))"),
+    'StudioView closes contextual Properties panel on element deletion or stale selection removal',
   );
 
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
