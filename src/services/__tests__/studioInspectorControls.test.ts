@@ -557,6 +557,81 @@ function runStudioInspectorControlsTests(): void {
     'StudioView closes contextual Properties panel on element deletion or stale selection removal',
   );
 
+  // 13. A2.0 Inspector Focus Mode: hide Main Module Tabs while inspecting selected element
+  const moduleTabsSection = extractBetween(
+    studioSource,
+    '{/* Main Module Tabs */}',
+    '{/* TAB 1: CONTEXTUAL PROPERTIES PANEL */}',
+    'Main Module Tabs section',
+  );
+  assert(
+    moduleTabsSection.includes("!(activeSidePanel === 'properties' && selectedElement)"),
+    'Main Module Tabs use conditional rendering !(activeSidePanel === properties && selectedElement)',
+  );
+
+  const shouldRenderModuleTabs = (panel: string, hasSelectedElement: boolean): boolean =>
+    !(panel === 'properties' && hasSelectedElement);
+  assertEqual(
+    shouldRenderModuleTabs('properties', true),
+    false,
+    'Module tabs are unmounted when activeSidePanel is properties with selectedElement',
+  );
+  assertEqual(
+    shouldRenderModuleTabs('properties', false),
+    true,
+    'Module tabs stay visible when activeSidePanel is properties without selectedElement',
+  );
+  for (const nonInspectorPanel of ['elements', 'sources', 'presets', 'media', 'layers', 'simulator', 'marketplace']) {
+    assertEqual(
+      shouldRenderModuleTabs(nonInspectorPanel, true),
+      true,
+      `Module tabs stay visible when activeSidePanel is '${nonInspectorPanel}' even with selectedElement`,
+    );
+  }
+
+  for (const tabExpectation of [
+    { key: 'properties', label: 'Properti' },
+    { key: 'elements', label: 'Elemen' },
+    { key: 'sources', label: 'Sumber' },
+    { key: 'presets', label: 'Preset' },
+    { key: 'media', label: 'Media' },
+    { key: 'layers', label: 'Lapisan' },
+    { key: 'simulator', label: 'Uji Live' },
+    { key: 'marketplace', label: 'Marketplace' },
+  ]) {
+    assert(
+      moduleTabsSection.includes(`setActiveSidePanel('${tabExpectation.key}')`) &&
+        moduleTabsSection.includes(`<span>${tabExpectation.label}</span>`),
+      `Main Module Tabs keep '${tabExpectation.label}' tab wired to setActiveSidePanel('${tabExpectation.key}')`,
+    );
+  }
+
+  // Quick Canvas toolbar, preset access, close button, and Inspector title stay intact
+  const quickDockSection = extractBetween(
+    studioSource,
+    '{/* COMPACT FLOATING BOTTOM-LEFT WORKSPACE DOCK',
+    '{/* Overlay Backdrop',
+    'Canvas quick toolbar dock',
+  );
+  assert(
+    quickDockSection.includes("openStudioPanel('elements')") &&
+      quickDockSection.includes("openStudioPanel('marketplace')") &&
+      quickDockSection.includes("openStudioPanel('layers')") &&
+      quickDockSection.includes('aria-label="Buka panel alat Studio"') &&
+      quickDockSection.includes('>Alat</span>'),
+    'Canvas quick dock preserves Elemen, Marketplace, Lapisan, and Alat shortcuts',
+  );
+  assert(
+    studioSource.includes("openStudioPanel('presets')") &&
+      studioSource.includes('onClick={handleOpenPresetSelector}'),
+    'Preset panel and preset manager remain reachable outside Inspector module tabs',
+  );
+  assert(
+    studioSource.includes('`Properti: ${selectedElement.name}`') &&
+      studioSource.includes('aria-label="Tutup panel Studio"'),
+    'Inspector header preserves selected element title and close panel button',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

@@ -4278,107 +4278,109 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
 
           {/* Main Module Tabs */}
-          <div
-            className="flex overflow-x-auto no-scrollbar gap-1 p-1.5 bg-[var(--app-surface-muted)]/70 border-b border-[var(--app-border)] text-[11px] font-semibold select-none shrink-0"
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('properties')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'properties'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
+          {!(activeSidePanel === 'properties' && selectedElement) && (
+            <div
+              className="flex overflow-x-auto no-scrollbar gap-1 p-1.5 bg-[var(--app-surface-muted)]/70 border-b border-[var(--app-border)] text-[11px] font-semibold select-none shrink-0"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
             >
-              <Sliders className="w-3.5 h-3.5 shrink-0" />
-              <span>Properti</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('elements')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'elements'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span>Elemen</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('sources')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'sources'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <Box className="w-3.5 h-3.5 shrink-0" />
-              <span>Sumber</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('presets')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'presets'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-              <span>Preset</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('media')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'media'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
-              <span>Media</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('layers')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'layers'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 shrink-0" />
-              <span>Lapisan</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('simulator')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'simulator'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 shrink-0" />
-              <span>Uji Live</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSidePanel('marketplace')}
-              className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[88px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
-                activeSidePanel === 'marketplace'
-                  ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
-                  : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
-              }`}
-            >
-              <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-              <span>Marketplace</span>
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('properties')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'properties'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <Sliders className="w-3.5 h-3.5 shrink-0" />
+                <span>Properti</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('elements')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'elements'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span>Elemen</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('sources')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'sources'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <Box className="w-3.5 h-3.5 shrink-0" />
+                <span>Sumber</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('presets')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'presets'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+                <span>Preset</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('media')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'media'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+                <span>Media</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('layers')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'layers'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span>Lapisan</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('simulator')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[76px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'simulator'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 shrink-0" />
+                <span>Uji Live</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSidePanel('marketplace')}
+                className={`btn-press min-h-[44px] shrink-0 px-3 min-w-[88px] rounded-xl transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap flex-1 ${
+                  activeSidePanel === 'marketplace'
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)] font-bold'
+                    : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface)]'
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+                <span>Marketplace</span>
+              </button>
+            </div>
+          )}
 
           <div className="p-4 sm:p-5 flex-1 min-h-0 overflow-y-auto">
           {/* TAB 1: CONTEXTUAL PROPERTIES PANEL */}
