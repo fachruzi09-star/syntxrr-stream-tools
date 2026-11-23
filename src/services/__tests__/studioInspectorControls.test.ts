@@ -702,6 +702,86 @@ function runStudioInspectorControlsTests(): void {
     'live_viewer_counter inspector documents LIVE priority and never mutates latestViewerCount',
   );
 
+  // 15. A2.2 Dynamic Inspector: counter & progress_bar
+  const counterSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'counter'",
+    "selectedElement.type === 'progress_bar'",
+    'counter inspector',
+  );
+  for (const prop of ['targetGoal', 'label']) {
+    assert(
+      updatesProp(counterSection, prop),
+      `counter inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    !updatesProp(counterSection, 'current') &&
+      !counterSection.includes('setSimulatedLikes('),
+    'counter inspector does NOT expose fake properties.current input or mutate simulatedLikes directly',
+  );
+  assert(
+    counterSection.includes('selectedElement.properties.targetGoal ?? selectedElement.properties.target') &&
+      counterSection.includes('clampNumericRange(e.target.value, 1, 999999999, 2000)') &&
+      counterSection.includes('min={1}') &&
+      counterSection.includes("'Target Follower Hari Ini'"),
+    'counter inspector preserves targetGoal ?? target fallback, positive integer bounds, and default 2000/label',
+  );
+  assert(
+    counterSection.includes('simulatedLikes.toLocaleString') &&
+      counterSection.includes('event like/tap LIVE'),
+    'counter inspector displays live event running counter honestly as read-only',
+  );
+
+  const counterRendererSection = extractBetween(
+    studioSource,
+    "case 'counter': {",
+    "case 'live_viewer_counter': {",
+    'counter renderer',
+  );
+  assert(
+    counterRendererSection.includes('simulatedLikes.toLocaleString') &&
+      counterRendererSection.includes('props.targetGoal ?? props.target') &&
+      !counterRendererSection.includes('props.current'),
+    'counter canvas renderer reads running count from simulatedLikes and target from targetGoal ?? target',
+  );
+
+  const progressBarIdx = inspectorSection.indexOf("selectedElement.type === 'progress_bar'");
+  assert(progressBarIdx !== -1, 'progress_bar inspector section exists');
+  const progressBarSection = inspectorSection.slice(progressBarIdx);
+  for (const prop of ['currentAmount', 'targetAmount', 'currency', 'barColor']) {
+    assert(
+      updatesProp(progressBarSection, prop),
+      `progress_bar inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    progressBarSection.includes('clampNumericRange(e.target.value, 0, 999999999999, 0)') &&
+      progressBarSection.includes('min={0}') &&
+      progressBarSection.includes('350000'),
+    'progress_bar inspector allows >= 0 integer currentAmount with default 350000',
+  );
+  assert(
+    progressBarSection.includes('clampNumericRange(e.target.value, 1, 999999999999, 1000000)') &&
+      progressBarSection.includes('min={1}') &&
+      progressBarSection.includes('1000000'),
+    'progress_bar inspector enforces > 0 integer targetAmount with default 1000000',
+  );
+  assert(
+    progressBarSection.includes("typeof propsObj.currency === 'string' ? propsObj.currency : 'Rp'") &&
+      progressBarSection.includes('type="color"') &&
+      progressBarSection.includes("toSafeHexColor(propsObj.barColor, '#F2C230')") &&
+      progressBarSection.includes("toSafeHexColor(e.target.value, '#F2C230')"),
+    'progress_bar inspector handles currency prefix default Rp and hex-validated barColor picker with safe fallback',
+  );
+  assert(
+    progressBarSection.includes('computeProgressBarModel(propsObj)') &&
+      progressBarSection.includes('progressPreview.formattedCurrent') &&
+      progressBarSection.includes('progressPreview.formattedTarget') &&
+      progressBarSection.includes('progressPreview.percentLabel'),
+    'progress_bar inspector delegates percentage and nominal formatting strictly to computeProgressBarModel',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

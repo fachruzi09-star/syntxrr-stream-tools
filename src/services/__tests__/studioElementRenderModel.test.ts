@@ -622,8 +622,46 @@ function runStudioElementRenderModelTests(): void {
     'LIVE badge remains hidden during standby even if liveBadge=true',
   );
 
+  // === A2.2 PROGRESS BAR & COUNTER EDGE-CASE CHECKS ===
+  const zeroCurrentValidTarget = computeProgressBarModel({
+    currentAmount: 0,
+    targetAmount: 1000000,
+    currency: 'Rp',
+  });
+  assertEqual(zeroCurrentValidTarget.current, 0, 'progress_bar supports currentAmount=0');
+  assertEqual(zeroCurrentValidTarget.percent, 0, 'progress_bar computes 0% when currentAmount=0');
+  assertEqual(zeroCurrentValidTarget.formattedCurrent, 'Rp 0', 'progress_bar formats 0 with Rp currency');
+  assertEqual(zeroCurrentValidTarget.formattedTarget, 'Rp 1.000.000', 'progress_bar formats 1.000.000 with Rp currency');
+
+  const invalidTargetModel = computeProgressBarModel({
+    currentAmount: 50000,
+    targetAmount: -100,
+    currency: 'USD',
+  });
+  assertEqual(invalidTargetModel.isValidTarget, false, 'negative targetAmount is invalid');
+  assertEqual(invalidTargetModel.formattedTarget, '—', 'invalid targetAmount falls back to —');
+  assertEqual(invalidTargetModel.percent, 0, 'invalid targetAmount yields 0%');
+
+  const supportedNominalStrings = computeProgressBarModel({
+    current: 'Rp 1.250.000',
+    target: 'Rp 1.000.000',
+    currency: 'Rp',
+  });
+  assertEqual(supportedNominalStrings.current, 1250000, 'parses Indonesian dot-thousands nominal string');
+  assertEqual(supportedNominalStrings.percent, 100, 'clamps current > target strictly at 100%');
+  assertEqual(supportedNominalStrings.percentLabel, '100%', 'formats clamped percent label as 100%');
+
+  const customCurrencyEmpty = computeProgressBarModel({
+    currentAmount: 250,
+    targetAmount: 500,
+    currency: '',
+  });
+  assertEqual(customCurrencyEmpty.formattedCurrent, '250', 'empty currency omits prefix cleanly');
+  assertEqual(customCurrencyEmpty.formattedTarget, '500', 'empty currency formats plain target');
+  assertEqual(customCurrencyEmpty.percent, 50, 'computes 50% accurately');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 checks).`,
   );
 }
 

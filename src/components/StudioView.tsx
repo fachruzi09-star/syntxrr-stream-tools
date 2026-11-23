@@ -6156,6 +6156,205 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       );
                     })()}
 
+                    {/* Counter Inspector */}
+                    {selectedElement.type === 'counter' && (() => {
+                      const rawGoal = selectedElement.properties.targetGoal ?? selectedElement.properties.target;
+                      const effectiveGoal =
+                        typeof rawGoal === 'number' && Number.isFinite(rawGoal) && rawGoal > 0
+                          ? Math.floor(rawGoal)
+                          : 2000;
+                      const currentLabel =
+                        typeof selectedElement.properties.label === 'string'
+                          ? selectedElement.properties.label
+                          : 'Target Follower Hari Ini';
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                            <TrendingUp className="w-4 h-4" /> Pengaturan Penghitung Target
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Target Penghitung (Goal)
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={999999999}
+                              step={1}
+                              value={effectiveGoal}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'targetGoal',
+                                  clampNumericRange(e.target.value, 1, 999999999, 2000),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                            <p className="text-[10px] text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                              Bilangan bulat positif (minimal 1, default 2000). Disimpan ke <code className="font-mono">targetGoal</code> dengan kompatibilitas fallback <code className="font-mono">target</code>.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Label Penghitung
+                            </label>
+                            <input
+                              type="text"
+                              value={currentLabel}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'label', e.target.value)}
+                              placeholder="Target Follower Hari Ini"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] space-y-1">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              Angka Berjalan Saat Ini (Event LIVE)
+                            </div>
+                            <div className="font-mono font-bold text-emerald-400 tabular-metrics">
+                              {simulatedLikes.toLocaleString('id-ID')} / {effectiveGoal.toLocaleString('id-ID')}
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Angka berjalan berasal langsung dari event like/tap LIVE yang diterima aplikasi dan tidak diubah secara manual melalui properti elemen.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Progress Bar Inspector */}
+                    {selectedElement.type === 'progress_bar' && (() => {
+                      const propsObj = selectedElement.properties || {};
+                      const progressPreview = computeProgressBarModel(propsObj);
+                      const hasExplicitCurrent =
+                        propsObj.currentAmount !== undefined || propsObj.current !== undefined;
+                      const currentAmountInputValue = hasExplicitCurrent
+                        ? Math.max(0, Math.floor(progressPreview.current))
+                        : 350000;
+                      const hasExplicitTarget =
+                        propsObj.targetAmount !== undefined || propsObj.target !== undefined;
+                      const targetAmountInputValue = hasExplicitTarget
+                        ? progressPreview.isValidTarget
+                          ? Math.max(1, Math.floor(progressPreview.target))
+                          : ''
+                        : 1000000;
+                      const currentCurrency =
+                        typeof propsObj.currency === 'string' ? propsObj.currency : 'Rp';
+                      const safeBarColor = toSafeHexColor(propsObj.barColor, '#F2C230');
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                            <TrendingUp className="w-4 h-4" /> Pengaturan Progress Bar Donasi
+                          </span>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Jumlah Terkumpul
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={currentAmountInputValue}
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'currentAmount',
+                                    clampNumericRange(e.target.value, 0, 999999999999, 0),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Target Donasi (&gt; 0)
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={targetAmountInputValue}
+                                placeholder="Target > 0"
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'targetAmount',
+                                    clampNumericRange(e.target.value, 1, 999999999999, 1000000),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Mata Uang / Prefix
+                              </label>
+                              <input
+                                type="text"
+                                value={currentCurrency}
+                                onChange={(e) =>
+                                  updateElementProperty(selectedElement.id, 'currency', e.target.value)
+                                }
+                                placeholder="Rp"
+                                className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Warna Progress Bar
+                              </label>
+                              <input
+                                type="color"
+                                aria-label="Pilih warna progress bar"
+                                value={safeBarColor}
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'barColor',
+                                    toSafeHexColor(e.target.value, '#F2C230'),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] space-y-1.5">
+                            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              <span>Preview Progress</span>
+                              <span className="font-mono text-[var(--app-accent-text)]">
+                                {progressPreview.percentLabel}
+                              </span>
+                            </div>
+                            <div className="font-semibold text-[var(--app-text)] truncate tabular-metrics">
+                              {progressPreview.formattedCurrent} / {progressPreview.formattedTarget}
+                            </div>
+                            <div className="w-full h-2 rounded-full bg-zinc-800 overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-300"
+                                style={{
+                                  width: `${progressPreview.percent}%`,
+                                  backgroundColor: safeBarColor,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Common Geometry & Transform (Editable X, Y, Width, Height) */}
                     <div className="py-4 space-y-3">
                       <div className="flex items-center justify-between text-xs font-bold text-[var(--app-text)]">
