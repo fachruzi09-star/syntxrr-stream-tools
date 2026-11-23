@@ -1596,7 +1596,7 @@ public final class StudioOverlayView extends View {
                     }
                 }
             }
-        } catch (IOException | SecurityException | OutOfMemoryError | RuntimeException ignored) {
+        } catch (IOException | RuntimeException | OutOfMemoryError ignored) {
             // Do not log avatar URL or username/PII on fetch failures; fallback initial stays visible.
         } finally {
             synchronized (avatarFetchLock) {
