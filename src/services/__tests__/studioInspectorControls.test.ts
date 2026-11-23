@@ -782,6 +782,87 @@ function runStudioInspectorControlsTests(): void {
     'progress_bar inspector delegates percentage and nominal formatting strictly to computeProgressBarModel',
   );
 
+  // 16. A2.3 Combo Counter & Leaderboard Inspector & Renderer Alignment
+  const comboInspectorSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'combo_counter'",
+    "selectedElement.type === 'leaderboard'",
+    'combo_counter inspector section',
+  );
+  for (const prop of ['comboLabel', 'themeColor']) {
+    assert(
+      updatesProp(comboInspectorSection, prop),
+      `combo_counter inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    !updatesProp(comboInspectorSection, 'multiplier') &&
+      !updatesProp(comboInspectorSection, 'giftName'),
+    'combo_counter inspector does not add disconnected multiplier or giftName inputs',
+  );
+  assert(
+    comboInspectorSection.includes("'x25 COMBO MAWAR MERAH!'") &&
+      comboInspectorSection.includes("toSafeHexColor(propsObj.themeColor, '#EA580C')") &&
+      comboInspectorSection.includes("toSafeHexColor(e.target.value, '#EA580C')") &&
+      comboInspectorSection.includes('type="color"'),
+    'combo_counter inspector enforces default comboLabel and hex-validated themeColor (#EA580C)',
+  );
+
+  const comboRendererSection = extractBetween(
+    studioSource,
+    "case 'combo_counter': {",
+    "case 'counter': {",
+    'combo_counter renderer',
+  );
+  assert(
+    comboRendererSection.includes("props.comboLabel || 'x25 COMBO LOVE!'") &&
+      comboRendererSection.includes('props.themeColor') &&
+      comboRendererSection.includes("'#EA580C'") &&
+      comboRendererSection.includes('linear-gradient(90deg, ${themeColor}, #F59E0B)'),
+    'combo_counter canvas renderer reads comboLabel and themeColor gradient directly',
+  );
+
+  const leaderboardIdx = inspectorSection.indexOf("selectedElement.type === 'leaderboard'");
+  assert(leaderboardIdx !== -1, 'leaderboard inspector section exists');
+  const leaderboardInspectorSection = inspectorSection.slice(leaderboardIdx);
+  for (const prop of ['topCount', 'showAmounts']) {
+    assert(
+      updatesProp(leaderboardInspectorSection, prop),
+      `leaderboard inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    leaderboardInspectorSection.includes('min={1}') &&
+      leaderboardInspectorSection.includes('max={10}') &&
+      leaderboardInspectorSection.includes('step={1}') &&
+      leaderboardInspectorSection.includes('clampNumericRange(e.target.value, 1, 10, 3)'),
+    'leaderboard inspector clamps topCount integer between 1 and 10 with default 3',
+  );
+  assert(
+    leaderboardInspectorSection.includes('!(selectedElement.properties.showAmounts !== false)') &&
+      leaderboardInspectorSection.includes('buildLeaderboardEntries(') &&
+      leaderboardInspectorSection.includes('studioEventHistory'),
+    'leaderboard inspector toggles showAmounts and references actual studioEventHistory via buildLeaderboardEntries',
+  );
+  assert(
+    !leaderboardInspectorSection.includes("updateElementProperty(selectedElement.id, 'entries'") &&
+      !leaderboardInspectorSection.includes("updateElementProperty(selectedElement.id, 'donors'"),
+    'leaderboard inspector contains no manual donor/entry property mutation controls',
+  );
+
+  const leaderboardRendererSection = extractBetween(
+    studioSource,
+    "case 'leaderboard': {",
+    "case 'live_text': {",
+    'leaderboard renderer',
+  );
+  assert(
+    leaderboardRendererSection.includes('buildLeaderboardEntries(studioEventHistory, props.topCount)') &&
+      leaderboardRendererSection.includes('props.showAmounts !== false') &&
+      leaderboardRendererSection.includes('Belum ada gift / donasi sesi ini'),
+    'leaderboard canvas renderer uses buildLeaderboardEntries(studioEventHistory, props.topCount) and showAmounts toggle',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

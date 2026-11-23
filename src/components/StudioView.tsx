@@ -6355,6 +6355,169 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       );
                     })()}
 
+                    {/* Combo Counter Inspector */}
+                    {selectedElement.type === 'combo_counter' && (() => {
+                      const propsObj = selectedElement.properties || {};
+                      const currentComboLabel =
+                        typeof propsObj.comboLabel === 'string'
+                          ? propsObj.comboLabel
+                          : 'x25 COMBO MAWAR MERAH!';
+                      const safeThemeColor = toSafeHexColor(propsObj.themeColor, '#EA580C');
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-orange-400 flex items-center gap-1.5">
+                            <Flame className="w-4 h-4" /> Pengaturan Combo Counter
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Label Combo
+                            </label>
+                            <input
+                              type="text"
+                              value={currentComboLabel}
+                              onChange={(e) =>
+                                updateElementProperty(selectedElement.id, 'comboLabel', e.target.value)
+                              }
+                              placeholder="x25 COMBO MAWAR MERAH!"
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                            <p className="text-[10px] text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                              Teks yang ditampilkan langsung di banner combo (default: x25 COMBO MAWAR MERAH!). Jika dikosongkan, renderer menggunakan fallback <code className="font-mono">x25 COMBO LOVE!</code>.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Warna Tema Combo
+                            </label>
+                            <div className="flex items-center gap-2 mt-1">
+                              <input
+                                type="color"
+                                aria-label="Pilih warna tema combo"
+                                value={safeThemeColor}
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'themeColor',
+                                    toSafeHexColor(e.target.value, '#EA580C'),
+                                  )
+                                }
+                                className="w-14 min-h-[44px] p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer shrink-0"
+                              />
+                              <div
+                                className="flex-1 min-h-[44px] px-3 rounded-xl flex items-center justify-between text-white shadow-sm overflow-hidden"
+                                style={{
+                                  background: `linear-gradient(90deg, ${safeThemeColor}, #F59E0B)`,
+                                }}
+                              >
+                                <span className="text-[11px] font-black tracking-wider truncate">
+                                  {currentComboLabel || 'x25 COMBO LOVE!'}
+                                </span>
+                                <span className="text-[10px] font-mono opacity-90 shrink-0 ml-2">
+                                  {safeThemeColor.toUpperCase()}
+                                </span>
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                              Mengatur warna awal gradient banner combo (default #EA580C ke aksen #F59E0B).
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Leaderboard Inspector */}
+                    {selectedElement.type === 'leaderboard' && (() => {
+                      const propsObj = selectedElement.properties || {};
+                      const effectiveTopCount =
+                        typeof propsObj.topCount === 'number' &&
+                        Number.isFinite(propsObj.topCount) &&
+                        propsObj.topCount > 0
+                          ? Math.max(1, Math.min(10, Math.floor(propsObj.topCount)))
+                          : 3;
+                      const showAmountsEnabled = propsObj.showAmounts !== false;
+                      const leaderboardPreviewEntries = buildLeaderboardEntries(
+                        studioEventHistory,
+                        effectiveTopCount,
+                      );
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-[#F2C230] flex items-center gap-1.5">
+                            <Award className="w-4 h-4" /> Pengaturan Peringkat Donatur (Leaderboard)
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Jumlah Peringkat (1–10)
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              step={1}
+                              value={effectiveTopCount}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'topCount',
+                                  clampNumericRange(e.target.value, 1, 10, 3),
+                                )
+                              }
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                            <p className="text-[10px] text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                              Membatasi jumlah peringkat teratas yang ditampilkan antara 1 sampai 10 (default: 3).
+                            </p>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Tampilkan Nominal
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'showAmounts',
+                                    !(selectedElement.properties.showAmounts !== false),
+                                  )
+                                }
+                                className={`min-h-[36px] px-3 rounded-lg text-[11px] font-bold border transition-all ${
+                                  showAmountsEnabled
+                                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                                }`}
+                              >
+                                {showAmountsEnabled ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              {showAmountsEnabled
+                                ? 'Menampilkan nominal dukungan terakhir pada setiap peringkat jika tersedia.'
+                                : 'Menyembunyikan nominal sementara peringkat dan jumlah interaksi tetap tampil.'}
+                            </p>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] space-y-1">
+                            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              <span>Informasi Sumber Data</span>
+                              <span className="font-mono text-[#F2C230]">
+                                {leaderboardPreviewEntries.length} entri
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Daftar peringkat dihitung otomatis hanya dari event <code className="font-mono">gift</code> dan <code className="font-mono">donation</code> aktual yang memiliki username. Jika sesi belum memiliki gift/donasi, elemen tetap menampilkan status kosong &ldquo;Belum ada gift / donasi sesi ini&rdquo; tanpa data palsu atau input donatur manual.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Common Geometry & Transform (Editable X, Y, Width, Height) */}
                     <div className="py-4 space-y-3">
                       <div className="flex items-center justify-between text-xs font-bold text-[var(--app-text)]">

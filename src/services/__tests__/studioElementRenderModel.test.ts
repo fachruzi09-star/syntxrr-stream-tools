@@ -660,8 +660,102 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(customCurrencyEmpty.formattedTarget, '500', 'empty currency formats plain target');
   assertEqual(customCurrencyEmpty.percent, 50, 'computes 50% accurately');
 
+  // === A2.3 LEADERBOARD RENDER MODEL EDGE-CASE CHECKS ===
+  assertEqual(
+    buildLeaderboardEntries([], 3).length,
+    0,
+    'leaderboard returns empty list when no events have occurred yet',
+  );
+
+  const nonSupportingOnly: StreamEvent[] = [
+    { id: 'c1', type: 'chat', username: 'chatter', detail: 'halo', timestamp: 1000 },
+    { id: 'f1', type: 'follow', username: 'follower', detail: 'followed', timestamp: 1100 },
+    { id: 'l1', type: 'like', username: 'liker', detail: 'liked', timestamp: 1200 },
+    { id: 'g-empty', type: 'gift', username: '   ', detail: 'Rose', amount: 10, timestamp: 1300 },
+  ];
+  assertEqual(
+    buildLeaderboardEntries(nonSupportingOnly, 5).length,
+    0,
+    'leaderboard excludes chat/follow/like events and gift events without valid username',
+  );
+
+  const manyDonors: StreamEvent[] = Array.from({ length: 14 }, (_, idx) => ({
+    id: `d-${idx}`,
+    type: 'donation' as const,
+    username: `Supporter_${idx + 1}`,
+    detail: 'Sawer',
+    amount: (idx + 1) * 1000,
+    currency: 'Rp',
+    timestamp: 2000 + idx,
+  }));
+  assertEqual(
+    buildLeaderboardEntries(manyDonors, 25).length,
+    10,
+    'leaderboard clamps topCount above 10 strictly to 10 entries',
+  );
+  assertEqual(
+    buildLeaderboardEntries(manyDonors, 0).length,
+    3,
+    'leaderboard falls back to 3 entries when topCount <= 0',
+  );
+  assertEqual(
+    buildLeaderboardEntries(manyDonors, Number.NaN).length,
+    3,
+    'leaderboard falls back to 3 entries when topCount is NaN',
+  );
+
+  const a23MixedCurrencyEvents: StreamEvent[] = [
+    {
+      id: 'm1',
+      type: 'donation',
+      username: 'Bima',
+      detail: 'Support 1',
+      amount: 50000,
+      currency: 'Rp',
+      timestamp: 1000,
+    },
+    {
+      id: 'm2',
+      type: 'gift',
+      username: 'bima',
+      detail: 'Support 2',
+      amount: 10,
+      currency: 'USD',
+      timestamp: 2000,
+    },
+    {
+      id: 'm3',
+      type: 'gift',
+      username: 'Citra',
+      detail: 'Support 1',
+      amount: 100,
+      currency: 'Koin',
+      timestamp: 2500,
+    },
+    {
+      id: 'm4',
+      type: 'gift',
+      username: 'Andi',
+      detail: 'Support 1',
+      amount: 20,
+      currency: 'Koin',
+      timestamp: 1500,
+    },
+  ];
+  const a23RankedMixed = buildLeaderboardEntries(a23MixedCurrencyEvents, 10);
+  assertEqual(a23RankedMixed.length, 3, 'groups case-insensitive usernames into distinct leaderboard entries');
+  assertEqual(a23RankedMixed[0]?.username, 'bima', 'ranks highest supportCount first');
+  assertEqual(a23RankedMixed[0]?.supportCount, 2, 'counts repeat support accurately');
+  assertEqual(
+    a23RankedMixed[0]?.formattedLastAmount,
+    'USD 10',
+    'uses latest event nominal & currency without summing mixed currencies',
+  );
+  assertEqual(a23RankedMixed[1]?.username, 'Citra', 'breaks equal supportCount ties by newest timestamp');
+  assertEqual(a23RankedMixed[2]?.username, 'Andi', 'orders older equal-count donor after newer tie');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 checks).`,
   );
 }
 
