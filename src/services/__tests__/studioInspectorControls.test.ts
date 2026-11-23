@@ -863,6 +863,57 @@ function runStudioInspectorControlsTests(): void {
     'leaderboard canvas renderer uses buildLeaderboardEntries(studioEventHistory, props.topCount) and showAmounts toggle',
   );
 
+  // 17. A2.4 Live Text Inspector & Renderer Alignment
+  const liveTextIdx = inspectorSection.indexOf("selectedElement.type === 'live_text'");
+  assert(liveTextIdx !== -1, 'live_text inspector section exists');
+  const liveTextInspectorSection = inspectorSection.slice(liveTextIdx);
+  for (const prop of ['showFps', 'showBitrate']) {
+    assert(
+      updatesProp(liveTextInspectorSection, prop),
+      `live_text inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    liveTextInspectorSection.includes("propsObj.showFps !== false") &&
+      liveTextInspectorSection.includes("propsObj.showBitrate !== false") &&
+      liveTextInspectorSection.includes('!(selectedElement.properties.showFps !== false)') &&
+      liveTextInspectorSection.includes('!(selectedElement.properties.showBitrate !== false)'),
+    'live_text inspector defaults showFps and showBitrate to active and toggles via selectedElement.id',
+  );
+  assert(
+    !liveTextInspectorSection.includes('<input') &&
+      !liveTextInspectorSection.includes('<select') &&
+      !liveTextInspectorSection.includes('<textarea') &&
+      !updatesProp(liveTextInspectorSection, 'showResolution') &&
+      !updatesProp(liveTextInspectorSection, 'showDuration'),
+    'live_text inspector has no manual telemetry inputs and adds no unsupported showResolution/showDuration props',
+  );
+  assert(
+    liveTextInspectorSection.includes('buildLiveTextRenderModel(') &&
+      liveTextInspectorSection.includes('modeBStatus') &&
+      liveTextInspectorSection.includes('isModeBSelected') &&
+      liveTextInspectorSection.includes('belum dipasok') &&
+      liveTextInspectorSection.includes('&mdash;'),
+    'live_text inspector binds preview to runtime Mode B helper and states FPS/resolution telemetry limitation honestly',
+  );
+
+  const liveTextRendererSection = extractBetween(
+    studioSource,
+    "case 'live_text': {",
+    "case 'image': {",
+    'live_text renderer',
+  );
+  assert(
+    liveTextRendererSection.includes('buildLiveTextRenderModel({') &&
+      liveTextRendererSection.includes('isModeBSelected,') &&
+      liveTextRendererSection.includes('modeBStatus,') &&
+      liveTextRendererSection.includes('showFps: props.showFps !== false') &&
+      liveTextRendererSection.includes('showBitrate: props.showBitrate !== false') &&
+      !liveTextRendererSection.includes('fps:') &&
+      !liveTextRendererSection.includes('resolution:'),
+    'live_text canvas renderer connects to buildLiveTextRenderModel and modeBStatus without fabricating fps/resolution',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

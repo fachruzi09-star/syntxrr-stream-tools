@@ -6518,6 +6518,105 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       );
                     })()}
 
+                    {/* Live Text Inspector */}
+                    {selectedElement.type === 'live_text' && (() => {
+                      const propsObj = selectedElement.properties || {};
+                      const showFpsEnabled = propsObj.showFps !== false;
+                      const showBitrateEnabled = propsObj.showBitrate !== false;
+                      const livePreview = buildLiveTextRenderModel({
+                        isModeBSelected,
+                        modeBStatus,
+                        showFps: showFpsEnabled,
+                        showBitrate: showBitrateEnabled,
+                      });
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                            <Radio className="w-4 h-4" /> Pengaturan Teks Siaran Langsung (Live Text)
+                          </span>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Tampilkan FPS
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'showFps',
+                                    !(selectedElement.properties.showFps !== false),
+                                  )
+                                }
+                                className={`min-h-[36px] px-3 rounded-lg text-[11px] font-bold border transition-all ${
+                                  showFpsEnabled
+                                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                                }`}
+                              >
+                                {showFpsEnabled ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Menampilkan atau menyembunyikan label <code className="font-mono">FPS</code> pada elemen Live Text (default: Aktif).
+                            </p>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Tampilkan Bitrate
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'showBitrate',
+                                    !(selectedElement.properties.showBitrate !== false),
+                                  )
+                                }
+                                className={`min-h-[36px] px-3 rounded-lg text-[11px] font-bold border transition-all ${
+                                  showBitrateEnabled
+                                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                                    : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                                }`}
+                              >
+                                {showBitrateEnabled ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Menampilkan atau menyembunyikan angka bitrate dari snapshot runtime Mode B (default: Aktif).
+                            </p>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] space-y-2">
+                            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              <span>Informasi Status LIVE (Read-Only)</span>
+                              <span className="font-mono text-[var(--app-accent-text)]">
+                                {livePreview.statusLabel}
+                              </span>
+                            </div>
+
+                            <div className="px-2.5 py-1.5 rounded-lg bg-zinc-950/90 border border-zinc-800 flex items-center justify-between gap-2 text-[10px] font-mono text-zinc-300">
+                              <span className="font-bold text-white shrink-0">{livePreview.statusLabel}</span>
+                              <div className="flex items-center gap-2 truncate">
+                                <span>RES: {livePreview.resolutionLabel}</span>
+                                {showFpsEnabled && <span>FPS: {livePreview.fpsLabel}</span>}
+                                {showBitrateEnabled && <span>{livePreview.bitrateLabel}</span>}
+                              </div>
+                            </div>
+
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Status <code className="font-mono">LIVE</code>, <code className="font-mono">CONNECTING</code>, <code className="font-mono">HOST WAIT</code>, <code className="font-mono">STOPPING</code>, <code className="font-mono">OFFLINE</code>, maupun error berasal langsung dari runtime Mode B (Mode A tampil sebagai <code className="font-mono">STANDBY</code>). Bitrate dibaca dari snapshot <code className="font-mono">modeBStatus</code> saat memenuhi kondisi helper. Nilai FPS dan resolusi saat ini belum dipasok ke <code className="font-mono">buildLiveTextRenderModel()</code> oleh pemanggil di StudioView, sehingga ketika tidak tersedia tetap ditampilkan sebagai <code className="font-mono">&mdash;</code>.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Common Geometry & Transform (Editable X, Y, Width, Height) */}
                     <div className="py-4 space-y-3">
                       <div className="flex items-center justify-between text-xs font-bold text-[var(--app-text)]">

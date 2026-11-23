@@ -754,8 +754,115 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(a23RankedMixed[1]?.username, 'Citra', 'breaks equal supportCount ties by newest timestamp');
   assertEqual(a23RankedMixed[2]?.username, 'Andi', 'orders older equal-count donor after newer tie');
 
+  // === A2.4 LIVE TEXT RENDER MODEL HONESTY & VISIBILITY CHECKS ===
+  const modeAStandby = buildLiveTextRenderModel({
+    isModeBSelected: false,
+    modeBStatus: {
+      status: 'live',
+      message: 'Streaming',
+      isStreaming: true,
+      bitrateKbps: 3800,
+    },
+  });
+  assertEqual(modeAStandby.isLive, false, 'Mode A remains standby even if snapshot had live status');
+  assertEqual(modeAStandby.statusLabel, 'STANDBY', 'Mode A displays STANDBY');
+  assertEqual(modeAStandby.bitrateLabel, '—', 'Mode A suppresses Mode B bitrate');
+
+  const liveFlagWithoutStreaming = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'Stale',
+      isStreaming: false,
+      bitrateKbps: 3200,
+    },
+  });
+  assertEqual(liveFlagWithoutStreaming.isLive, false, 'requires both status=live and isStreaming=true to report LIVE');
+
+  const hostWaitState = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'host_wait',
+      message: 'Waiting host',
+      isStreaming: false,
+      bitrateKbps: 1800,
+    },
+  });
+  assertEqual(hostWaitState.isLive, false, 'host_wait never claims LIVE');
+  assertEqual(hostWaitState.statusLabel, 'HOST WAIT', 'host_wait displays HOST WAIT');
+  assertEqual(hostWaitState.bitrateLabel, '1800 kbps', 'host_wait preserves valid positive bitrate');
+
+  const stoppingState = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'stopping',
+      message: 'Stopping',
+      isStreaming: false,
+      bitrateKbps: 2500,
+    },
+  });
+  assertEqual(stoppingState.statusLabel, 'STOPPING', 'stopping displays STOPPING');
+  assertEqual(stoppingState.bitrateLabel, '—', 'stopping hides bitrate as session ends');
+
+  const errorState = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'error',
+      message: 'Socket failure',
+      isStreaming: false,
+      bitrateKbps: 2000,
+    },
+  });
+  assertEqual(errorState.isLive, false, 'error state is never LIVE');
+  assertEqual(errorState.statusLabel, 'TERPUTUS', 'error state displays TERPUTUS');
+  assertEqual(errorState.tone, 'error', 'error state sets error tone');
+  assertEqual(errorState.bitrateLabel, '—', 'error state hides stale bitrate');
+
+  const captureLostState = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'capture_lost',
+      message: 'Projection revoked',
+      isStreaming: false,
+      bitrateKbps: 0,
+    },
+  });
+  assertEqual(captureLostState.statusLabel, 'CAPTURE LOST', 'capture_lost displays CAPTURE LOST');
+  assertEqual(captureLostState.tone, 'error', 'capture_lost sets error tone');
+
+  const hiddenTogglesAndInvalidBitrate = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'Streaming',
+      isStreaming: true,
+      bitrateKbps: 0,
+    },
+    showFps: false,
+    showBitrate: true,
+    fps: 60,
+    resolution: '   ',
+  });
+  assertEqual(hiddenTogglesAndInvalidBitrate.fpsLabel, '—', 'showFps=false hides fps even when supplied');
+  assertEqual(hiddenTogglesAndInvalidBitrate.bitrateLabel, '—', 'zero/invalid bitrateKbps displays —');
+  assertEqual(hiddenTogglesAndInvalidBitrate.resolutionLabel, '—', 'blank resolution displays —');
+
+  const bitrateHiddenByToggle = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'Streaming',
+      isStreaming: true,
+      bitrateKbps: 4500,
+    },
+    showFps: true,
+    showBitrate: false,
+  });
+  assertEqual(bitrateHiddenByToggle.bitrateLabel, '—', 'showBitrate=false hides valid live bitrate');
+  assertEqual(bitrateHiddenByToggle.fpsLabel, '—', 'unavailable fps stays — even when showFps=true');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 checks).`,
   );
 }
 
