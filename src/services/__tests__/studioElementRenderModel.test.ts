@@ -498,8 +498,95 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(shouldPlayEventAlertSound({ soundEnabled: true, soundEffect: false }), false, 'mutes alert when soundEffect=false');
   assertEqual(shouldPlayEventAlertSound({}), true, 'defaults alert sound to enabled when flags omitted');
 
+  // === A1.1 DYNAMIC ELEMENT INSPECTOR & RENDER MODEL TESTS ===
+
+  // 11.1 Username comes from latest valid audience event and applies prefix + badge cleanly
+  const blankUsernameChat: StreamEvent = {
+    id: 'ev_blank_user',
+    type: 'chat',
+    username: '   ',
+    detail: 'pesan tanpa username',
+    timestamp: 4000,
+  };
+  const latestValidFollow: StreamEvent = {
+    id: 'ev_valid_follow',
+    type: 'follow',
+    username: '  NadiaStream  ',
+    userAvatar: 'https://img.example.com/nadia.png',
+    detail: 'mulai mengikuti',
+    timestamp: 3900,
+  };
+  const olderGiftWithDiffUser: StreamEvent = {
+    id: 'ev_older_gift',
+    type: 'gift',
+    username: 'OldDonatur',
+    userAvatar: 'https://img.example.com/old-donatur.png',
+    detail: 'mengirim Singa',
+    timestamp: 3500,
+  };
+  const a11Events: StreamEvent[] = [tiktokSystemViewerEvent, blankUsernameChat, latestValidFollow, olderGiftWithDiffUser];
+  const resolvedUser = resolveActiveUsernameModel(a11Events, { prefix: '🔥 ', badge: '  MVP  ' });
+  assertEqual(resolvedUser.hasEvent, true, 'username detects latest valid audience event');
+  assertEqual(resolvedUser.username, 'NadiaStream', 'username trims whitespace and skips viewer/blank events');
+  assertEqual(resolvedUser.displayText, '🔥 NadiaStream', 'username combines prefix and latest valid username');
+  assertEqual(resolvedUser.badge, 'MVP', 'username trims badge label');
+  assertEqual(resolvedUser.eventType, 'follow', 'username preserves latest valid audience event type');
+
+  const resolvedUserEmptyBadge = resolveActiveUsernameModel(a11Events, { prefix: '@', badge: '   ' });
+  assertEqual(resolvedUserEmptyBadge.displayText, '@NadiaStream', 'username supports @ prefix');
+  assertEqual(resolvedUserEmptyBadge.badge, null, 'whitespace badge becomes null');
+
+  // 11.2 Avatar stays paired with the exact same audience event & validates all shape/borderGlow options
+  const pairedLatestAvatar = resolveDynamicAvatarModel(a11Events, { shape: 'circle', borderGlow: true });
+  assertEqual(pairedLatestAvatar.username, resolvedUser.username, 'avatar pairs with exact same latest valid username');
+  assertEqual(pairedLatestAvatar.avatarUrl, 'https://img.example.com/nadia.png', 'avatar pairs with exact same event photo');
+  assertEqual(pairedLatestAvatar.shape, 'circle', 'avatar supports circle shape');
+  assertEqual(pairedLatestAvatar.borderGlow, true, 'avatar supports borderGlow=true');
+
+  const squareAvatar = resolveDynamicAvatarModel(a11Events, { shape: 'square', borderGlow: false });
+  assertEqual(squareAvatar.shape, 'square', 'avatar supports square shape');
+  assertEqual(squareAvatar.borderGlow, false, 'avatar supports borderGlow=false');
+
+  const roundedAvatar = resolveDynamicAvatarModel(a11Events, { shape: 'rounded' });
+  assertEqual(roundedAvatar.shape, 'rounded', 'avatar supports rounded shape');
+  assertEqual(roundedAvatar.borderGlow, true, 'avatar defaults borderGlow to true when omitted');
+
+  const invalidShapeUnsafeUrlEvent: StreamEvent = {
+    id: 'ev_unsafe_av',
+    type: 'donation',
+    username: '@ZakiPro',
+    userAvatar: 'javascript:alert(1)',
+    detail: 'donasi',
+    timestamp: 4100,
+  };
+  const sanitizedAvatar = resolveDynamicAvatarModel([invalidShapeUnsafeUrlEvent], { shape: 'hexagon' });
+  assertEqual(sanitizedAvatar.shape, 'circle', 'invalid shape falls back safely to circle');
+  assertEqual(sanitizedAvatar.avatarUrl, null, 'unsafe javascript: userAvatar is rejected');
+  assertEqual(sanitizedAvatar.initial, 'Z', 'initial strips leading @ cleanly');
+
+  // 11.3 Dynamic Text safely handles missing tokens (including durationText=null) & empty templates
+  const durationMissingResult = resolveDynamicTextOutput({
+    template: 'Live selama {durasi} bersama {username}',
+    fallback: 'Siaran siap dimulai',
+    context: {
+      latestUsername: 'NadiaStream',
+      durationText: null,
+    },
+  });
+  assertEqual(durationMissingResult.usedFallback, true, 'null durationText triggers fallback safely');
+  assertEqual(durationMissingResult.text, 'Siaran siap dimulai', 'null durationText returns clean fallback text');
+  assert(!/\{[^}]+\}/.test(durationMissingResult.text), 'missing duration never leaks {durasi}');
+
+  const emptyTemplateResult = resolveDynamicTextOutput({
+    template: '   ',
+    fallback: 'Fallback aman',
+    context: { latestUsername: 'NadiaStream' },
+  });
+  assertEqual(emptyTemplateResult.usedFallback, true, 'empty template triggers fallback safely');
+  assertEqual(emptyTemplateResult.text, 'Fallback aman', 'empty template returns trimmed fallback');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 corrective checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 checks).`,
   );
 }
 

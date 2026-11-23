@@ -2556,13 +2556,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
             topDonorName: getTopDonorNameFromHistory(studioEventHistory),
           },
         });
+        const customBgColor =
+          typeof props.backgroundColor === 'string' && props.backgroundColor.trim()
+            ? props.backgroundColor.trim()
+            : null;
+        const isTransparentBg = customBgColor?.toLowerCase() === 'transparent';
         return (
           <div
-            className={`w-full h-full rounded-lg bg-zinc-950/75 border border-zinc-800 flex items-center justify-center text-center px-2.5 select-none ${animClass}`}
+            className={`w-full h-full rounded-lg flex items-center justify-center text-center px-2.5 select-none ${
+              customBgColor
+                ? isTransparentBg
+                  ? 'border border-transparent'
+                  : 'border border-zinc-800'
+                : 'bg-zinc-950/75 border border-zinc-800'
+            } ${animClass}`}
             style={{
               color: props.textColor || props.color || '#FFFFFF',
               fontSize: `${props.fontSize || 14}px`,
               fontWeight: 700,
+              ...(customBgColor ? { backgroundColor: customBgColor } : {}),
             }}
           >
             <span className="truncate">{dynamicResult.text}</span>
@@ -5470,6 +5482,288 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             />
                           </div>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Dynamic Text Inspector */}
+                    {selectedElement.type === 'dynamic_text' && (() => {
+                      const currentTemplate =
+                        typeof selectedElement.properties.template === 'string'
+                          ? selectedElement.properties.template
+                          : typeof selectedElement.properties.text === 'string'
+                            ? selectedElement.properties.text
+                            : '';
+                      const currentFallback =
+                        typeof selectedElement.properties.fallback === 'string'
+                          ? selectedElement.properties.fallback
+                          : '';
+                      const previewNowTime = new Date().toLocaleTimeString('id-ID', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                      });
+                      const previewOutput = resolveDynamicTextOutput({
+                        template: currentTemplate,
+                        fallback: currentFallback,
+                        context: {
+                          latestUsername: getLatestAudienceUsernameFromHistory(studioEventHistory),
+                          targetText: getActiveTargetTextFromElements(elements, selectedElement.properties || {}),
+                          currentTimeText: previewNowTime,
+                          durationText: null,
+                          topDonorName: getTopDonorNameFromHistory(studioEventHistory),
+                        },
+                      });
+                      const supportedTokens = [
+                        '{username}',
+                        '{target}',
+                        '{waktu}',
+                        '{durasi}',
+                        '{top_donor_name}',
+                      ] as const;
+
+                      return (
+                        <div className="py-4 space-y-3">
+                          <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                            <Type className="w-4 h-4" /> Pengaturan Teks Dinamis
+                          </span>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Template Teks
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={currentTemplate}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'template', e.target.value)}
+                              placeholder="Contoh: Top Donatur: {top_donor_name}"
+                              className="w-full mt-1 px-3 py-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] space-y-1.5">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              Token Didukung (ketuk untuk sisipkan)
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {supportedTokens.map((token) => (
+                                <button
+                                  key={token}
+                                  type="button"
+                                  onClick={() => {
+                                    const nextTemplate = currentTemplate
+                                      ? `${currentTemplate}${currentTemplate.endsWith(' ') ? '' : ' '}${token}`
+                                      : token;
+                                    updateElementProperty(selectedElement.id, 'template', nextTemplate);
+                                  }}
+                                  className="px-2 py-1 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] text-[10px] font-mono text-[var(--app-accent-text)]"
+                                >
+                                  {token}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                              Catatan: Token <code className="font-mono text-[var(--app-text-secondary)]">{'{durasi}'}</code> saat ini belum memiliki sumber waktu mulai LIVE tepercaya (<code className="font-mono">null</code>), sehingga akan otomatis memakai teks fallback bila digunakan.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                              Teks Fallback (Saat Data Belum Tersedia)
+                            </label>
+                            <input
+                              type="text"
+                              value={currentFallback}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'fallback', e.target.value)}
+                              placeholder="Menunggu data siaran..."
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Ukuran Font (px)
+                              </label>
+                              <input
+                                type="number"
+                                min={8}
+                                max={96}
+                                value={
+                                  typeof selectedElement.properties.fontSize === 'number' &&
+                                  Number.isFinite(selectedElement.properties.fontSize)
+                                    ? selectedElement.properties.fontSize
+                                    : 14
+                                }
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'fontSize',
+                                    clampNumericRange(e.target.value, 8, 96, 14),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Warna Teks
+                              </label>
+                              <input
+                                type="color"
+                                value={toSafeHexColor(
+                                  selectedElement.properties.textColor || selectedElement.properties.color,
+                                  '#FFFFFF',
+                                )}
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'textColor', e.target.value)}
+                                className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                                Warna Latar Belakang
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => updateElementProperty(selectedElement.id, 'backgroundColor', 'transparent')}
+                                className="text-[10px] font-semibold text-[var(--app-accent-text)] hover:underline"
+                              >
+                                Transparan
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <input
+                                type="color"
+                                aria-label="Pilih warna latar teks dinamis"
+                                value={toSafeHexColor(selectedElement.properties.backgroundColor, '#09090B')}
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'backgroundColor', e.target.value)}
+                                className="w-11 min-h-[44px] p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer shrink-0"
+                              />
+                              <input
+                                type="text"
+                                value={
+                                  typeof selectedElement.properties.backgroundColor === 'string'
+                                    ? selectedElement.properties.backgroundColor
+                                    : ''
+                                }
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'backgroundColor', e.target.value)}
+                                placeholder="transparent / #09090B / rgba(...)"
+                                className="w-full min-w-0 min-h-[44px] px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] space-y-0.5">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
+                              Hasil Preview ({previewOutput.usedFallback ? 'Fallback Aktif' : 'Data Terisi'})
+                            </div>
+                            <div className="font-semibold text-[var(--app-text)] truncate">
+                              {previewOutput.text}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Username Inspector */}
+                    {selectedElement.type === 'username' && (
+                      <div className="py-4 space-y-3">
+                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                          <User className="w-4 h-4" /> Pengaturan Nama Penonton Aktif
+                        </span>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                            Prefix Nama
+                          </label>
+                          <input
+                            type="text"
+                            value={typeof selectedElement.properties.prefix === 'string' ? selectedElement.properties.prefix : ''}
+                            onChange={(e) => updateElementProperty(selectedElement.id, 'prefix', e.target.value)}
+                            placeholder="Contoh: ⭐ atau @"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                            Badge / Label Pendukung
+                          </label>
+                          <input
+                            type="text"
+                            value={typeof selectedElement.properties.badge === 'string' ? selectedElement.properties.badge : ''}
+                            onChange={(e) => updateElementProperty(selectedElement.id, 'badge', e.target.value)}
+                            placeholder="Contoh: VIP Supporter (kosongkan untuk sembunyi)"
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                          />
+                        </div>
+
+                        <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                          Menampilkan username dari event interaksi penonton terbaru (chat, gift, like, follow, share, join, donasi) tanpa nama simulasi palsu.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Avatar Inspector */}
+                    {selectedElement.type === 'avatar' && (
+                      <div className="py-4 space-y-3">
+                        <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                          <User className="w-4 h-4" /> Pengaturan Avatar Penonton
+                        </span>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">
+                            Bentuk Bingkai Avatar
+                          </label>
+                          <select
+                            value={
+                              selectedElement.properties.shape === 'square' ||
+                              selectedElement.properties.shape === 'rounded'
+                                ? selectedElement.properties.shape
+                                : 'circle'
+                            }
+                            onChange={(e) =>
+                              updateElementProperty(
+                                selectedElement.id,
+                                'shape',
+                                e.target.value as 'circle' | 'square' | 'rounded',
+                              )
+                            }
+                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                          >
+                            <option value="circle">Circle (Bulat)</option>
+                            <option value="rounded">Rounded (Sudut Membulat)</option>
+                            <option value="square">Square (Persegi)</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-xs text-[var(--app-text-secondary)]">Efek Border Glow</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateElementProperty(
+                                selectedElement.id,
+                                'borderGlow',
+                                !(selectedElement.properties.borderGlow !== false),
+                              )
+                            }
+                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                              selectedElement.properties.borderGlow !== false
+                                ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                            }`}
+                          >
+                            {selectedElement.properties.borderGlow !== false ? 'Aktif' : 'Nonaktif'}
+                          </button>
+                        </div>
+
+                        <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
+                          Foto profil selalu dipasangkan dengan event penonton terbaru yang sama dengan elemen Nama Penonton.
+                        </p>
                       </div>
                     )}
 

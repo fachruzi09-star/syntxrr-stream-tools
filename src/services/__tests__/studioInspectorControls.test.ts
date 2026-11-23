@@ -314,6 +314,82 @@ function runStudioInspectorControlsTests(): void {
   assertEqual(stickerModel.stickerId, 'crown', 'stickerId crown resolved');
   assertEqual(stickerModel.floatEffect, false, 'sticker floatEffect=false resolved');
 
+  // 9. dynamic_text Inspector controls & preview binding
+  const dynamicTextSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'dynamic_text'",
+    "selectedElement.type === 'username'",
+    'dynamic_text inspector',
+  );
+  assert(dynamicTextSection.includes('<textarea'), 'dynamic_text inspector provides textarea for template');
+  for (const prop of ['template', 'fallback', 'fontSize', 'textColor', 'backgroundColor']) {
+    assert(
+      updatesProp(dynamicTextSection, prop),
+      `dynamic_text inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  assert(
+    dynamicTextSection.includes("'transparent'"),
+    'dynamic_text inspector supports transparent backgroundColor option',
+  );
+  for (const token of ['{username}', '{target}', '{waktu}', '{durasi}', '{top_donor_name}']) {
+    assert(
+      dynamicTextSection.includes(token),
+      `dynamic_text inspector documents supported token ${token}`,
+    );
+  }
+  assert(
+    dynamicTextSection.includes('durationText: null') &&
+      dynamicTextSection.includes('resolveDynamicTextOutput('),
+    'dynamic_text inspector preview keeps durationText=null and resolves via resolveDynamicTextOutput',
+  );
+
+  // Verify dynamic_text canvas renderer also reads backgroundColor & keeps durationText: null
+  const dynamicTextRendererSection = extractBetween(
+    studioSource,
+    "case 'dynamic_text': {",
+    "case 'username': {",
+    'dynamic_text renderer',
+  );
+  assert(
+    dynamicTextRendererSection.includes('props.backgroundColor') &&
+      dynamicTextRendererSection.includes("'transparent'") &&
+      dynamicTextRendererSection.includes('durationText: null'),
+    'dynamic_text canvas renderer reflects backgroundColor (including transparent) and keeps durationText=null',
+  );
+
+  // 10. username Inspector controls
+  const usernameSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'username'",
+    "selectedElement.type === 'avatar'",
+    'username inspector',
+  );
+  for (const prop of ['prefix', 'badge']) {
+    assert(
+      updatesProp(usernameSection, prop),
+      `username inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+
+  // 11. avatar Inspector controls
+  const avatarIdx = inspectorSection.indexOf("selectedElement.type === 'avatar'");
+  assert(avatarIdx !== -1, 'avatar inspector section exists');
+  const avatarSection = inspectorSection.slice(avatarIdx);
+  for (const prop of ['shape', 'borderGlow']) {
+    assert(
+      updatesProp(avatarSection, prop),
+      `avatar inspector updates '${prop}' via updateElementProperty`,
+    );
+  }
+  for (const shapeOpt of ['circle', 'rounded', 'square']) {
+    assert(avatarSection.includes(`value="${shapeOpt}"`), `avatar inspector includes shape="${shapeOpt}"`);
+  }
+  assert(
+    avatarSection.includes('!(selectedElement.properties.borderGlow !== false)'),
+    'avatar inspector toggles boolean borderGlow properly with !== false default',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 
