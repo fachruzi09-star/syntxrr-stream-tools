@@ -151,6 +151,100 @@ async function runTests(): Promise<void> {
   );
   assertEqual(createModeBOverlaySnapshot(null).length, 0, 'null input returns empty snapshot');
 
+  // A1.2: dynamic_text & username Mode B native snapshot property forwarding
+  const dynamicSnapshot = createModeBOverlaySnapshot([
+    {
+      id: 'dyn_text_1',
+      name: 'Teks Dinamis',
+      type: 'dynamic_text',
+      x: 5,
+      y: 8,
+      width: 65,
+      height: 8,
+      layer: 2,
+      visible: true,
+      opacity: 100,
+      rotation: 0,
+      properties: {
+        template: 'Top Donatur: {top_donor_name}',
+        fallback: 'Belum ada donasi hari ini',
+        fontSize: 18,
+        textColor: '#FDE047',
+        backgroundColor: 'transparent',
+        target: 'Rp 1.000.000',
+        imageUrl: 'https://evil.example/a.png',
+        oversizedProp: 'x'.repeat(1001),
+      },
+    },
+    {
+      id: 'user_badge_1',
+      name: 'Nama Penonton',
+      type: 'username',
+      x: 5,
+      y: 20,
+      width: 45,
+      height: 8,
+      layer: 3,
+      visible: true,
+      opacity: 100,
+      rotation: 0,
+      properties: {
+        prefix: '⭐ ',
+        badge: 'VIP Supporter',
+        fontSize: 14,
+        textColor: '#FFFFFF',
+        backgroundColor: '#111827',
+        avatarUrl: 'https://evil.example/avatar.png',
+      },
+    },
+    {
+      id: 'prog_1',
+      name: 'Progress Bar',
+      type: 'progress_bar',
+      x: 5,
+      y: 35,
+      width: 80,
+      height: 9,
+      layer: 1,
+      visible: true,
+      opacity: 100,
+      rotation: 0,
+      properties: {
+        currentAmount: 350000,
+        targetAmount: 1000000,
+        currency: 'Rp',
+      },
+    },
+  ]);
+  assertEqual(dynamicSnapshot.length, 3, 'dynamic_text, username, and progress_bar included in snapshot');
+  assertEqual(dynamicSnapshot[0].type, 'progress_bar', 'elements sorted by layer ascending');
+  assertEqual(dynamicSnapshot[0].properties.currency, 'Rp', 'progress_bar currency retained for target parity');
+  assertEqual(dynamicSnapshot[0].properties.targetAmount, 1000000, 'progress_bar targetAmount retained');
+  assertEqual(dynamicSnapshot[1].type, 'dynamic_text', 'dynamic_text element retained');
+  assertEqual(
+    dynamicSnapshot[1].properties.template,
+    'Top Donatur: {top_donor_name}',
+    'dynamic_text template forwarded to native snapshot',
+  );
+  assertEqual(
+    dynamicSnapshot[1].properties.fallback,
+    'Belum ada donasi hari ini',
+    'dynamic_text fallback forwarded to native snapshot',
+  );
+  assertEqual(dynamicSnapshot[1].properties.fontSize, 18, 'dynamic_text fontSize forwarded');
+  assertEqual(dynamicSnapshot[1].properties.textColor, '#FDE047', 'dynamic_text textColor forwarded');
+  assertEqual(dynamicSnapshot[1].properties.backgroundColor, 'transparent', 'dynamic_text transparent backgroundColor forwarded');
+  assertEqual(dynamicSnapshot[1].properties.target, 'Rp 1.000.000', 'dynamic_text target forwarded');
+  assertEqual(dynamicSnapshot[1].properties['imageUrl'], undefined, 'dynamic_text rejects non-allowlisted imageUrl');
+  assertEqual(dynamicSnapshot[1].properties['oversizedProp'], undefined, 'dynamic_text rejects non-allowlisted oversized props');
+  assertEqual(dynamicSnapshot[2].type, 'username', 'username element retained');
+  assertEqual(dynamicSnapshot[2].properties.prefix, '⭐ ', 'username prefix forwarded with trailing space preserved');
+  assertEqual(dynamicSnapshot[2].properties.badge, 'VIP Supporter', 'username badge forwarded to native snapshot');
+  assertEqual(dynamicSnapshot[2].properties.fontSize, 14, 'username fontSize forwarded');
+  assertEqual(dynamicSnapshot[2].properties.textColor, '#FFFFFF', 'username textColor forwarded');
+  assertEqual(dynamicSnapshot[2].properties.backgroundColor, '#111827', 'username backgroundColor forwarded');
+  assertEqual(dynamicSnapshot[2].properties['avatarUrl'], undefined, 'username rejects arbitrary avatarUrl');
+
   const manyElements = Array.from({ length: 60 }, (_, index) => ({
     ...element,
     id: `element_${index}`,

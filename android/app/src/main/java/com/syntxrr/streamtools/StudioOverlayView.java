@@ -20,8 +20,10 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.io.File;
@@ -46,6 +48,8 @@ public final class StudioOverlayView extends View {
     private final List<OverlayElement> elements = new ArrayList<>();
     private final List<LiveEvent> liveEvents = new ArrayList<>();
     private final Map<String, Long> eventCounters = new HashMap<>();
+    /** Bounded top-donor aggregation preserved across the 50-event live feed window and scene handoffs. */
+    private final Map<String, ModeBDynamicOverlayResolver.DonorAggregate> donorAggregates = new LinkedHashMap<>();
     private final Map<String, Bitmap> imageBitmaps = new HashMap<>();
     private final Map<String, ModeBBitmapBudget.Reservation> imageMemoryReservations = new HashMap<>();
     private final ModeBBitmapBudget bitmapBudget;
@@ -210,6 +214,7 @@ public final class StudioOverlayView extends View {
                     optionalNumber(object, "repeatCount", -1d),
                     object.optLong("timestamp", System.currentTimeMillis())
             );
+            boolean accepted = false;
             synchronized (liveEvents) {
                 if (assetsReleased) return;
                 for (LiveEvent previous : liveEvents) if (previous.id.equals(event.id)) return;
@@ -221,23 +226,39 @@ public final class StudioOverlayView extends View {
                 if ("gift".equals(type) && event.repeatCount >= 1) increment = Math.max(1L, (long) event.repeatCount);
                 eventCounters.put(type, eventCounters.containsKey(type) ? eventCounters.get(type) + increment : increment);
                 if ("donation".equals(type) && event.amount > 0) donationTotal += (long) event.amount;
+                ModeBDynamicOverlayResolver.recordDonorEvent(
+                        donorAggregates,
+                        type,
+                        event.username,
+                        event.timestamp,
+                        ModeBDynamicOverlayResolver.MAX_DONOR_ENTRIES);
+                accepted = true;
+            }
+            if (accepted) {
+                postInvalidate();
             }
         } catch (JSONException ignored) {
             // Malformed event payloads are intentionally ignored; streaming must continue.
         }
     }
 
-    /** Preserve live counters/feed state when replacing only the static overlay scene. */
+    /** Preserve live counters/feed/donor leaderboard state when replacing only the static overlay scene. */
     void copyLiveStateTo(StudioOverlayView target) {
         if (target == null || target == this) return;
         List<LiveEvent> eventSnapshot;
         Map<String, Long> counterSnapshot;
+        Map<String, ModeBDynamicOverlayResolver.DonorAggregate> donorSnapshot = new LinkedHashMap<>();
         long donationSnapshot;
         long viewerSnapshot;
         long likesSnapshot;
         synchronized (liveEvents) {
             eventSnapshot = new ArrayList<>(liveEvents);
             counterSnapshot = new HashMap<>(eventCounters);
+            for (Map.Entry<String, ModeBDynamicOverlayResolver.DonorAggregate> entry : donorAggregates.entrySet()) {
+                if (entry.getValue() != null) {
+                    donorSnapshot.put(entry.getKey(), entry.getValue().copy());
+                }
+            }
             donationSnapshot = donationTotal;
             viewerSnapshot = lastViewerCount;
             likesSnapshot = latestTotalLikes;
@@ -248,6 +269,8 @@ public final class StudioOverlayView extends View {
             target.liveEvents.addAll(eventSnapshot);
             target.eventCounters.clear();
             target.eventCounters.putAll(counterSnapshot);
+            target.donorAggregates.clear();
+            target.donorAggregates.putAll(donorSnapshot);
             target.donationTotal = donationSnapshot;
             target.lastViewerCount = viewerSnapshot;
             target.latestTotalLikes = likesSnapshot;
@@ -455,8 +478,8 @@ public final class StudioOverlayView extends View {
 
     private boolean isSupported(String type, JSONObject properties) {
         if ("shape".equals(type) || "separator".equals(type)) return true;
-        if ("text".equals(type) || "running_text".equals(type) || "dynamic_text".equals(type)
-                || "live_text".equals(type) || "username".equals(type)) {
+        if ("dynamic_text".equals(type) || "username".equals(type)) return true;
+        if ("text".equals(type) || "running_text".equals(type) || "live_text".equals(type)) {
             return firstNonEmpty(properties.optString("text", ""), properties.optString("content", ""),
                     properties.optString("sampleText", ""), properties.optString("label", "")).length() > 0;
         }
@@ -518,6 +541,10 @@ public final class StudioOverlayView extends View {
         } else if ("chat_message".equals(type) || "event_feed".equals(type) || "event_alert".equals(type)
                 || "combo_counter".equals(type) || "counter".equals(type) || "live_viewer_counter".equals(type)) {
             drawLiveWidget(canvas, bounds, element, alpha);
+        } else if ("dynamic_text".equals(type)) {
+            drawDynamicTextElement(canvas, bounds, element, alpha);
+        } else if ("username".equals(type)) {
+            drawUsernameElement(canvas, bounds, element, alpha);
         } else if ("running_text".equals(type)) {
             drawRunningText(canvas, bounds, element, alpha);
         } else {
@@ -1098,6 +1125,201 @@ public final class StudioOverlayView extends View {
         if (x + textWidth < bounds.right) {
             canvas.drawText(text, x + cycleWidth, baseline, paint);
         }
+    }
+
+    private void drawDynamicTextElement(Canvas canvas, RectF bounds, OverlayElement element, int alpha) {
+        JSONObject properties = element.properties;
+        String template = properties.has("template") && !properties.isNull("template")
+                ? properties.optString("template", "")
+                : properties.optString("text", "");
+        String fallback = properties.optString("fallback", "");
+
+        List<ModeBDynamicOverlayResolver.AudienceEventRecord> audienceRecords;
+        String topDonorName;
+        synchronized (liveEvents) {
+            audienceRecords = buildAudienceEventRecordsLocked();
+            topDonorName = ModeBDynamicOverlayResolver.resolveTopDonorName(donorAggregates);
+        }
+        String latestUsername = ModeBDynamicOverlayResolver.resolveLatestAudienceUsername(audienceRecords);
+        Object ownTargetRaw = properties.has("target") && !properties.isNull("target") ? properties.opt("target") : null;
+        String targetText = ModeBDynamicOverlayResolver.resolveActiveTargetText(ownTargetRaw, buildTargetSources());
+        String nowTimeText = ModeBDynamicOverlayResolver.formatCurrentTimeHHmm(new Date());
+
+        ModeBDynamicOverlayResolver.DynamicTextResolution resolved =
+                ModeBDynamicOverlayResolver.resolveDynamicTextOutput(
+                        template,
+                        fallback,
+                        latestUsername,
+                        targetText,
+                        nowTimeText,
+                        null,
+                        topDonorName);
+        String text = resolved.text;
+        if (text == null || text.isEmpty()) return;
+
+        String backgroundRaw = firstNonEmpty(properties.optString("backgroundColor", ""), properties.optString("bgColor", ""));
+        float radius = Math.max(0f, number(properties, "borderRadius", 8f) * previewScale);
+        if (!"transparent".equalsIgnoreCase(backgroundRaw)) {
+            int bg = backgroundRaw.isEmpty() ? 0xBF09090B : parseColor(backgroundRaw, 0xBF09090B);
+            paint.setColor(bg);
+            paint.setAlpha(Math.round(Color.alpha(bg) * (alpha / 255f)));
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(bounds, radius, radius, paint);
+
+            if (backgroundRaw.isEmpty()) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(0xFF27272A);
+                paint.setAlpha(alpha);
+                paint.setStrokeWidth(Math.max(1f, previewScale));
+                canvas.drawRoundRect(bounds, radius, radius, paint);
+                paint.setStyle(Paint.Style.FILL);
+            }
+        }
+
+        float requestedSize = number(properties, "fontSize", 14f);
+        float textSize = Math.max(12f, Math.min(outputHeight * 0.12f, requestedSize * previewScale));
+        String colorRaw = firstNonEmpty(properties.optString("textColor", ""), properties.optString("color", ""), "#FFFFFF");
+        paint.setColor(parseColor(colorRaw, Color.WHITE));
+        paint.setAlpha(alpha);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setTextAlign(Paint.Align.LEFT);
+        paint.setTextSize(textSize);
+        paint.setTypeface("normal".equalsIgnoreCase(properties.optString("fontWeight", "bold"))
+                ? Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                : Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+
+        float padding = Math.max(4f, 8f * previewScale);
+        float maxWidth = Math.max(1f, bounds.width() - padding * 2f);
+        float lineHeight = textSize * 1.22f;
+        float availableHeight = Math.max(lineHeight, bounds.height() - padding * 2f);
+        int maxLines = Math.max(1, Math.min(12, (int) (availableHeight / lineHeight)));
+        List<String> lines = wrapText(text, maxWidth, maxLines, paint);
+        float totalHeight = lines.size() * lineHeight;
+        Paint.FontMetrics dynamicMetrics = paint.getFontMetrics();
+        float verticalOffset = bounds.height() >= totalHeight
+                ? (bounds.height() - totalHeight) / 2f
+                : Math.min(padding, Math.max(0f, (bounds.height() - textSize) / 2f));
+        float baseline = bounds.top + verticalOffset - dynamicMetrics.ascent;
+        String align = properties.optString("textAlign", "center");
+        for (String line : lines) {
+            float x = bounds.centerX() - paint.measureText(line) / 2f;
+            if ("left".equalsIgnoreCase(align)) x = bounds.left + padding;
+            else if ("right".equalsIgnoreCase(align)) x = bounds.right - padding - paint.measureText(line);
+            canvas.drawText(line, x, baseline, paint);
+            baseline += lineHeight;
+        }
+    }
+
+    private void drawUsernameElement(Canvas canvas, RectF bounds, OverlayElement element, int alpha) {
+        JSONObject properties = element.properties;
+        String prefix = properties.has("prefix") && !properties.isNull("prefix") ? properties.optString("prefix", "") : "";
+        String badgeProp = properties.has("badge") && !properties.isNull("badge") ? properties.optString("badge", "") : "";
+
+        List<ModeBDynamicOverlayResolver.AudienceEventRecord> audienceRecords;
+        synchronized (liveEvents) {
+            audienceRecords = buildAudienceEventRecordsLocked();
+        }
+        ModeBDynamicOverlayResolver.UsernameResolution model =
+                ModeBDynamicOverlayResolver.resolveActiveUsername(audienceRecords, prefix, badgeProp);
+
+        String backgroundRaw = firstNonEmpty(properties.optString("backgroundColor", ""), properties.optString("bgColor", ""));
+        float radius = Math.max(4f, number(properties, "borderRadius", 12f) * previewScale);
+        if (!"transparent".equalsIgnoreCase(backgroundRaw)) {
+            int bg = backgroundRaw.isEmpty() ? 0xE609090B : parseColor(backgroundRaw, 0xE609090B);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(bg);
+            paint.setAlpha(Math.round(Color.alpha(bg) * (alpha / 255f)));
+            canvas.drawRoundRect(bounds, radius, radius, paint);
+
+            if (backgroundRaw.isEmpty()) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(0x6610B981);
+                paint.setAlpha(Math.round(Color.alpha(0x6610B981) * (alpha / 255f)));
+                paint.setStrokeWidth(Math.max(1f, previewScale));
+                canvas.drawRoundRect(bounds, radius, radius, paint);
+                paint.setStyle(Paint.Style.FILL);
+            }
+        }
+
+        float padding = Math.max(5f, 8f * previewScale);
+        float requestedSize = number(properties, "fontSize", 12f);
+        float textSize = Math.max(11f, Math.min(outputHeight * 0.09f, requestedSize * previewScale));
+
+        float badgeReservedWidth = 0f;
+        if (model.hasEvent && model.badge != null && !model.badge.isEmpty() && bounds.width() > padding * 4f) {
+            float badgeTextSize = Math.max(9f, textSize * 0.68f);
+            float badgePadX = Math.max(4f, 6f * previewScale);
+            float badgePadY = Math.max(2f, 3f * previewScale);
+            paint.setTextSize(badgeTextSize);
+            paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            paint.setTextAlign(Paint.Align.LEFT);
+            float maxBadgeWidth = Math.max(badgePadX * 2f + badgeTextSize, bounds.width() * 0.36f);
+            String fittedBadge = fitText(model.badge, Math.max(1f, maxBadgeWidth - badgePadX * 2f), paint);
+            if (!fittedBadge.isEmpty()) {
+                float badgeWidth = paint.measureText(fittedBadge) + badgePadX * 2f;
+                float badgeHeight = Math.min(bounds.height() - padding, badgeTextSize + badgePadY * 2f);
+                float badgeRight = bounds.right - padding;
+                float badgeLeft = badgeRight - badgeWidth;
+                float badgeTop = bounds.centerY() - badgeHeight / 2f;
+                float badgeBottom = bounds.centerY() + badgeHeight / 2f;
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(0x3310B981);
+                paint.setAlpha(Math.round(Color.alpha(0x3310B981) * (alpha / 255f)));
+                float pillRadius = Math.max(3f, 4f * previewScale);
+                canvas.drawRoundRect(new RectF(badgeLeft, badgeTop, badgeRight, badgeBottom), pillRadius, pillRadius, paint);
+
+                paint.setColor(0xFF6EE7B7);
+                paint.setAlpha(alpha);
+                Paint.FontMetrics badgeMetrics = paint.getFontMetrics();
+                float badgeBaseline = bounds.centerY() - (badgeMetrics.ascent + badgeMetrics.descent) / 2f;
+                canvas.drawText(fittedBadge, badgeLeft + badgePadX, badgeBaseline, paint);
+                badgeReservedWidth = badgeWidth + Math.max(4f, 6f * previewScale);
+            }
+        }
+
+        int activeTextColor = parseColor(
+                firstNonEmpty(properties.optString("textColor", ""), properties.optString("color", ""), "#FFFFFF"),
+                Color.WHITE);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setTextAlign(Paint.Align.LEFT);
+        paint.setTextSize(textSize);
+        paint.setColor(model.hasEvent ? activeTextColor : 0xFF9CA3AF);
+        paint.setAlpha(alpha);
+        paint.setTypeface(model.hasEvent
+                ? Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                : Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
+
+        float maxTextWidth = Math.max(1f, bounds.width() - padding * 2f - badgeReservedWidth);
+        Paint.FontMetrics metrics = paint.getFontMetrics();
+        float baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f;
+        canvas.drawText(fitText(model.displayText, maxTextWidth, paint), bounds.left + padding, baseline, paint);
+    }
+
+    private List<ModeBDynamicOverlayResolver.AudienceEventRecord> buildAudienceEventRecordsLocked() {
+        List<ModeBDynamicOverlayResolver.AudienceEventRecord> records = new ArrayList<>(liveEvents.size());
+        for (LiveEvent event : liveEvents) {
+            if (event == null) continue;
+            records.add(new ModeBDynamicOverlayResolver.AudienceEventRecord(
+                    event.id, event.type, event.username, event.timestamp));
+        }
+        return records;
+    }
+
+    private List<ModeBDynamicOverlayResolver.TargetSource> buildTargetSources() {
+        List<ModeBDynamicOverlayResolver.TargetSource> sources = new ArrayList<>(elements.size());
+        for (OverlayElement item : elements) {
+            if (item == null || item.properties == null) continue;
+            if (!"counter".equals(item.type) && !"progress_bar".equals(item.type)) continue;
+            JSONObject props = item.properties;
+            Object targetGoalRaw = props.has("targetGoal") && !props.isNull("targetGoal") ? props.opt("targetGoal") : null;
+            Object targetAmountRaw = props.has("targetAmount") && !props.isNull("targetAmount") ? props.opt("targetAmount") : null;
+            Object targetRaw = props.has("target") && !props.isNull("target") ? props.opt("target") : null;
+            String currencyRaw = props.has("currency") && !props.isNull("currency") ? props.optString("currency", "") : "";
+            sources.add(new ModeBDynamicOverlayResolver.TargetSource(
+                    item.type, targetGoalRaw, targetAmountRaw, targetRaw, currencyRaw));
+        }
+        return sources;
     }
 
     private void drawTextElement(Canvas canvas, RectF bounds, OverlayElement element, int alpha) {

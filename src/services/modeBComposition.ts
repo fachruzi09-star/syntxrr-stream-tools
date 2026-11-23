@@ -46,12 +46,13 @@ export interface ModeBOverlaySourceElement {
 }
 
 const NATIVE_OVERLAY_PROPERTY_KEYS = [
-  'text', 'content', 'sampleText', 'label', 'fontSize', 'fontWeight', 'textColor', 'color',
+  'text', 'content', 'sampleText', 'label', 'template', 'fallback',
+  'fontSize', 'fontWeight', 'textColor', 'color',
   'backgroundColor', 'bgColor', 'fillColor', 'borderColor', 'borderWidth', 'borderRadius',
   'shapeType', 'shape', 'textAlign', 'value', 'progress', 'maxMessages', 'eventType',
-  'durationSec', 'countType', 'prefix', 'suffix', 'showBadges', 'title', 'maxItems', 'speed',
+  'durationSec', 'countType', 'prefix', 'suffix', 'badge', 'showBadges', 'title', 'maxItems', 'speed',
   'alertTitle', 'accentColor', 'badgeColor', 'comboLabel', 'giftName', 'targetGoal',
-  'targetAmount', 'target', 'barColor', 'imageAssetId', 'imageFit', 'objectFit',
+  'targetAmount', 'target', 'currency', 'barColor', 'imageAssetId', 'imageFit', 'objectFit',
   'videoAssetId', 'videoFit', 'loop', 'facingMode', 'cameraFit', 'mirror',
 ] as const;
 
