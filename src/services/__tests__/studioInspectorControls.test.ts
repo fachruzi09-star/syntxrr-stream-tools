@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { percentToUnitVolume, type StudioElement } from '../../types';
 import {
   createStudioElementFromSource,
+  getStudioSourceCatalogEntry,
   normalizeStudioElementProperties,
 } from '../studioElementCatalog';
 import {
@@ -13,12 +14,16 @@ import {
   buildChatMessageBgOpacityPatch,
   clampChatMessageOpacity,
   createCameraPreviewController,
+  createScreenCapturePreviewController,
   resolveChatMessageBackground,
   resolveSeparatorStyle,
   resolveSoundboardControlModel,
   resolveStickerVisualModel,
   type CameraFacingMode,
   type CameraPreviewStreamLike,
+  type ScreenCapturePreviewRequestState,
+  type ScreenCaptureStreamLike,
+  type ScreenCaptureTrackLike,
   validateSafeBrowserEmbedUrl,
 } from '../studioElementRenderModel';
 import {
@@ -1496,6 +1501,347 @@ async function runStudioInspectorControlsTests(): Promise<void> {
     assert(
       !screenCaptureSection.includes('Menangkap feed game Android atau tampilan layar dengan MediaProjection 60 FPS.'),
       'Screen capture inspector no longer conflates browser button with native MediaProjection',
+    );
+    assert(
+      !screenCaptureSection.includes('Layer #1') &&
+        screenCaptureSection.includes('lebih rendah daripada setiap overlay aktif') &&
+        screenCaptureSection.includes('frame rate encoder global') &&
+        screenCaptureSection.includes('0° / 90° / 180° / 270°'),
+      'Screen capture inspector uses accurate layer rule, global FPS copy, and quarter-turn info',
+    );
+  }
+
+  // --- A2.8.2 Screen Capture Preview Lifecycle, Rotation Policy, FPS & Layer Copy Tests ---
+  {
+    type MockScreenTrack = ScreenCaptureTrackLike & { kind: 'video' | 'audio'; stopped: boolean };
+    type MockScreenStream = ScreenCaptureStreamLike & { id: string; tracks: MockScreenTrack[] };
+
+    const makeScreenStream = (id: string): MockScreenStream => {
+      const videoTrack: MockScreenTrack = {
+        kind: 'video',
+        stopped: false,
+        onended: null,
+        stop() {
+          this.stopped = true;
+        },
+      };
+      const audioTrack: MockScreenTrack = {
+        kind: 'audio',
+        stopped: false,
+        onended: null,
+        stop() {
+          this.stopped = true;
+        },
+      };
+      return {
+        id,
+        tracks: [videoTrack, audioTrack],
+        getTracks: () => [videoTrack, audioTrack],
+        getVideoTracks: () => [videoTrack],
+      };
+    };
+
+    let activeStream: MockScreenStream | null = null;
+    let activeOwnerId: string | null = null;
+    let videoSrcObject: MockScreenStream | null = null;
+    const readActiveStream = (): MockScreenStream | null => activeStream;
+    const readVideoSrc = (): MockScreenStream | null => videoSrcObject;
+    let mounted = true;
+    let displayMediaSupported = true;
+    let currentPresetId = 'preset_a';
+    let elementsInScene: Array<{ id: string; type: string }> = [
+      { id: 'screen_1', type: 'screen_capture' },
+      { id: 'text_1', type: 'text' },
+    ];
+    const reqState: ScreenCapturePreviewRequestState = { seq: 0 };
+
+    type DeferredScreenRequest = {
+      resolve: (s: MockScreenStream) => void;
+      reject: (e: unknown) => void;
+    };
+    const pendingScreenRequests: DeferredScreenRequest[] = [];
+    let unsupportedCalls = 0;
+    let cancelledCalls = 0;
+    const errorCalls: unknown[] = [];
+
+    const screenController = createScreenCapturePreviewController<MockScreenStream>({
+      isMounted: () => mounted,
+      getActivePresetId: () => currentPresetId,
+      resolveOwnerElementId: (requestedElemId) => {
+        if (
+          requestedElemId &&
+          elementsInScene.some((e) => e.id === requestedElemId && e.type === 'screen_capture')
+        ) {
+          return requestedElemId;
+        }
+        return elementsInScene.find((e) => e.type === 'screen_capture')?.id;
+      },
+      hasScreenCaptureElement: (elemId) =>
+        elemId
+          ? elementsInScene.some((e) => e.id === elemId && e.type === 'screen_capture')
+          : elementsInScene.some((e) => e.type === 'screen_capture'),
+      getActiveStream: () => activeStream,
+      setActiveStream: (stream, ownerElemId) => {
+        activeStream = stream;
+        activeOwnerId = stream ? (ownerElemId ?? null) : null;
+      },
+      attachStreamToVideo: (stream) => {
+        videoSrcObject = stream;
+      },
+      hasDisplayMedia: () => displayMediaSupported,
+      requestDisplayMedia: () =>
+        new Promise<MockScreenStream>((resolve, reject) => {
+          pendingScreenRequests.push({ resolve, reject });
+        }),
+      onUnsupported: () => {
+        unsupportedCalls += 1;
+      },
+      onCancelled: () => {
+        cancelledCalls += 1;
+      },
+      onError: (err) => {
+        errorCalls.push(err);
+      },
+      requestState: reqState,
+    });
+
+    // 1) Start succeeds and attaches stream/ref/owner
+    const startP1 = screenController.handleToggleScreenCapture('screen_1');
+    const s1 = makeScreenStream('screen_stream_1');
+    pendingScreenRequests.shift()!.resolve(s1);
+    const startR1 = await startP1;
+    assertEqual(startR1.started, true, 'screen capture start succeeds');
+    assertEqual(readActiveStream()?.id, 'screen_stream_1', 'active stream ref set on start');
+    assertEqual(activeOwnerId, 'screen_1', 'owner element tracked on start');
+    assertEqual(readVideoSrc()?.id, 'screen_stream_1', 'video srcObject attached on start');
+
+    // 2) Stop stops all tracks (video & audio) and clears state/ref/video
+    const stopR1 = await screenController.handleToggleScreenCapture('screen_1');
+    assertEqual(stopR1.started, false, 'toggle stop returns started=false');
+    assertEqual(stopR1.reason, 'stopped', 'toggle stop returns reason=stopped');
+    assertEqual(s1.tracks[0].stopped, true, 'video track stopped on Stop');
+    assertEqual(s1.tracks[1].stopped, true, 'audio track stopped on Stop');
+    assertEqual(activeStream, null, 'active stream cleared on Stop');
+    assertEqual(activeOwnerId, null, 'active owner cleared on Stop');
+    assertEqual(videoSrcObject, null, 'video srcObject cleared on Stop');
+
+    // 3) Natural track onended clears state/ref/UI and stops remaining tracks
+    const startP2 = screenController.startScreenCapturePreview('screen_1');
+    const s2 = makeScreenStream('screen_stream_2');
+    pendingScreenRequests.shift()!.resolve(s2);
+    await startP2;
+    assert(typeof s2.tracks[0].onended === 'function', 'onended callback registered on primary video track');
+    s2.tracks[0].onended!({} as Event);
+    assertEqual(activeStream, null, 'onended clears active stream');
+    assertEqual(activeOwnerId, null, 'onended clears owner');
+    assertEqual(videoSrcObject, null, 'onended clears video srcObject');
+    assertEqual(s2.tracks[1].stopped, true, 'onended stops remaining tracks in stream');
+
+    // 4) Stale onended from old stream must NOT clear newer active stream
+    const startP3 = screenController.startScreenCapturePreview('screen_1');
+    const s3Old = makeScreenStream('screen_stream_3_old');
+    pendingScreenRequests.shift()!.resolve(s3Old);
+    await startP3;
+    const oldOnEnded = s3Old.tracks[0].onended!;
+
+    const startP4 = screenController.startScreenCapturePreview('screen_1');
+    const s4New = makeScreenStream('screen_stream_4_new');
+    pendingScreenRequests.shift()!.resolve(s4New);
+    await startP4;
+    assertEqual(s3Old.tracks[0].stopped, true, 'previous stream stopped when starting newer stream');
+    oldOnEnded({} as Event);
+    assertEqual(readActiveStream()?.id, 'screen_stream_4_new', 'old stream onended does not clear newer active stream');
+    assertEqual(readVideoSrc()?.id, 'screen_stream_4_new', 'old stream onended leaves newer video srcObject intact');
+    assertEqual(s4New.tracks[0].stopped, false, 'newer stream tracks remain active');
+    screenController.stopScreenCapturePreview();
+
+    // 5) getDisplayMedia unsupported notifies user cleanly
+    displayMediaSupported = false;
+    const unsupportedRes = await screenController.startScreenCapturePreview('screen_1');
+    assertEqual(unsupportedRes.started, false, 'unsupported getDisplayMedia does not start');
+    assertEqual(unsupportedRes.reason, 'unsupported', 'unsupported returns reason=unsupported');
+    assertEqual(unsupportedCalls, 1, 'onUnsupported called once when getDisplayMedia unavailable');
+    displayMediaSupported = true;
+
+    // 6) Permission denied / request failure calls onError without leaving unmanaged stream
+    const errP = screenController.startScreenCapturePreview('screen_1');
+    pendingScreenRequests.shift()!.reject(
+      Object.assign(new Error('Permission denied by system'), { name: 'NotAllowedError' }),
+    );
+    const errRes = await errP;
+    assertEqual(errRes.started, false, 'failed request does not start');
+    assertEqual(errRes.reason, 'error', 'permission denied returns reason=error');
+    assertEqual(errorCalls.length, 1, 'onError called for latest failed request');
+    assertEqual(activeStream, null, 'no active stream left after failure');
+
+    // 7) User cancellation is not treated as fatal error
+    const cancelP = screenController.startScreenCapturePreview('screen_1');
+    pendingScreenRequests.shift()!.reject(
+      Object.assign(new Error('User cancelled screen share'), { name: 'AbortError' }),
+    );
+    const cancelRes = await cancelP;
+    assertEqual(cancelRes.started, false, 'cancelled picker does not start');
+    assertEqual(cancelRes.reason, 'cancelled', 'cancelled picker returns reason=cancelled');
+    assertEqual(cancelledCalls, 1, 'onCancelled invoked for user cancel');
+    assertEqual(errorCalls.length, 1, 'onError NOT incremented on picker cancel');
+
+    // 8) Pending request resolved after Stop stops its tracks immediately
+    const pendingStopP = screenController.startScreenCapturePreview('screen_1');
+    screenController.stopScreenCapturePreview();
+    const sAfterStop = makeScreenStream('screen_after_stop');
+    pendingScreenRequests.shift()!.resolve(sAfterStop);
+    const afterStopRes = await pendingStopP;
+    assertEqual(afterStopRes.reason, 'stale', 'request resolved after Stop is stale');
+    assertEqual(sAfterStop.tracks[0].stopped, true, 'tracks resolved after Stop are stopped immediately');
+    assertEqual(activeStream, null, 'no active stream after late Stop resolve');
+
+    // 9) Pending request resolved after preset switch stops its tracks & stays stale
+    const pendingPresetP = screenController.startScreenCapturePreview('screen_1');
+    currentPresetId = 'preset_b';
+    const sAfterPreset = makeScreenStream('screen_after_preset');
+    pendingScreenRequests.shift()!.resolve(sAfterPreset);
+    const afterPresetRes = await pendingPresetP;
+    assertEqual(afterPresetRes.reason, 'stale', 'request resolved after preset switch is stale');
+    assertEqual(sAfterPreset.tracks[0].stopped, true, 'tracks resolved after preset switch are stopped');
+    assertEqual(activeStream, null, 'preset switch prevents stale stream activation');
+
+    // 10) Element deleted while request is pending stops late stream
+    const pendingDeleteP = screenController.startScreenCapturePreview('screen_1');
+    elementsInScene = [{ id: 'text_1', type: 'text' }];
+    const sAfterDelete = makeScreenStream('screen_after_delete');
+    pendingScreenRequests.shift()!.resolve(sAfterDelete);
+    const afterDeleteRes = await pendingDeleteP;
+    assertEqual(afterDeleteRes.reason, 'stale', 'deleted screen_capture element makes pending request stale');
+    assertEqual(sAfterDelete.tracks[0].stopped, true, 'deleted element stops late stream tracks');
+    elementsInScene = [{ id: 'screen_1', type: 'screen_capture' }];
+
+    // 11) Component unmount while request is pending stops late stream
+    const pendingUnmountP = screenController.startScreenCapturePreview('screen_1');
+    mounted = false;
+    const sAfterUnmount = makeScreenStream('screen_after_unmount');
+    pendingScreenRequests.shift()!.resolve(sAfterUnmount);
+    const afterUnmountRes = await pendingUnmountP;
+    assertEqual(afterUnmountRes.reason, 'stale', 'unmount makes pending request stale');
+    assertEqual(sAfterUnmount.tracks[0].stopped, true, 'unmount stops late stream tracks');
+    mounted = true;
+
+    // 12) Rapid sequential requests: only latest request activates stream
+    const rapidScreen1 = screenController.startScreenCapturePreview('screen_1');
+    const rapidScreen2 = screenController.startScreenCapturePreview('screen_1');
+    const reqScreen1 = pendingScreenRequests.shift()!;
+    const reqScreen2 = pendingScreenRequests.shift()!;
+    const latestScreenStream = makeScreenStream('screen_latest');
+    const staleScreenStream = makeScreenStream('screen_stale');
+    reqScreen2.resolve(latestScreenStream);
+    const rapidRes2 = await rapidScreen2;
+    assertEqual(rapidRes2.started, true, 'latest screen capture request activates');
+    reqScreen1.resolve(staleScreenStream);
+    const rapidRes1 = await rapidScreen1;
+    assertEqual(rapidRes1.reason, 'stale', 'superseded screen capture request returns stale');
+    assertEqual(staleScreenStream.tracks[0].stopped, true, 'superseded screen capture stops its tracks');
+    assertEqual(readActiveStream()?.id, 'screen_latest', 'superseded request never overwrites latest stream');
+    screenController.stopScreenCapturePreview();
+
+    // 13) Stale error (after preset switch / superseded / unmount) does NOT trigger onError/onCancelled
+    const errorBeforeCount = errorCalls.length;
+    const cancelBeforeCount = cancelledCalls;
+    const staleErrP = screenController.startScreenCapturePreview('screen_1');
+    currentPresetId = 'preset_c';
+    pendingScreenRequests.shift()!.reject(new Error('Stale permission failure'));
+    const staleErrRes = await staleErrP;
+    assertEqual(staleErrRes.reason, 'stale', 'error after preset switch is treated as stale');
+    assertEqual(errorCalls.length, errorBeforeCount, 'stale failure never emits misleading onError');
+    assertEqual(cancelledCalls, cancelBeforeCount, 'stale failure never emits onCancelled');
+
+    // Catalog & StudioView wiring checks for A2.8.2
+    const screenCatalog = getStudioSourceCatalogEntry('screen_capture');
+    assert(
+      !screenCatalog.description.includes('60FPS') &&
+        !screenCatalog.description.includes('60 FPS') &&
+        screenCatalog.description.includes('encoder global'),
+      'screen_capture catalog description truthfully notes FPS follows global encoder setting',
+    );
+    assert(
+      screenCatalog.defaultProperties.fps === 60,
+      'screen_capture catalog preserves legacy fps property for preset backward compatibility',
+    );
+
+    assert(
+      studioSource.includes('createScreenCapturePreviewController<MediaStream>(') &&
+        !studioSource.includes('frameRate: { ideal: 60 }'),
+      'StudioView uses createScreenCapturePreviewController and does not force ideal 60 FPS on getDisplayMedia',
+    );
+
+    const presetSwitchEffect = extractBetween(
+      studioSource,
+      'if (previousPresetIdRef.current === activePresetId) return;',
+      '}, [activePresetId]);',
+      'preset switch cleanup effect',
+    );
+    assert(
+      presetSwitchEffect.includes('stopScreenCapturePreview()'),
+      'Preset switch effect stops active/pending screen capture preview',
+    );
+
+    const unmountCleanupEffect = extractBetween(
+      studioSource,
+      '// Cleanup all remaining camera, screen tracks, and object URLs strictly on component unmount',
+      '// EVENT-TO-ELEMENT ENGINE',
+      'unmount cleanup effect',
+    );
+    assert(
+      unmountCleanupEffect.includes('screenCaptureRequestStateRef.current.seq += 1') &&
+        unmountCleanupEffect.includes('screenCaptureStreamRef.current.getTracks().forEach'),
+      'Unmount cleanup invalidates pending screen capture requests and stops tracks',
+    );
+
+    const deleteHandlerSection = extractBetween(
+      studioSource,
+      'const handleDelete = (id: string) => {',
+      'const handleMoveLayer =',
+      'handleDelete cleanup',
+    );
+    assert(
+      deleteHandlerSection.includes("target.type === 'screen_capture'") &&
+        deleteHandlerSection.includes('stopScreenCapturePreview()'),
+      'Deleting owning screen_capture element stops active/pending preview',
+    );
+
+    const screenCanvasSection = extractBetween(
+      studioSource,
+      "case 'screen_capture': {",
+      "case 'event_alert': {",
+      'screen_capture canvas renderer',
+    );
+    assert(
+      !screenCanvasSection.includes('MediaProjection {fpsVal} FPS') &&
+        screenCanvasSection.includes('FPS Encoder Global') &&
+        screenCanvasSection.includes('handleToggleScreenCapture(normalizedElem.id)'),
+      'Canvas screen_capture placeholder does not promise per-element/60 FPS and passes element ID',
+    );
+
+    const rotationControlSection = extractBetween(
+      studioSource,
+      'const isScreenCapture = selectedElement.type === \'screen_capture\';',
+      '{/* Layer order buttons */}',
+      'geometry rotation control',
+    );
+    assert(
+      rotationControlSection.includes('max={isScreenCapture ? 270 : 360}') &&
+        rotationControlSection.includes('step={isScreenCapture ? 90 : 1}') &&
+        rotationControlSection.includes('normalizeScreenCaptureRotation('),
+      'Rotation slider restricts screen_capture to step=90 quarter-turns while keeping 0-360 for other elements',
+    );
+
+    const quickAddSection = extractBetween(
+      studioSource,
+      "onClick={() => handleAddQuickElement('screen_capture', 'Tangkapan Layar (Game)')}",
+      '</button>',
+      'quick add screen_capture button',
+    );
+    assert(
+      !quickAddSection.includes('60 FPS') && quickAddSection.includes('FPS global'),
+      'Quick-add screen_capture card does not promise 60 FPS',
     );
   }
 

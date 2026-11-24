@@ -24,6 +24,8 @@ import {
   extractViewerCountFromEvent,
   getLatestAudienceUsernameFromHistory,
   getLatestViewerCountFromHistory,
+  normalizeElementRotationForType,
+  normalizeScreenCaptureRotation,
   resolveActiveUsernameModel,
   resolveChatMessageBackground,
   resolveDynamicAvatarModel,
@@ -1087,8 +1089,65 @@ function runStudioElementRenderModelTests(): void {
     'custom hex chat bg preserves RGB (30, 41, 59) at 0.6 alpha',
   );
 
+  // --- A2.8.2 Screen Capture Rotation Normalization & Non-Screen Capture Preservation ---
+  assertEqual(normalizeScreenCaptureRotation(0), 0, 'rotation 0 stays 0');
+  assertEqual(normalizeScreenCaptureRotation(90), 90, 'rotation 90 stays 90');
+  assertEqual(normalizeScreenCaptureRotation(180), 180, 'rotation 180 stays 180');
+  assertEqual(normalizeScreenCaptureRotation(270), 270, 'rotation 270 stays 270');
+  assertEqual(normalizeScreenCaptureRotation(360), 0, 'rotation 360 normalizes to 0');
+  assertEqual(normalizeScreenCaptureRotation(720), 0, 'rotation 720 normalizes to 0');
+
+  assertEqual(normalizeScreenCaptureRotation(44), 0, 'rotation 44 snaps down to 0');
+  assertEqual(normalizeScreenCaptureRotation(45), 90, 'rotation 45 snaps up to 90');
+  assertEqual(normalizeScreenCaptureRotation(134), 90, 'rotation 134 snaps to 90');
+  assertEqual(normalizeScreenCaptureRotation(135), 180, 'rotation 135 snaps to 180');
+  assertEqual(normalizeScreenCaptureRotation(224), 180, 'rotation 224 snaps to 180');
+  assertEqual(normalizeScreenCaptureRotation(225), 270, 'rotation 225 snaps to 270');
+  assertEqual(normalizeScreenCaptureRotation(314), 270, 'rotation 314 snaps to 270');
+  assertEqual(normalizeScreenCaptureRotation(315), 0, 'rotation 315 snaps to 0');
+  assertEqual(normalizeScreenCaptureRotation(359), 0, 'rotation 359 snaps to 0');
+
+  assertEqual(normalizeScreenCaptureRotation(-90), 270, 'negative rotation -90 wraps to 270');
+  assertEqual(normalizeScreenCaptureRotation(-180), 180, 'negative rotation -180 wraps to 180');
+  assertEqual(normalizeScreenCaptureRotation(-270), 90, 'negative rotation -270 wraps to 90');
+  assertEqual(normalizeScreenCaptureRotation(-360), 0, 'negative rotation -360 wraps to 0');
+  assertEqual(normalizeScreenCaptureRotation(-1), 0, 'negative rotation -1 snaps to 0');
+  assertEqual(normalizeScreenCaptureRotation(-46), 270, 'negative rotation -46 snaps to 270');
+
+  assertEqual(normalizeScreenCaptureRotation(Number.NaN), 0, 'NaN rotation falls back to 0');
+  assertEqual(normalizeScreenCaptureRotation(Number.POSITIVE_INFINITY), 0, 'Infinity rotation falls back to 0');
+  assertEqual(normalizeScreenCaptureRotation(Number.NEGATIVE_INFINITY), 0, '-Infinity rotation falls back to 0');
+  assertEqual(normalizeScreenCaptureRotation(undefined), 0, 'undefined rotation falls back to 0');
+  assertEqual(normalizeScreenCaptureRotation(null), 0, 'null rotation falls back to 0');
+  assertEqual(normalizeScreenCaptureRotation('not-a-number'), 0, 'invalid string rotation falls back to 0');
+
+  assertEqual(normalizeElementRotationForType('screen_capture', 142), 180, 'screen_capture uses quarter-turn normalization');
+  assertEqual(normalizeElementRotationForType('camera', 45), 45, 'camera preserves 0-360 rotation');
+  assertEqual(normalizeElementRotationForType('text', 360), 360, 'text preserves full 360 rotation');
+  assertEqual(normalizeElementRotationForType('image', 137), 137, 'image preserves free-angle rotation');
+
+  const legacyScreenInvalidRot = normalizeStudioElementProperties({
+    ...createStudioElementFromSource('screen_capture', []),
+    rotation: 360,
+    properties: { cropMode: 'fit', fps: 60 },
+  });
+  assertEqual(legacyScreenInvalidRot.rotation, 0, 'normalizeStudioElementProperties normalizes screen_capture rotation 360 -> 0');
+  assertEqual(legacyScreenInvalidRot.properties.fps, 60, 'legacy screen_capture properties.fps preserved for backward compatibility');
+
+  const legacyScreenMidRot = normalizeStudioElementProperties({
+    ...createStudioElementFromSource('screen_capture', []),
+    rotation: 195,
+  });
+  assertEqual(legacyScreenMidRot.rotation, 180, 'normalizeStudioElementProperties snaps screen_capture rotation 195 -> 180');
+
+  const nonScreenRot = normalizeStudioElementProperties({
+    ...createStudioElementFromSource('text', []),
+    rotation: 42,
+  });
+  assertEqual(nonScreenRot.rotation, 42, 'normalizeStudioElementProperties keeps free rotation on non-screen_capture');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 + A2.5 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 + A2.5 + A2.8.2 checks).`,
   );
 }
 

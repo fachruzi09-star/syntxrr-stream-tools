@@ -107,6 +107,26 @@ export function parseSafeNumericNominal(value: unknown): number | undefined {
   return undefined;
 }
 
+export type ScreenCaptureQuarterRotation = 0 | 90 | 180 | 270;
+
+export function normalizeScreenCaptureRotation(value: unknown): ScreenCaptureQuarterRotation {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  const snappedQuarter = Math.round(numeric / 90) * 90;
+  const wrapped = ((snappedQuarter % 360) + 360) % 360;
+  if (wrapped === 90) return 90;
+  if (wrapped === 180) return 180;
+  if (wrapped === 270) return 270;
+  return 0;
+}
+
 /**
  * Single Source of Truth for all 26 Studio source definitions (11 Basic + 15 Dynamic).
  * Pure TypeScript metadata without JSX or UI dependencies.
@@ -213,7 +233,8 @@ export const STUDIO_ELEMENT_CATALOG: readonly StudioSourceCatalogEntry[] = [
     category: 'basic',
     categoryLabel: 'Sumber Dasar',
     status: 'ACTIVE',
-    description: 'Tangkapan layar game atau aplikasi Android via MediaProjection API 60FPS.',
+    description:
+      'Tangkapan layar game atau aplikasi Android via MediaProjection native (FPS mengikuti pengaturan frame rate encoder global).',
     defaultDimensions: { width: 90, height: 50 },
     defaultProperties: {
       cropMode: 'fit',
@@ -711,8 +732,14 @@ export function normalizeStudioElementProperties(element: StudioElement): Studio
       break;
   }
 
+  const normalizedRotation =
+    element.type === 'screen_capture'
+      ? normalizeScreenCaptureRotation(element.rotation)
+      : element.rotation;
+
   return {
     ...element,
+    rotation: normalizedRotation,
     properties: props,
     ...(element.triggerConfig ? { triggerConfig: cloneTriggerConfig(element.triggerConfig) } : {}),
   };

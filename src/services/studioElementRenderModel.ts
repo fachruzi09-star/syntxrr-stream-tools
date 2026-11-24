@@ -2,7 +2,13 @@ import type { StreamEvent, StudioElement } from '../types';
 import { normalizeUnitVolume } from '../types';
 import type { ModeBStreamSnapshot } from './nativeStreamingBridge';
 import { isStudioElementReadOnly } from './studioCanvasGesture';
-import { parseSafeNumericNominal } from './studioElementCatalog';
+import {
+  normalizeScreenCaptureRotation,
+  parseSafeNumericNominal,
+  type ScreenCaptureQuarterRotation,
+} from './studioElementCatalog';
+
+export { normalizeScreenCaptureRotation, type ScreenCaptureQuarterRotation };
 
 export const SUPPORTED_SOUNDBOARD_SFX = [
   'cheer',
@@ -1252,4 +1258,218 @@ export function createCameraPreviewController<TStream extends CameraPreviewStrea
     invalidateCameraRequests,
   };
 }
+
+export function normalizeElementRotationForType(type: string, value: unknown): number {
+  if (type === 'screen_capture') {
+    return normalizeScreenCaptureRotation(value);
+  }
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(360, Math.round(numeric)));
+}
+
+export interface ScreenCaptureTrackLike {
+  stop: () => void;
+  onended?: ((this: any, ev: Event) => any) | null;
+}
+
+export interface ScreenCaptureStreamLike {
+  getTracks: () => ScreenCaptureTrackLike[];
+  getVideoTracks?: () => ScreenCaptureTrackLike[];
+}
+
+export interface ScreenCapturePreviewRequestState {
+  seq: number;
+  ownerElemId?: string;
+  presetId?: string;
+}
+
+export interface ScreenCapturePreviewControllerDeps<TStream extends ScreenCaptureStreamLike> {
+  isMounted: () => boolean;
+  getActivePresetId: () => string | undefined;
+  resolveOwnerElementId?: (requestedElemId?: string) => string | undefined;
+  hasScreenCaptureElement: (elemId?: string) => boolean;
+  getActiveStream: () => TStream | null | undefined;
+  setActiveStream: (stream: TStream | null, ownerElemId?: string | null) => void;
+  attachStreamToVideo?: (stream: TStream | null) => void;
+  hasDisplayMedia: () => boolean;
+  requestDisplayMedia: () => Promise<TStream>;
+  onUnsupported: () => void;
+  onCancelled?: () => void;
+  onError: (err: unknown) => void;
+  requestState?: ScreenCapturePreviewRequestState;
+}
+
+export interface ScreenCapturePreviewTransitionResult {
+  started: boolean;
+  reason: 'started' | 'stopped' | 'stale' | 'unsupported' | 'cancelled' | 'error';
+  ownerElemId?: string;
+  presetId?: string;
+}
+
+function stopScreenCaptureStreamTracks(stream: ScreenCaptureStreamLike | null | undefined): void {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach((track) => {
+      try {
+        track.stop();
+      } catch {}
+    });
+  } catch {}
+}
+
+export function isScreenCaptureCancelledError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const maybeErr = err as { name?: unknown; message?: unknown };
+  const name = typeof maybeErr.name === 'string' ? maybeErr.name.trim() : '';
+  if (name === 'AbortError') return true;
+  const message = typeof maybeErr.message === 'string' ? maybeErr.message : '';
+  return /\b(?:cancel|canceled|cancelled|aborted|dismiss|dismissed)\b/i.test(message);
+}
+
+export function createScreenCapturePreviewController<TStream extends ScreenCaptureStreamLike>(
+  deps: ScreenCapturePreviewControllerDeps<TStream>,
+) {
+  const state: ScreenCapturePreviewRequestState = deps.requestState ?? { seq: 0 };
+
+  const stopScreenCapturePreview = (): void => {
+    state.seq += 1;
+    state.ownerElemId = undefined;
+    state.presetId = undefined;
+    const existing = deps.getActiveStream();
+    if (existing) {
+      stopScreenCaptureStreamTracks(existing);
+    }
+    deps.setActiveStream(null, null);
+    deps.attachStreamToVideo?.(null);
+  };
+
+  const invalidatePendingRequests = (): void => {
+    state.seq += 1;
+  };
+
+  const isRequestValid = (
+    requestId: number,
+    ownerElemId: string | undefined,
+    startPresetId: string | undefined,
+  ): boolean => {
+    return (
+      deps.isMounted() &&
+      state.seq === requestId &&
+      deps.hasScreenCaptureElement(ownerElemId) &&
+      deps.getActivePresetId() === startPresetId
+    );
+  };
+
+  const startScreenCapturePreview = async (
+    requestedElemId?: string,
+  ): Promise<ScreenCapturePreviewTransitionResult> => {
+    const requestId = ++state.seq;
+    const ownerElemId = deps.resolveOwnerElementId
+      ? deps.resolveOwnerElementId(requestedElemId)
+      : requestedElemId;
+    const startPresetId = deps.getActivePresetId();
+    state.ownerElemId = ownerElemId;
+    state.presetId = startPresetId;
+
+    const existing = deps.getActiveStream();
+    if (existing) {
+      stopScreenCaptureStreamTracks(existing);
+      deps.setActiveStream(null, null);
+      deps.attachStreamToVideo?.(null);
+    }
+
+    if (!deps.hasDisplayMedia()) {
+      if (deps.isMounted() && state.seq === requestId) {
+        deps.onUnsupported();
+      }
+      return { started: false, reason: 'unsupported' };
+    }
+
+    if (!deps.hasScreenCaptureElement(ownerElemId)) {
+      return { started: false, reason: 'stale' };
+    }
+
+    try {
+      const stream = await deps.requestDisplayMedia();
+
+      if (!isRequestValid(requestId, ownerElemId, startPresetId)) {
+        stopScreenCaptureStreamTracks(stream);
+        return { started: false, reason: 'stale' };
+      }
+
+      const concurrent = deps.getActiveStream();
+      if (concurrent && concurrent !== stream) {
+        stopScreenCaptureStreamTracks(concurrent);
+      }
+
+      const videoTracks = stream.getVideoTracks ? stream.getVideoTracks() : [];
+      const primaryTrack = videoTracks[0] ?? stream.getTracks()[0];
+      if (primaryTrack) {
+        primaryTrack.onended = () => {
+          if (deps.getActiveStream() !== stream) {
+            return;
+          }
+          stopScreenCaptureStreamTracks(stream);
+          deps.setActiveStream(null, null);
+          deps.attachStreamToVideo?.(null);
+        };
+      }
+
+      deps.setActiveStream(stream, ownerElemId ?? null);
+      deps.attachStreamToVideo?.(stream);
+      return {
+        started: true,
+        reason: 'started',
+        ownerElemId,
+        presetId: startPresetId,
+      };
+    } catch (err) {
+      if (state.seq === requestId) {
+        const leftover = deps.getActiveStream();
+        if (leftover) {
+          stopScreenCaptureStreamTracks(leftover);
+        }
+        deps.setActiveStream(null, null);
+        deps.attachStreamToVideo?.(null);
+
+        if (isRequestValid(requestId, ownerElemId, startPresetId)) {
+          if (isScreenCaptureCancelledError(err)) {
+            deps.onCancelled?.();
+            return { started: false, reason: 'cancelled' };
+          }
+          deps.onError(err);
+          return { started: false, reason: 'error' };
+        }
+      }
+      return { started: false, reason: 'stale' };
+    }
+  };
+
+  const handleToggleScreenCapture = async (
+    requestedElemId?: string,
+  ): Promise<ScreenCapturePreviewTransitionResult> => {
+    const existing = deps.getActiveStream();
+    if (existing) {
+      stopScreenCapturePreview();
+      return { started: false, reason: 'stopped' };
+    }
+    return startScreenCapturePreview(requestedElemId);
+  };
+
+  return {
+    startScreenCapturePreview,
+    stopScreenCapturePreview,
+    handleToggleScreenCapture,
+    invalidatePendingRequests,
+  };
+}
+
 

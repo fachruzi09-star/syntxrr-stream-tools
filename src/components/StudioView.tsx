@@ -77,6 +77,7 @@ import {
   buildLiveTextRenderModel,
   computeProgressBarModel,
   createCameraPreviewController,
+  createScreenCapturePreviewController,
   deduplicateStreamEvents,
   deriveInitialLikeCountFromHistory,
   extractViewerCountFromEvent,
@@ -84,6 +85,7 @@ import {
   getLatestAudienceUsernameFromHistory,
   getLatestViewerCountFromHistory,
   getTopDonorNameFromHistory,
+  normalizeScreenCaptureRotation,
   resolveActiveUsernameModel,
   resolveChatMessageBackground,
   resolveDynamicAvatarModel,
@@ -95,6 +97,7 @@ import {
   shouldPlayEventAlertSound,
   shouldShowViewerLiveBadge,
   type CameraFacingMode,
+  type ScreenCapturePreviewRequestState,
   type SupportedSoundboardSfx,
   type StudioChatItem,
   validateSafeBrowserEmbedUrl,
@@ -406,7 +409,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Screen Capture Stream Store
   const [screenCaptureStream, setScreenCaptureStream] = useState<MediaStream | null>(null);
   const screenCaptureStreamRef = useRef<MediaStream | null>(null);
+  const screenCaptureOwnerIdRef = useRef<string | null>(null);
+  const screenCaptureRequestStateRef = useRef<ScreenCapturePreviewRequestState>({ seq: 0 });
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  const activePresetIdRef = useRef<string | undefined>(activePresetId);
+  activePresetIdRef.current = activePresetId;
   const isMountedRef = useRef<boolean>(true);
 
   // Active Reactions on Canvas (Trigger Engine)
@@ -615,6 +622,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
       });
       return changed ? next : prev;
     });
+  }, [elements]);
+
+  // Stop active or pending screen capture preview if the owning screen_capture element is removed
+  useEffect(() => {
+    const screenCaptureIds = new Set(
+      elements.filter((elem) => elem.type === 'screen_capture').map((elem) => elem.id),
+    );
+    const activeOwnerId = screenCaptureOwnerIdRef.current;
+    const pendingOwnerId = screenCaptureRequestStateRef.current.ownerElemId;
+
+    const ownerMissing =
+      (activeOwnerId !== null && !screenCaptureIds.has(activeOwnerId)) ||
+      (activeOwnerId === null && Boolean(screenCaptureStreamRef.current) && screenCaptureIds.size === 0);
+    const pendingOwnerMissing =
+      pendingOwnerId !== undefined && !screenCaptureIds.has(pendingOwnerId);
+
+    if (ownerMissing || pendingOwnerMissing) {
+      stopScreenCapturePreview();
+    }
   }, [elements]);
 
   const activePreset = activePresetProp ?? presets.find((p) => p.id === activePresetId) ?? presets[0] ?? null;
@@ -907,6 +933,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   useEffect(() => {
     if (previousPresetIdRef.current === activePresetId) return;
     previousPresetIdRef.current = activePresetId;
+    stopScreenCapturePreview();
     setSelectedId(null);
     setSelectedLayerElementIds([]);
     setSelectedLayerGroupIds([]);
@@ -1043,8 +1070,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
         stream.getTracks().forEach((track) => track.stop());
       });
       activeCameraStreamsRef.current = {};
+      screenCaptureRequestStateRef.current.seq += 1;
+      screenCaptureRequestStateRef.current.ownerElemId = undefined;
+      screenCaptureRequestStateRef.current.presetId = undefined;
       if (screenCaptureStreamRef.current) {
         screenCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      screenCaptureStreamRef.current = null;
+      screenCaptureOwnerIdRef.current = null;
+      if (screenVideoRef.current) {
+        screenVideoRef.current.srcObject = null;
       }
       createdObjectUrlsRef.current.forEach((url) => {
         try {
@@ -1224,7 +1259,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
     const updated = elementsRef.current.map((elem) => {
       if (elem.id === id) {
-        return { ...elem, [field]: value };
+        const nextValue =
+          field === 'rotation' && elem.type === 'screen_capture'
+            ? normalizeScreenCaptureRotation(value)
+            : value;
+        return { ...elem, [field]: nextValue };
       }
       return elem;
     });
@@ -1393,53 +1432,86 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return startCameraPreview(elemId, requestedFacingMode);
   };
 
-  // SCREEN CAPTURE CONTROL (getDisplayMedia)
-  const handleToggleScreenCapture = async () => {
-    const existingScreen = screenCaptureStreamRef.current;
-    if (existingScreen) {
-      existingScreen.getTracks().forEach((t) => t.stop());
-      setScreenCaptureStream(null);
-      if (screenVideoRef.current) {
-        screenVideoRef.current.srcObject = null;
-      }
-    } else {
-      try {
-        if (navigator.mediaDevices && (navigator.mediaDevices as any).getDisplayMedia) {
-          const stream: MediaStream = await (navigator.mediaDevices as any).getDisplayMedia({
-            video: { frameRate: { ideal: 60 } },
-            audio: true,
-          });
-
-          if (!isMountedRef.current) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-
-          setScreenCaptureStream(stream);
-          if (screenVideoRef.current) {
-            screenVideoRef.current.srcObject = stream;
-            screenVideoRef.current.play().catch(() => {});
-          }
-          const videoTrack = stream.getVideoTracks()[0];
-          if (videoTrack) {
-            videoTrack.onended = () => {
-              setScreenCaptureStream((current) => (current === stream ? null : current));
-              if (screenVideoRef.current && screenVideoRef.current.srcObject === stream) {
-                screenVideoRef.current.srcObject = null;
-              }
-            };
-          }
-        } else {
-          showInAppNotice({
-            tone: 'warn',
-            title: 'Screen Capture Tidak Didukung',
-            message: 'Screen capture getDisplayMedia tidak didukung di perangkat/browser ini.',
-          });
+  // SCREEN CAPTURE CONTROL (browser preview via getDisplayMedia; Android LIVE uses native MediaProjection)
+  const getScreenCapturePreviewController = () =>
+    createScreenCapturePreviewController<MediaStream>({
+      isMounted: () => isMountedRef.current,
+      getActivePresetId: () => activePresetIdRef.current,
+      resolveOwnerElementId: (requestedElemId) => {
+        if (
+          requestedElemId &&
+          elementsRef.current.some((e) => e.id === requestedElemId && e.type === 'screen_capture')
+        ) {
+          return requestedElemId;
         }
-      } catch (err: any) {
+        return elementsRef.current.find((e) => e.type === 'screen_capture')?.id;
+      },
+      hasScreenCaptureElement: (elemId) => {
+        if (elemId) {
+          return elementsRef.current.some((e) => e.id === elemId && e.type === 'screen_capture');
+        }
+        return elementsRef.current.some((e) => e.type === 'screen_capture');
+      },
+      getActiveStream: () => screenCaptureStreamRef.current,
+      setActiveStream: (stream, ownerElemId) => {
+        screenCaptureStreamRef.current = stream;
+        screenCaptureOwnerIdRef.current = stream ? (ownerElemId ?? null) : null;
+        setScreenCaptureStream(stream);
+      },
+      attachStreamToVideo: (stream) => {
+        const videoEl = screenVideoRef.current;
+        if (!videoEl) return;
+        videoEl.srcObject = stream;
+        if (stream) {
+          videoEl.play().catch(() => {});
+        }
+      },
+      hasDisplayMedia: () =>
+        Boolean(navigator.mediaDevices && (navigator.mediaDevices as any).getDisplayMedia),
+      requestDisplayMedia: () =>
+        (navigator.mediaDevices as any).getDisplayMedia({
+          video: true,
+          audio: true,
+        }),
+      onUnsupported: () => {
+        showInAppNotice({
+          tone: 'warn',
+          title: 'Screen Capture Tidak Didukung',
+          message: 'Preview browser getDisplayMedia tidak didukung di perangkat/browser ini.',
+        });
+      },
+      onCancelled: () => {
+        showInAppNotice({
+          tone: 'info',
+          title: 'Screen Share Dibatalkan',
+          message: 'Pemilihan layar preview dibatalkan.',
+        });
+      },
+      onError: (err: any) => {
         console.warn('Screen capture error:', err);
-      }
+        showInAppNotice({
+          tone: 'error',
+          title: 'Gagal Memulai Screen Share',
+          message: err?.message || 'Izin screen capture ditolak atau tidak tersedia.',
+        });
+      },
+      requestState: screenCaptureRequestStateRef.current,
+    });
+
+  const stopScreenCapturePreview = () => {
+    getScreenCapturePreviewController().stopScreenCapturePreview();
+  };
+
+  const startScreenCapturePreview = async (ownerElemId?: string) => {
+    return getScreenCapturePreviewController().startScreenCapturePreview(ownerElemId);
+  };
+
+  const handleToggleScreenCapture = async (ownerElemId?: string) => {
+    if (screenCaptureStreamRef.current) {
+      stopScreenCapturePreview();
+      return { started: false as const, reason: 'stopped' as const };
     }
+    return startScreenCapturePreview(ownerElemId);
   };
 
   // MANUAL AUDIO FILE & PLAYBACK HANDLERS
@@ -1593,6 +1665,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
       stopCameraPreview(id);
     } else {
       cameraRequestSeqRef.current[id] = (cameraRequestSeqRef.current[id] ?? 0) + 1;
+    }
+
+    if (
+      target.type === 'screen_capture' &&
+      (screenCaptureOwnerIdRef.current === id ||
+        screenCaptureRequestStateRef.current.ownerElemId === id ||
+        !elementsRef.current.some((e) => e.id !== id && e.type === 'screen_capture'))
+    ) {
+      stopScreenCapturePreview();
     }
 
     const updated = elements.filter((e) => e.id !== id);
@@ -2346,10 +2427,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           props.cropMode === 'cover' || props.cropMode === 'fill'
             ? 'object-cover'
             : 'object-contain';
-        const fpsVal =
-          typeof props.fps === 'number' && Number.isFinite(props.fps) && props.fps > 0
-            ? Math.round(props.fps)
-            : 60;
         return (
           <div
             className={`w-full h-full rounded-xl bg-zinc-950 border border-zinc-700 relative overflow-hidden flex flex-col items-center justify-center ${animClass}`}
@@ -2373,16 +2450,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
               <div className="flex flex-col items-center justify-center text-zinc-400 p-3 text-center select-none">
                 <Monitor className="w-8 h-8 text-rose-400 mb-1.5" />
                 <span className="text-xs font-bold text-white">Tangkapan Layar Android</span>
-                <span className="text-[9px] text-zinc-400 mt-0.5">MediaProjection {fpsVal} FPS</span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">
+                  MediaProjection Native · FPS Encoder Global
+                </span>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleToggleScreenCapture();
+                    void handleToggleScreenCapture(normalizedElem.id);
                   }}
                   className="mt-2 px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-semibold shadow"
                 >
-                  Mulai Screen Share
+                  Mulai Preview Screen Share
                 </button>
               </div>
             )}
@@ -3778,7 +3857,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       height: `${elem.height}%`,
                       zIndex: elem.layer,
                       opacity: elem.opacity / 100,
-                      transform: `rotate(${elem.rotation}deg)`,
+                      transform: `rotate(${elem.type === 'screen_capture' ? normalizeScreenCaptureRotation(elem.rotation) : elem.rotation}deg)`,
                       touchAction: 'none',
                       userSelect: 'none',
                     }}
@@ -4685,19 +4764,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
-                          Tombol preview di bawah menggunakan <span className="text-[var(--app-text)] font-medium">getDisplayMedia</span> pada platform browser yang mendukung. Pada Android produksi, tangkapan layar <strong className="text-[var(--app-text)]">Mode B</strong> menggunakan <span className="text-[var(--app-text)] font-medium">MediaProjection native</span> saat <strong className="text-[var(--app-text)]">Go Live Mode B</strong> dimulai.
+                          Tombol preview di bawah menggunakan <span className="text-[var(--app-text)] font-medium">getDisplayMedia</span> pada platform browser yang mendukungnya. Pada Android produksi, tangkapan layar <strong className="text-[var(--app-text)]">Mode B</strong> menggunakan <span className="text-[var(--app-text)] font-medium">MediaProjection native</span> ketika <strong className="text-[var(--app-text)]">Go Live Mode B</strong> dimulai.
                         </p>
                         <div className="pl-3 border-l-2 border-rose-500/50 text-[11px] text-[var(--app-text-secondary)] space-y-1">
                           <div>
-                            <strong className="text-[var(--app-error)]">Aturan Mode B RTMP:</strong> Layer Tangkapan Layar harus berada di lapisan paling bawah (Layer #1 / di bawah semua overlay).
+                            <strong className="text-[var(--app-error)]">Aturan Mode B RTMP:</strong> Screen Capture harus berada di bawah semua overlay yang terlihat. Pastikan layer Screen Capture lebih rendah daripada setiap overlay aktif.
                           </div>
                           <div>
                             Crop Mode aktif: <span className="tabular-metrics text-[var(--app-text)] font-medium">Fit</span> · Rotasi didukung: <span className="tabular-metrics text-[var(--app-text)] font-medium">0° / 90° / 180° / 270°</span>.
                           </div>
+                          <div>
+                            Output FPS Mode B mengikuti pengaturan frame rate encoder global (bukan FPS per elemen).
+                          </div>
                         </div>
                         <button
                           type="button"
-                          onClick={handleToggleScreenCapture}
+                          onClick={() => void handleToggleScreenCapture(selectedElement.id)}
                           className="btn-press w-full min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors bg-rose-600 hover:bg-rose-500 text-white"
                         >
                           <Monitor className="w-4 h-4" />
@@ -6824,20 +6906,39 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             className="w-full mt-2 accent-[var(--app-accent)] cursor-pointer"
                           />
                         </div>
-                        <div>
-                          <div className="flex items-center justify-between text-[10px] text-[var(--app-text-secondary)]">
-                            <span>Rotasi</span>
-                            <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">{selectedElement.rotation}°</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="360"
-                            value={selectedElement.rotation}
-                            onChange={(e) => updateElementField(selectedElement.id, 'rotation', parseInt(e.target.value))}
-                            className="w-full mt-2 accent-[var(--app-accent)] cursor-pointer"
-                          />
-                        </div>
+                        {(() => {
+                          const isScreenCapture = selectedElement.type === 'screen_capture';
+                          const displayedRotation = isScreenCapture
+                            ? normalizeScreenCaptureRotation(selectedElement.rotation)
+                            : selectedElement.rotation;
+                          return (
+                            <div>
+                              <div className="flex items-center justify-between text-[10px] text-[var(--app-text-secondary)]">
+                                <span>Rotasi</span>
+                                <span className="tabular-metrics text-[var(--app-accent-text)] font-semibold">
+                                  {displayedRotation}°
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={isScreenCapture ? 270 : 360}
+                                step={isScreenCapture ? 90 : 1}
+                                value={displayedRotation}
+                                onChange={(e) => {
+                                  const parsed = parseInt(e.target.value, 10);
+                                  const nextRotation = isScreenCapture
+                                    ? normalizeScreenCaptureRotation(parsed)
+                                    : Number.isFinite(parsed)
+                                      ? parsed
+                                      : 0;
+                                  updateElementField(selectedElement.id, 'rotation', nextRotation);
+                                }}
+                                className="w-full mt-2 accent-[var(--app-accent)] cursor-pointer"
+                              />
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Layer order buttons */}
@@ -6921,10 +7022,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <Monitor className="w-4 h-4 text-[var(--app-error)]" />
-                      <span className="text-[10px] text-[var(--app-error)] font-bold tabular-metrics">60 FPS</span>
+                      <span className="text-[10px] text-[var(--app-error)] font-bold tabular-metrics">Mode B</span>
                     </div>
                     <span className="font-bold text-[var(--app-text)] mt-1">Tangkapan Layar</span>
-                    <span className="text-[10px] text-[var(--app-text-secondary)]">MediaProjection game capture</span>
+                    <span className="text-[10px] text-[var(--app-text-secondary)]">MediaProjection (FPS global)</span>
                   </button>
                 </div>
               </div>
