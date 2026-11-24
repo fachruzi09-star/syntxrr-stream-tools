@@ -31,7 +31,10 @@ import { normalizeModeBPresetTransition } from './modeBPresetTransitionPolicy';
 import { normalizeModeBScreensaver } from './modeBScreensaverPolicy';
 import { applyPresetGroupStateToElements } from './presetModel';
 import { getStudioMediaAssetIdFromUri, normalizeModeBAudioSource } from './storage';
-import { normalizeCameraProperties } from './studioElementCatalog';
+import {
+  normalizeCameraProperties,
+  normalizeStudioElementProperties,
+} from './studioElementCatalog';
 
 export interface ModeBRtmpValidationResult {
   valid: boolean;
@@ -127,6 +130,9 @@ export function isModeBStoppableStatus(status: ModeBStreamStatus): boolean {
 export function normalizeElementsForModeBSnapshot(elements: StudioElement[]): StudioElement[] {
   if (!Array.isArray(elements)) return [];
   return elements.map((elem) => {
+    if (elem.type === 'screen_capture') {
+      return normalizeStudioElementProperties(elem);
+    }
     const props = elem.properties ? { ...elem.properties } : {};
     if ((elem.type === 'image' || elem.type === 'sticker') && !props.imageAssetId) {
       const parsedId = getStudioMediaAssetIdFromUri(props.imageUrl);

@@ -11,7 +11,10 @@ import {
   validateModeBRtmpConfig,
   waitForModeBSessionReadiness,
 } from '../modeBController';
-import { createModeBOverlaySnapshot } from '../modeBComposition';
+import {
+  createModeBOverlaySnapshot,
+  createModeBScreenCaptureLayer,
+} from '../modeBComposition';
 import {
   __resetNativeStreamingBridgeForTests,
   __setNativeStreamingBridgeTestAdapter,
@@ -1265,6 +1268,167 @@ async function runTests(): Promise<void> {
     assertEqual(customOverlay?.properties?.borderColor, '#10B981', 'snapshot keeps explicit borderColor');
     assertEqual(customOverlay?.properties?.borderWidth, 5, 'snapshot keeps explicit borderWidth=5');
     assertEqual(customOverlay?.properties?.borderRadius, 0, 'snapshot keeps explicit borderRadius=0');
+
+    // A2.8.4.1 — Mode B screen_capture runtime cropMode normalization & Go Live compatibility
+    const scMissingCropSrc = makeEl({
+      id: 'el_sc_missing_crop',
+      type: 'screen_capture',
+      layer: 0,
+      properties: { fps: 60, borderRadius: 12 },
+    });
+    const scFitSrc = makeEl({
+      id: 'el_sc_fit',
+      type: 'screen_capture',
+      layer: 0,
+      properties: { cropMode: 'fit', fps: 60, borderRadius: 12 },
+    });
+    const scCoverSrc = makeEl({
+      id: 'el_sc_cover',
+      type: 'screen_capture',
+      layer: 0,
+      properties: { cropMode: 'cover', fps: 60, borderRadius: 12, customLegacyKey: 'keep-cover' },
+    });
+    const scFillSrc = makeEl({
+      id: 'el_sc_fill',
+      type: 'screen_capture',
+      layer: 0,
+      properties: { cropMode: 'fill', fps: 30, borderRadius: 0, customLegacyKey: 'keep-fill' },
+    });
+    const scNonScreenText = makeEl({
+      id: 'el_non_sc_text',
+      type: 'text',
+      layer: 1,
+      properties: { text: 'Live Banner' },
+    });
+    const scNonScreenImage = makeEl({
+      id: 'el_non_sc_img',
+      type: 'image',
+      layer: 2,
+      properties: { imageUrl: 'studio-media://img_99' },
+    });
+
+    const normalizedScBatch = normalizeElementsForModeBSnapshot([
+      scMissingCropSrc,
+      scFitSrc,
+      scCoverSrc,
+      scFillSrc,
+      scNonScreenText,
+      scNonScreenImage,
+    ]);
+
+    assertEqual(normalizedScBatch[0].properties.cropMode, 'fit', 'missing screen_capture cropMode normalizes to fit');
+    assertEqual(scMissingCropSrc.properties.cropMode, undefined, 'source missing-crop screen_capture is not mutated');
+
+    assertEqual(normalizedScBatch[1].properties.cropMode, 'fit', 'screen_capture cropMode=fit stays fit');
+    assertEqual(normalizedScBatch[2].properties.cropMode, 'fit', 'legacy screen_capture cropMode=cover normalizes to fit');
+    assertEqual(scCoverSrc.properties.cropMode, 'cover', 'source cover screen_capture is not mutated');
+    assertEqual(normalizedScBatch[2].properties.fps, 60, 'cover screen_capture retains fps=60');
+    assertEqual(normalizedScBatch[2].properties.borderRadius, 12, 'cover screen_capture retains borderRadius=12');
+    assertEqual(normalizedScBatch[2].properties.customLegacyKey, 'keep-cover', 'cover screen_capture retains legacy keys');
+
+    assertEqual(normalizedScBatch[3].properties.cropMode, 'fit', 'legacy screen_capture cropMode=fill normalizes to fit');
+    assertEqual(scFillSrc.properties.cropMode, 'fill', 'source fill screen_capture is not mutated');
+    assertEqual(normalizedScBatch[3].properties.fps, 30, 'fill screen_capture retains fps=30');
+    assertEqual(normalizedScBatch[3].properties.borderRadius, 0, 'fill screen_capture retains borderRadius=0');
+    assertEqual(normalizedScBatch[3].properties.customLegacyKey, 'keep-fill', 'fill screen_capture retains legacy keys');
+
+    assertEqual(normalizedScBatch[4].properties.cropMode, undefined, 'text element does not get cropMode');
+    assertEqual(normalizedScBatch[5].properties.cropMode, undefined, 'image element does not get cropMode');
+
+    for (const unknownCrop of ['stretch', 'zoom', '', 123, null]) {
+      const scUnknownSrc = makeEl({
+        id: `el_sc_unknown_${String(unknownCrop)}`,
+        type: 'screen_capture',
+        layer: 0,
+        properties: { cropMode: unknownCrop, fps: 60, borderRadius: 8 },
+      });
+      const [normUnknownSc] = normalizeElementsForModeBSnapshot([scUnknownSrc]);
+      assertEqual(
+        normUnknownSc.properties.cropMode,
+        'fit',
+        `unknown screen_capture cropMode (${String(unknownCrop)}) normalizes to fit`,
+      );
+      assertEqual(
+        scUnknownSrc.properties.cropMode,
+        unknownCrop,
+        `source screen_capture cropMode (${String(unknownCrop)}) is not mutated`,
+      );
+      const layerResult = createModeBScreenCaptureLayer([normUnknownSc], false);
+      assertEqual(
+        layerResult.cropMode,
+        'fit',
+        `createModeBScreenCaptureLayer accepts normalized screen_capture from (${String(unknownCrop)})`,
+      );
+    }
+
+    assertEqual(
+      createModeBScreenCaptureLayer([normalizedScBatch[2]], false).cropMode,
+      'fit',
+      'createModeBScreenCaptureLayer accepts normalized legacy cover screen_capture',
+    );
+    assertEqual(
+      createModeBScreenCaptureLayer([normalizedScBatch[3]], false).cropMode,
+      'fit',
+      'createModeBScreenCaptureLayer accepts normalized legacy fill screen_capture',
+    );
+
+    // Verify prepareAndStartModeBStream succeeds end-to-end with legacy cropMode='cover' screen_capture
+    let capturedLegacyScStartArgs: Parameters<NativeStreamingPluginInterface['startStream']>[0] | null = null;
+    __setNativeStreamingBridgeTestAdapter({
+      isNativeAvailable: true,
+      plugin: {
+        ...mockPlugin,
+        startStream: async (opts) => {
+          capturedLegacyScStartArgs = opts;
+          return {
+            success: true,
+            status: 'starting',
+            message: 'Memulai encoder...',
+          };
+        },
+        getStatus: async () => ({
+          status: 'idle',
+          message: 'Siap',
+          isStreaming: false,
+          bitrateKbps: 0,
+          canStartNewSession: true,
+        }),
+      },
+    });
+    const legacyScPreset = createPreset({
+      id: 'preset_legacy_sc_cover',
+      elements: [scCoverSrc, scNonScreenText],
+    });
+    const legacyScStartRes = await prepareAndStartModeBStream({
+      elements: legacyScPreset.elements,
+      activePreset: legacyScPreset,
+      settings: {
+        ...DEFAULT_SETTINGS,
+        operatingMode: 'MODE_B_STREAMING_ENCODER',
+        rtmpServer: 'rtmp://live.example.com/app/',
+        streamKey: 'legacy_sc_key',
+      },
+      notificationAdapter: {
+        isNativeAndroid: () => true,
+        checkNotificationPermission: async () => ({ granted: true }),
+        requestNotificationPermission: async () => ({ granted: true }),
+      },
+      resolveAssets: async () => [],
+    });
+    assertEqual(
+      legacyScStartRes.snapshot.status,
+      'starting',
+      `prepareAndStartModeBStream succeeds with legacy screen_capture cropMode=cover (${legacyScStartRes.snapshot.message})`,
+    );
+    const resolvedLegacyScArgs = capturedLegacyScStartArgs as
+      | Parameters<NativeStreamingPluginInterface['startStream']>[0]
+      | null;
+    assertEqual(
+      resolvedLegacyScArgs?.screenCaptureLayer?.cropMode,
+      'fit',
+      'prepareAndStartModeBStream forwards normalized screenCaptureLayer.cropMode=fit to native startStream',
+    );
+    assertEqual(scCoverSrc.properties.cropMode, 'cover', 'prepareAndStartModeBStream does not mutate preset source screen_capture');
   } finally {
     __resetNativeStreamingBridgeForTests();
   }
