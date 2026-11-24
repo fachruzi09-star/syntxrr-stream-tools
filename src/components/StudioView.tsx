@@ -268,6 +268,78 @@ const INSPECTOR_STICKER_OPTIONS: ReadonlyArray<{ value: string; label: string }>
   { value: 'gift', label: '🎁 Special Gift' },
 ];
 
+interface ChatMessageOpacityInputProps {
+  elementId: string;
+  properties: Record<string, unknown>;
+  onCommit: (elementId: string, patch: { bgOpacity: number; backgroundColor: string }) => void;
+}
+
+const ChatMessageOpacityInput: React.FC<ChatMessageOpacityInputProps> = ({
+  elementId,
+  properties,
+  onCommit,
+}) => {
+  const resolvedOpacity = resolveChatMessageBackground(properties).bgOpacity;
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftValue, setDraftValue] = useState<string>(() => String(resolvedOpacity));
+  const isEditingRef = useRef(false);
+
+  useEffect(() => {
+    if (!isEditingRef.current) {
+      setDraftValue(String(resolvedOpacity));
+    }
+  }, [resolvedOpacity]);
+
+  const handleFocus = () => {
+    isEditingRef.current = true;
+    setIsEditing(true);
+    setDraftValue(String(resolvedOpacity));
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isEditingRef.current) {
+      isEditingRef.current = true;
+      setIsEditing(true);
+    }
+    setDraftValue(e.target.value);
+  };
+
+  const commitDraft = () => {
+    if (!isEditingRef.current) return;
+    isEditingRef.current = false;
+    setIsEditing(false);
+    const patch = buildChatMessageBgOpacityPatch(properties, draftValue);
+    setDraftValue(String(patch.bgOpacity));
+    onCommit(elementId, patch);
+  };
+
+  const handleBlur = () => {
+    commitDraft();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitDraft();
+      e.currentTarget.blur();
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      min="10"
+      max="100"
+      value={isEditing ? draftValue : String(resolvedOpacity)}
+      onFocus={handleFocus}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics"
+    />
+  );
+};
+
 export const StudioView: React.FC<StudioViewProps> = ({
   elements,
   canvasOrientation,
@@ -4651,18 +4723,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </div>
                           <div>
                             <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Opasitas Latar (%)</label>
-                            <input
-                              type="number"
-                              min="10"
-                              max="100"
-                              value={resolveChatMessageBackground(selectedElement.properties).bgOpacity}
-                              onChange={(e) =>
-                                updateElementProperties(
-                                  selectedElement.id,
-                                  buildChatMessageBgOpacityPatch(selectedElement.properties, e.target.value),
-                                )
-                              }
-                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics"
+                            <ChatMessageOpacityInput
+                              key={selectedElement.id}
+                              elementId={selectedElement.id}
+                              properties={selectedElement.properties}
+                              onCommit={updateElementProperties}
                             />
                           </div>
                         </div>

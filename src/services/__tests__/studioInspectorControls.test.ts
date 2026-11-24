@@ -10,6 +10,9 @@ import {
 } from '../studioElementCatalog';
 import {
   SUPPORTED_SOUNDBOARD_SFX,
+  buildChatMessageBgOpacityPatch,
+  clampChatMessageOpacity,
+  resolveChatMessageBackground,
   resolveSeparatorStyle,
   resolveSoundboardControlModel,
   resolveStickerVisualModel,
@@ -949,11 +952,117 @@ function runStudioInspectorControlsTests(): void {
     'chat_message inspector',
   );
   assert(
-    chatInspectorSection.includes('resolveChatMessageBackground(selectedElement.properties).bgOpacity') &&
-      chatInspectorSection.includes('updateElementProperties(') &&
-      chatInspectorSection.includes('buildChatMessageBgOpacityPatch(selectedElement.properties, e.target.value)'),
-    'chat_message inspector reads synchronized bgOpacity and writes atomic bgOpacity+backgroundColor patch via updateElementProperties',
+    chatInspectorSection.includes('<ChatMessageOpacityInput') &&
+      chatInspectorSection.includes('key={selectedElement.id}') &&
+      chatInspectorSection.includes('elementId={selectedElement.id}') &&
+      chatInspectorSection.includes('properties={selectedElement.properties}') &&
+      chatInspectorSection.includes('onCommit={updateElementProperties}'),
+    'chat_message inspector mounts ChatMessageOpacityInput keyed by selectedElement.id and commits atomically via updateElementProperties',
   );
+
+  // Ensure chat_message Inspector sits inside <fieldset disabled={isSelectedElementReadOnly}>
+  const inspectorFieldsetSection = extractBetween(
+    studioSource,
+    '<fieldset',
+    '</fieldset>',
+    'Inspector read-only fieldset',
+  );
+  assert(
+    inspectorFieldsetSection.includes('disabled={isSelectedElementReadOnly}') &&
+      inspectorFieldsetSection.includes('<ChatMessageOpacityInput'),
+    'ChatMessageOpacityInput remains governed by Inspector <fieldset disabled={isSelectedElementReadOnly}>',
+  );
+
+  // 19. A2.5.1 ChatMessageOpacityInput Local Draft State & Blur/Enter Commit Contract
+  const opacityComponentSection = extractBetween(
+    studioSource,
+    'const ChatMessageOpacityInput:',
+    'export const StudioView:',
+    'ChatMessageOpacityInput component',
+  );
+  assert(
+    opacityComponentSection.includes('resolveChatMessageBackground(properties).bgOpacity') &&
+      opacityComponentSection.includes('useState(false)') &&
+      opacityComponentSection.includes('useState<string>') &&
+      opacityComponentSection.includes('isEditingRef'),
+    'ChatMessageOpacityInput manages local draft state seeded from resolveChatMessageBackground(properties).bgOpacity',
+  );
+
+  const focusHandlerSection = extractBetween(
+    opacityComponentSection,
+    'const handleFocus = () => {',
+    'const handleChange =',
+    'ChatMessageOpacityInput handleFocus',
+  );
+  assert(
+    focusHandlerSection.includes('isEditingRef.current = true') &&
+      focusHandlerSection.includes('setIsEditing(true)') &&
+      focusHandlerSection.includes('setDraftValue(String(resolvedOpacity))'),
+    'ChatMessageOpacityInput copies current resolvedOpacity into local draft on focus',
+  );
+
+  const changeHandlerSection = extractBetween(
+    opacityComponentSection,
+    'const handleChange =',
+    'const commitDraft =',
+    'ChatMessageOpacityInput handleChange',
+  );
+  assert(
+    changeHandlerSection.includes('setDraftValue(e.target.value)') &&
+      !changeHandlerSection.includes('buildChatMessageBgOpacityPatch') &&
+      !changeHandlerSection.includes('onCommit') &&
+      !changeHandlerSection.includes('updateElementProperties') &&
+      !changeHandlerSection.includes('updateElementProperty'),
+    'ChatMessageOpacityInput onChange only updates local draft without mutating element properties per keystroke',
+  );
+
+  const commitDraftSection = extractBetween(
+    opacityComponentSection,
+    'const commitDraft = () => {',
+    'const handleBlur =',
+    'ChatMessageOpacityInput commitDraft',
+  );
+  assert(
+    commitDraftSection.includes('if (!isEditingRef.current) return;') &&
+      commitDraftSection.includes('isEditingRef.current = false;') &&
+      commitDraftSection.includes('buildChatMessageBgOpacityPatch(properties, draftValue)') &&
+      commitDraftSection.includes('onCommit(elementId, patch)'),
+    'ChatMessageOpacityInput commitDraft guards against double commit and applies buildChatMessageBgOpacityPatch via onCommit',
+  );
+
+  const blurAndKeyDownSection = extractBetween(
+    opacityComponentSection,
+    'const handleBlur = () => {',
+    'return (',
+    'ChatMessageOpacityInput blur and keydown handlers',
+  );
+  assert(
+    blurAndKeyDownSection.includes('commitDraft();') &&
+      blurAndKeyDownSection.includes("e.key === 'Enter'") &&
+      blurAndKeyDownSection.includes('e.preventDefault();') &&
+      blurAndKeyDownSection.includes('e.currentTarget.blur();'),
+    'ChatMessageOpacityInput commits on blur and Enter using the same guarded commitDraft flow without double commit',
+  );
+
+  assert(
+    opacityComponentSection.includes('value={isEditing ? draftValue : String(resolvedOpacity)}') &&
+      opacityComponentSection.includes('onFocus={handleFocus}') &&
+      opacityComponentSection.includes('onChange={handleChange}') &&
+      opacityComponentSection.includes('onBlur={handleBlur}') &&
+      opacityComponentSection.includes('onKeyDown={handleKeyDown}'),
+    'ChatMessageOpacityInput wires controlled draft/resolved value and focus/change/blur/keydown handlers',
+  );
+
+  // Helper behavior preservation checks for A2.5 + A2.5.1 draft-commit sequence
+  const chatDefaultElem = createStudioElementFromSource('chat_message', []);
+  assertEqual(resolveChatMessageBackground(chatDefaultElem.properties).bgOpacity, 82, 'catalog chat opacity defaults to 82');
+  const draftCommit50 = buildChatMessageBgOpacityPatch(chatDefaultElem.properties, '50');
+  assertEqual(draftCommit50.bgOpacity, 50, 'blur commit of two-digit "50" produces bgOpacity 50');
+  assertEqual(draftCommit50.backgroundColor, 'rgba(15, 19, 27, 0.5)', 'blur commit preserves RGB and updates alpha to 0.5');
+  assertEqual(clampChatMessageOpacity('5', 82), 10, 'post-edit clamp turns "5" into minimum 10');
+  assertEqual(clampChatMessageOpacity('150', 82), 100, 'post-edit clamp turns "150" into maximum 100');
+  assertEqual(buildChatMessageBgOpacityPatch(chatDefaultElem.properties, '').bgOpacity, 82, 'empty draft falls back to previous valid opacity 82');
+  assertEqual(buildChatMessageBgOpacityPatch(chatDefaultElem.properties, 'invalid').bgOpacity, 82, 'invalid draft falls back safely without NaN');
 
   const chatRendererSection = extractBetween(
     studioSource,
