@@ -133,6 +133,12 @@ export function normalizeElementsForModeBSnapshot(elements: StudioElement[]): St
     } else if (elem.type === 'video' && !props.videoAssetId) {
       const parsedId = getStudioMediaAssetIdFromUri(props.videoUrl);
       if (parsedId) props.videoAssetId = parsedId;
+    } else if (elem.type === 'camera') {
+      if (props.aspectFit === 'cover' || props.aspectFit === 'contain') {
+        props.cameraFit = props.aspectFit;
+      } else if (props.cameraFit !== 'cover' && props.cameraFit !== 'contain') {
+        props.cameraFit = 'cover';
+      }
     }
     return { ...elem, properties: props };
   });

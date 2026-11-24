@@ -1103,3 +1103,153 @@ export function buildChatMessageBgOpacityPatch(
     backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`,
   };
 }
+
+export type CameraFacingMode = 'user' | 'environment';
+
+export interface CameraPreviewTrackLike {
+  stop: () => void;
+}
+
+export interface CameraPreviewStreamLike {
+  getTracks: () => CameraPreviewTrackLike[];
+}
+
+export interface CameraPreviewControllerDeps<TStream extends CameraPreviewStreamLike> {
+  isMounted: () => boolean;
+  hasCameraElement: (elemId: string) => boolean;
+  getFacingMode: (elemId: string, requestedFacingMode?: CameraFacingMode) => CameraFacingMode;
+  getActiveStream: (elemId: string) => TStream | undefined;
+  setActiveStream: (elemId: string, stream: TStream | null) => void;
+  attachStreamToVideo?: (elemId: string, stream: TStream | null) => void;
+  hasMediaDevices: () => boolean;
+  requestMediaStream: (facingMode: CameraFacingMode) => Promise<TStream>;
+  onUnsupported: () => void;
+  onError: (err: unknown) => void;
+  requestSeqMap?: Record<string, number>;
+}
+
+export interface CameraPreviewTransitionResult {
+  started: boolean;
+  reason: 'started' | 'stopped' | 'stale' | 'unsupported' | 'error';
+  facingMode?: CameraFacingMode;
+}
+
+function stopCameraStreamTracks(stream: CameraPreviewStreamLike | null | undefined): void {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach((track) => {
+      try {
+        track.stop();
+      } catch {}
+    });
+  } catch {}
+}
+
+export function createCameraPreviewController<TStream extends CameraPreviewStreamLike>(
+  deps: CameraPreviewControllerDeps<TStream>,
+) {
+  const seqMap = deps.requestSeqMap ?? {};
+
+  const nextRequestSeq = (elemId: string): number => {
+    const next = (seqMap[elemId] ?? 0) + 1;
+    seqMap[elemId] = next;
+    return next;
+  };
+
+  const stopCameraPreview = (elemId: string): void => {
+    nextRequestSeq(elemId);
+    const existing = deps.getActiveStream(elemId);
+    if (existing) {
+      stopCameraStreamTracks(existing);
+    }
+    deps.setActiveStream(elemId, null);
+    deps.attachStreamToVideo?.(elemId, null);
+  };
+
+  const startCameraPreview = async (
+    elemId: string,
+    requestedFacingMode?: CameraFacingMode,
+  ): Promise<CameraPreviewTransitionResult> => {
+    const requestId = nextRequestSeq(elemId);
+    const existing = deps.getActiveStream(elemId);
+    if (existing) {
+      stopCameraStreamTracks(existing);
+      deps.setActiveStream(elemId, null);
+      deps.attachStreamToVideo?.(elemId, null);
+    }
+
+    if (!deps.hasMediaDevices()) {
+      if (deps.isMounted() && seqMap[elemId] === requestId) {
+        deps.onUnsupported();
+      }
+      return { started: false, reason: 'unsupported' };
+    }
+
+    const facing = deps.getFacingMode(elemId, requestedFacingMode);
+    try {
+      const stream = await deps.requestMediaStream(facing);
+
+      if (!deps.isMounted() || seqMap[elemId] !== requestId || !deps.hasCameraElement(elemId)) {
+        stopCameraStreamTracks(stream);
+        return { started: false, reason: 'stale' };
+      }
+
+      const concurrent = deps.getActiveStream(elemId);
+      if (concurrent && concurrent !== stream) {
+        stopCameraStreamTracks(concurrent);
+      }
+
+      deps.setActiveStream(elemId, stream);
+      deps.attachStreamToVideo?.(elemId, stream);
+      return { started: true, reason: 'started', facingMode: facing };
+    } catch (err) {
+      if (seqMap[elemId] === requestId) {
+        const leftover = deps.getActiveStream(elemId);
+        if (leftover) {
+          stopCameraStreamTracks(leftover);
+        }
+        deps.setActiveStream(elemId, null);
+        deps.attachStreamToVideo?.(elemId, null);
+        if (deps.isMounted()) {
+          deps.onError(err);
+        }
+      }
+      return { started: false, reason: 'error' };
+    }
+  };
+
+  const restartCameraPreview = async (
+    elemId: string,
+    nextFacingMode: CameraFacingMode,
+  ): Promise<CameraPreviewTransitionResult> => {
+    return startCameraPreview(elemId, nextFacingMode);
+  };
+
+  const toggleCameraPreview = async (
+    elemId: string,
+    requestedFacingMode?: CameraFacingMode,
+  ): Promise<CameraPreviewTransitionResult> => {
+    const existing = deps.getActiveStream(elemId);
+    if (existing) {
+      stopCameraPreview(elemId);
+      return { started: false, reason: 'stopped' };
+    }
+    return startCameraPreview(elemId, requestedFacingMode);
+  };
+
+  const invalidateCameraRequests = (elemIds?: readonly string[]): void => {
+    const keys = elemIds ?? Object.keys(seqMap);
+    for (const id of keys) {
+      nextRequestSeq(id);
+    }
+  };
+
+  return {
+    startCameraPreview,
+    stopCameraPreview,
+    restartCameraPreview,
+    toggleCameraPreview,
+    invalidateCameraRequests,
+  };
+}
+

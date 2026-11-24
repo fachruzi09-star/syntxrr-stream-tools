@@ -76,6 +76,7 @@ import {
   buildLeaderboardEntries,
   buildLiveTextRenderModel,
   computeProgressBarModel,
+  createCameraPreviewController,
   deduplicateStreamEvents,
   deriveInitialLikeCountFromHistory,
   extractViewerCountFromEvent,
@@ -93,6 +94,7 @@ import {
   resolveViewerCounterDisplay,
   shouldPlayEventAlertSound,
   shouldShowViewerLiveBadge,
+  type CameraFacingMode,
   type SupportedSoundboardSfx,
   type StudioChatItem,
   validateSafeBrowserEmbedUrl,
@@ -398,6 +400,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Multi-Camera Stream Store (elementId -> MediaStream)
   const [activeCameraStreams, setActiveCameraStreams] = useState<Record<string, MediaStream>>({});
   const activeCameraStreamsRef = useRef<Record<string, MediaStream>>({});
+  const cameraRequestSeqRef = useRef<Record<string, number>>({});
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
   // Screen Capture Stream Store
@@ -579,6 +582,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const activeElementIds = new Set(
       elements.filter((elem) => elem.type === 'camera').map((elem) => elem.id)
     );
+    Object.keys(cameraRequestSeqRef.current).forEach((id) => {
+      if (!activeElementIds.has(id)) {
+        cameraRequestSeqRef.current[id] = (cameraRequestSeqRef.current[id] ?? 0) + 1;
+      }
+    });
     const currentStreams = activeCameraStreamsRef.current;
     const orphanedIds = Object.keys(currentStreams).filter((id) => !activeElementIds.has(id));
     if (orphanedIds.length === 0) return;
@@ -589,6 +597,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
         videoRefs.current[id]!.srcObject = null;
       }
     });
+
+    const nextStreamsRef = { ...activeCameraStreamsRef.current };
+    orphanedIds.forEach((id) => {
+      delete nextStreamsRef[id];
+    });
+    activeCameraStreamsRef.current = nextStreamsRef;
 
     setActiveCameraStreams((prev) => {
       let changed = false;
@@ -1022,9 +1036,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      Object.keys(cameraRequestSeqRef.current).forEach((id) => {
+        cameraRequestSeqRef.current[id] = (cameraRequestSeqRef.current[id] ?? 0) + 1;
+      });
       Object.values(activeCameraStreamsRef.current).forEach((stream) => {
         stream.getTracks().forEach((track) => track.stop());
       });
+      activeCameraStreamsRef.current = {};
       if (screenCaptureStreamRef.current) {
         screenCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
       }
@@ -1279,69 +1297,100 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   // MULTI-CAMERA STREAM CONTROL PER ELEMENT
-  const handleToggleCameraForElement = async (elemId: string, requestedFacingMode?: 'user' | 'environment') => {
-    const existing = activeCameraStreamsRef.current[elemId];
-    if (existing) {
-      existing.getTracks().forEach((track) => track.stop());
-      setActiveCameraStreams((prev) => {
-        if (!prev[elemId]) return prev;
-        const next = { ...prev };
-        delete next[elemId];
-        return next;
-      });
-      if (videoRefs.current[elemId]) {
-        videoRefs.current[elemId]!.srcObject = null;
-      }
-    } else {
-      try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const targetElement = elementsRef.current.find((e) => e.id === elemId);
-          const facing = requestedFacingMode || targetElement?.properties?.facingMode || 'user';
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: facing,
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: false,
-          });
-
-          if (!isMountedRef.current) {
-            stream.getTracks().forEach((track) => track.stop());
-            return;
-          }
-
-          setActiveCameraStreams((prev) => {
-            const previousForElem = prev[elemId];
-            if (previousForElem && previousForElem !== stream) {
-              previousForElem.getTracks().forEach((track) => track.stop());
-            }
-            return {
-              ...prev,
-              [elemId]: stream,
-            };
-          });
-
-          if (videoRefs.current[elemId]) {
-            videoRefs.current[elemId]!.srcObject = stream;
-            videoRefs.current[elemId]!.play().catch(() => {});
-          }
+  const getCameraPreviewController = () =>
+    createCameraPreviewController<MediaStream>({
+      isMounted: () => isMountedRef.current,
+      hasCameraElement: (elemId) =>
+        elementsRef.current.some((e) => e.id === elemId && e.type === 'camera'),
+      getFacingMode: (elemId, requestedFacingMode) => {
+        if (requestedFacingMode === 'user' || requestedFacingMode === 'environment') {
+          return requestedFacingMode;
+        }
+        const targetElement = elementsRef.current.find((e) => e.id === elemId);
+        return targetElement?.properties?.facingMode === 'environment' ? 'environment' : 'user';
+      },
+      getActiveStream: (elemId) => activeCameraStreamsRef.current[elemId],
+      setActiveStream: (elemId, stream) => {
+        if (stream) {
+          activeCameraStreamsRef.current = {
+            ...activeCameraStreamsRef.current,
+            [elemId]: stream,
+          };
+          setActiveCameraStreams((prev) => ({
+            ...prev,
+            [elemId]: stream,
+          }));
         } else {
-          showInAppNotice({
-            tone: 'warn',
-            title: 'Kamera Tidak Didukung',
-            message: 'Webcam mediaDevices tidak didukung oleh browser ini.',
+          if (activeCameraStreamsRef.current[elemId]) {
+            const nextRef = { ...activeCameraStreamsRef.current };
+            delete nextRef[elemId];
+            activeCameraStreamsRef.current = nextRef;
+          }
+          setActiveCameraStreams((prev) => {
+            if (!prev[elemId]) return prev;
+            const next = { ...prev };
+            delete next[elemId];
+            return next;
           });
         }
-      } catch (err: any) {
-        console.warn('Camera error for element', elemId, err);
+      },
+      attachStreamToVideo: (elemId, stream) => {
+        const videoEl = videoRefs.current[elemId];
+        if (!videoEl) return;
+        videoEl.srcObject = stream;
+        if (stream) {
+          videoEl.play().catch(() => {});
+        }
+      },
+      hasMediaDevices: () => Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      requestMediaStream: (facing) =>
+        navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: facing,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        }),
+      onUnsupported: () => {
+        showInAppNotice({
+          tone: 'warn',
+          title: 'Kamera Tidak Didukung',
+          message: 'Webcam mediaDevices tidak didukung oleh browser ini.',
+        });
+      },
+      onError: (err: any) => {
+        console.warn('Camera error for element', err);
         showInAppNotice({
           tone: 'error',
           title: 'Gagal Mengakses Kamera',
           message: err?.message || 'Izin kamera ditolak.',
         });
-      }
+      },
+      requestSeqMap: cameraRequestSeqRef.current,
+    });
+
+  const stopCameraPreview = (elemId: string) => {
+    getCameraPreviewController().stopCameraPreview(elemId);
+  };
+
+  const startCameraPreview = async (elemId: string, requestedFacingMode?: CameraFacingMode) => {
+    return getCameraPreviewController().startCameraPreview(elemId, requestedFacingMode);
+  };
+
+  const restartCameraPreview = async (elemId: string, nextFacingMode: CameraFacingMode) => {
+    return getCameraPreviewController().restartCameraPreview(elemId, nextFacingMode);
+  };
+
+  const handleToggleCameraForElement = async (
+    elemId: string,
+    requestedFacingMode?: CameraFacingMode,
+  ) => {
+    if (activeCameraStreamsRef.current[elemId]) {
+      stopCameraPreview(elemId);
+      return { started: false as const, reason: 'stopped' as const };
     }
+    return startCameraPreview(elemId, requestedFacingMode);
   };
 
   // SCREEN CAPTURE CONTROL (getDisplayMedia)
@@ -1540,13 +1589,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     ) {
       return;
     }
-    if (activeCameraStreams[id]) {
-      activeCameraStreams[id].getTracks().forEach((t) => t.stop());
-      setActiveCameraStreams((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+    if (activeCameraStreamsRef.current[id] || activeCameraStreams[id]) {
+      stopCameraPreview(id);
+    } else {
+      cameraRequestSeqRef.current[id] = (cameraRequestSeqRef.current[id] ?? 0) + 1;
     }
 
     const updated = elements.filter((e) => e.id !== id);
@@ -4556,7 +4602,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
                             <Camera className="w-4 h-4" /> Sumber Kamera Siaran
                           </span>
-                          <span className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">Multi-Camera Ready</span>
+                          <span className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">
+                            Canvas Multi-Cam
+                          </span>
                         </div>
 
                         <div>
@@ -4564,10 +4612,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <select
                             value={selectedElement.properties.facingMode || 'user'}
                             onChange={(e) => {
-                              const facing = e.target.value as 'user' | 'environment';
+                              const facing = e.target.value as CameraFacingMode;
                               updateElementProperty(selectedElement.id, 'facingMode', facing);
-                              if (activeCameraStreams[selectedElement.id]) {
-                                handleToggleCameraForElement(selectedElement.id, facing);
+                              if (
+                                activeCameraStreams[selectedElement.id] ||
+                                activeCameraStreamsRef.current[selectedElement.id]
+                              ) {
+                                void restartCameraPreview(selectedElement.id, facing);
                               }
                             }}
                             className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
@@ -4591,6 +4642,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <Camera className="w-3.5 h-3.5" />
                             {activeCameraStreams[selectedElement.id] ? 'Matikan Kamera' : 'Aktifkan Kamera'}
                           </button>
+                        </div>
+
+                        <div className="pl-3 border-l-2 border-[var(--app-border)] text-[11px] text-[var(--app-text-secondary)] leading-relaxed space-y-1">
+                          <div>
+                            Canvas Studio dapat menampilkan lebih dari satu elemen kamera sesuai izin browser.
+                          </div>
+                          <div>
+                            <strong className="text-[var(--app-text)]">Batas Mode B Android:</strong> Saat ini hanya mendukung maksimal 1 kamera fisik aktif dengan 1 arah lensa per sesi LIVE. Mengganti arah lensa atau berpindah ke scene dengan kamera berbeda memerlukan hentikan lalu mulai ulang LIVE.
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 pt-1">
@@ -4625,7 +4685,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
-                          Menangkap feed game Android atau tampilan layar dengan MediaProjection 60 FPS.
+                          Tombol preview di bawah menggunakan <span className="text-[var(--app-text)] font-medium">getDisplayMedia</span> pada platform browser yang mendukung. Pada Android produksi, tangkapan layar <strong className="text-[var(--app-text)]">Mode B</strong> menggunakan <span className="text-[var(--app-text)] font-medium">MediaProjection native</span> saat <strong className="text-[var(--app-text)]">Go Live Mode B</strong> dimulai.
                         </p>
                         <div className="pl-3 border-l-2 border-rose-500/50 text-[11px] text-[var(--app-text-secondary)] space-y-1">
                           <div>
@@ -4641,7 +4701,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           className="btn-press w-full min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors bg-rose-600 hover:bg-rose-500 text-white"
                         >
                           <Monitor className="w-4 h-4" />
-                          {screenCaptureStream ? 'Hentikan Screen Share' : 'Mulai Screen Share (getDisplayMedia)'}
+                          {screenCaptureStream ? 'Hentikan Preview Screen Share' : 'Mulai Screen Share (getDisplayMedia)'}
                         </button>
                       </div>
                     )}

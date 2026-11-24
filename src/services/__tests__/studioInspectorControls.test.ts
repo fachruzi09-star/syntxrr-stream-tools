@@ -12,10 +12,13 @@ import {
   SUPPORTED_SOUNDBOARD_SFX,
   buildChatMessageBgOpacityPatch,
   clampChatMessageOpacity,
+  createCameraPreviewController,
   resolveChatMessageBackground,
   resolveSeparatorStyle,
   resolveSoundboardControlModel,
   resolveStickerVisualModel,
+  type CameraFacingMode,
+  type CameraPreviewStreamLike,
   validateSafeBrowserEmbedUrl,
 } from '../studioElementRenderModel';
 import {
@@ -61,7 +64,7 @@ function updatesProp(section: string, prop: string): boolean {
   return pattern.test(section);
 }
 
-function runStudioInspectorControlsTests(): void {
+async function runStudioInspectorControlsTests(): Promise<void> {
   const studioViewPath = join(process.cwd(), 'src', 'components', 'StudioView.tsx');
   const studioSource = readFileSync(studioViewPath, 'utf8');
 
@@ -1286,7 +1289,220 @@ function runStudioInspectorControlsTests(): void {
     );
   }
 
+  // --- A2.8.1 Camera Preview Restart, Sequencing & Runtime Limitation Tests ---
+  {
+    type MockTrack = { stopped: boolean; stop: () => void };
+    type MockStream = CameraPreviewStreamLike & { id: string; facing: CameraFacingMode; tracks: MockTrack[] };
+    const makeStream = (id: string, facing: CameraFacingMode): MockStream => {
+      const tracks: MockTrack[] = [
+        {
+          stopped: false,
+          stop() {
+            this.stopped = true;
+          },
+        },
+      ];
+      return {
+        id,
+        facing,
+        tracks,
+        getTracks: () => tracks,
+      };
+    };
+
+    const streams: Record<string, MockStream> = {};
+    const videoAttachments: Array<{ elemId: string; streamId: string | null }> = [];
+    const requestedFacings: CameraFacingMode[] = [];
+    const errors: unknown[] = [];
+    let unsupportedCount = 0;
+    let mounted = true;
+    let elementPresent = true;
+    let storedFacing: CameraFacingMode = 'user';
+    const seqMap: Record<string, number> = {};
+
+    type DeferredStream = {
+      facing: CameraFacingMode;
+      resolve: (s: MockStream) => void;
+      reject: (e: unknown) => void;
+    };
+    const pendingRequests: DeferredStream[] = [];
+
+    const controller = createCameraPreviewController<MockStream>({
+      isMounted: () => mounted,
+      hasCameraElement: (elemId) => elemId === 'cam_1' && elementPresent,
+      getFacingMode: (_elemId, requested) => requested ?? storedFacing,
+      getActiveStream: (elemId) => streams[elemId],
+      setActiveStream: (elemId, stream) => {
+        if (stream) {
+          streams[elemId] = stream;
+        } else {
+          delete streams[elemId];
+        }
+      },
+      attachStreamToVideo: (elemId, stream) => {
+        videoAttachments.push({ elemId, streamId: stream ? stream.id : null });
+      },
+      hasMediaDevices: () => true,
+      requestMediaStream: (facing) => {
+        requestedFacings.push(facing);
+        return new Promise<MockStream>((resolve, reject) => {
+          pendingRequests.push({ facing, resolve, reject });
+        });
+      },
+      onUnsupported: () => {
+        unsupportedCount += 1;
+      },
+      onError: (err) => {
+        errors.push(err);
+      },
+      requestSeqMap: seqMap,
+    });
+
+    // 1) Start camera preview via toggle ON
+    const startPromise = controller.toggleCameraPreview('cam_1', 'user');
+    assertEqual(requestedFacings.length, 1, 'toggle ON calls requestMediaStream once');
+    assertEqual(requestedFacings[0], 'user', 'toggle ON uses user facingMode');
+    const frontStream = makeStream('s_front_1', 'user');
+    pendingRequests.shift()!.resolve(frontStream);
+    const startRes = await startPromise;
+    assertEqual(startRes.started, true, 'toggle ON succeeds');
+    assertEqual(streams.cam_1?.id, 's_front_1', 'active stream stored for cam_1');
+    assertEqual(frontStream.tracks[0].stopped, false, 'front stream track stays active');
+
+    // 2) Switch facingMode while preview is active -> restarts with new facingMode and stops old stream
+    storedFacing = 'environment';
+    const restartPromise = controller.restartCameraPreview('cam_1', 'environment');
+    assertEqual(frontStream.tracks[0].stopped, true, 'old stream tracks stopped when restarting lens');
+    assertEqual(streams.cam_1, undefined, 'stale active stream cleared before new getUserMedia resolves');
+    assertEqual(requestedFacings.length, 2, 'restart issues second requestMediaStream');
+    assertEqual(requestedFacings[1], 'environment', 'restart requests environment facingMode');
+    const backStream = makeStream('s_back_1', 'environment');
+    pendingRequests.shift()!.resolve(backStream);
+    const restartRes = await restartPromise;
+    assertEqual(restartRes.started, true, 'restart succeeds with new lens');
+    assertEqual(streams.cam_1?.id, 's_back_1', 'new environment stream becomes active');
+    assertEqual(backStream.tracks[0].stopped, false, 'new environment stream track stays active');
+
+    // 3) Toggle OFF stops active stream cleanly
+    const stopRes = await controller.toggleCameraPreview('cam_1');
+    assertEqual(stopRes.started, false, 'toggle OFF returns started=false');
+    assertEqual(stopRes.reason, 'stopped', 'toggle OFF returns reason=stopped');
+    assertEqual(backStream.tracks[0].stopped, true, 'toggle OFF stops active stream tracks');
+    assertEqual(streams.cam_1, undefined, 'toggle OFF removes active stream');
+
+    // 4) Request sequencing: rapid lens switch ignores stale pending getUserMedia and stops stale tracks
+    const rapid1 = controller.restartCameraPreview('cam_1', 'user');
+    const rapid2 = controller.restartCameraPreview('cam_1', 'environment');
+    assertEqual(pendingRequests.length, 2, 'rapid switch queues two sequential media requests');
+    const req1 = pendingRequests.shift()!;
+    const req2 = pendingRequests.shift()!;
+    const latestEnvStream = makeStream('s_env_latest', 'environment');
+    const staleUserStream = makeStream('s_user_stale', 'user');
+    req2.resolve(latestEnvStream);
+    const rapid2Res = await rapid2;
+    assertEqual(rapid2Res.started, true, 'latest request wins');
+    req1.resolve(staleUserStream);
+    const rapid1Res = await rapid1;
+    assertEqual(rapid1Res.started, false, 'stale request does not activate');
+    assertEqual(rapid1Res.reason, 'stale', 'stale request reports reason=stale');
+    assertEqual(staleUserStream.tracks[0].stopped, true, 'stale resolved stream tracks are stopped immediately');
+    assertEqual(streams.cam_1?.id, 's_env_latest', 'latest stream remains undisturbed');
+
+    // 5) Stop while getUserMedia is pending prevents late resolve from re-opening camera
+    const pendingBeforeStop = controller.restartCameraPreview('cam_1', 'user');
+    assertEqual(latestEnvStream.tracks[0].stopped, true, 'previous active stream stopped before new restart');
+    controller.stopCameraPreview('cam_1');
+    const postStopStream = makeStream('s_after_stop', 'user');
+    pendingRequests.shift()!.resolve(postStopStream);
+    const postStopRes = await pendingBeforeStop;
+    assertEqual(postStopRes.started, false, 'request resolved after stop is rejected as stale');
+    assertEqual(postStopStream.tracks[0].stopped, true, 'tracks resolved after stop are stopped immediately');
+    assertEqual(streams.cam_1, undefined, 'no active stream remains after stop');
+
+    // 6) Failure on getUserMedia reports error and leaves zero unmanaged active streams
+    const errPromise = controller.restartCameraPreview('cam_1', 'environment');
+    pendingRequests.shift()!.reject(new Error('Permission denied'));
+    const errRes = await errPromise;
+    assertEqual(errRes.started, false, 'failed getUserMedia returns started=false');
+    assertEqual(errRes.reason, 'error', 'failed getUserMedia returns reason=error');
+    assertEqual(errors.length, 1, 'onError invoked once for current failed request');
+    assertEqual(streams.cam_1, undefined, 'no unmanaged active stream left on failure');
+    assertEqual(unsupportedCount, 0, 'unsupported callback not triggered when mediaDevices exists');
+
+    // 7) Unmount while getUserMedia is pending stops late stream and skips error/state updates
+    const unmountPending = controller.startCameraPreview('cam_1', 'user');
+    mounted = false;
+    const unmountLateStream = makeStream('s_unmount_late', 'user');
+    pendingRequests.shift()!.resolve(unmountLateStream);
+    const unmountRes = await unmountPending;
+    assertEqual(unmountRes.started, false, 'unmounted resolve does not activate stream');
+    assertEqual(unmountLateStream.tracks[0].stopped, true, 'unmounted resolve stops tracks immediately');
+    assertEqual(streams.cam_1, undefined, 'unmounted resolve leaves stream map clean');
+    mounted = true;
+
+    // 8) Element deleted while getUserMedia is pending stops late stream
+    const deletedElemPending = controller.startCameraPreview('cam_1', 'user');
+    elementPresent = false;
+    const deletedElemStream = makeStream('s_deleted_elem', 'user');
+    pendingRequests.shift()!.resolve(deletedElemStream);
+    const deletedRes = await deletedElemPending;
+    assertEqual(deletedRes.started, false, 'missing camera element rejects pending stream');
+    assertEqual(deletedElemStream.tracks[0].stopped, true, 'missing camera element stops pending stream tracks');
+    elementPresent = true;
+    assert(videoAttachments.length > 0, 'video attachment hook exercised');
+
+    // StudioView wiring & honest runtime limitation checks
+    const cameraSection = extractBetween(
+      studioSource,
+      "{selectedElement.type === 'camera' && (",
+      "{selectedElement.type === 'screen_capture' && (",
+      'camera inspector section',
+    );
+    assert(
+      !cameraSection.includes('Multi-Camera Ready'),
+      'Camera inspector removes misleading "Multi-Camera Ready" label',
+    );
+    assert(
+      cameraSection.includes('Canvas Multi-Cam') &&
+        cameraSection.includes('1 kamera fisik aktif') &&
+        cameraSection.includes('1 arah lensa') &&
+        cameraSection.includes('mulai ulang LIVE'),
+      'Camera inspector communicates Canvas multi-cam vs Mode B 1-camera/1-lens limitation honestly',
+    );
+    assert(
+      cameraSection.includes('restartCameraPreview(selectedElement.id, facing)') &&
+        (cameraSection.includes('activeCameraStreams[selectedElement.id]') ||
+          cameraSection.includes('activeCameraStreamsRef.current[selectedElement.id]')) &&
+        !cameraSection.includes('handleToggleCameraForElement(selectedElement.id, facing)'),
+      'Camera facingMode <select> calls restartCameraPreview only when preview is active instead of toggle',
+    );
+    assert(
+      cameraSection.includes('handleToggleCameraForElement(selectedElement.id, selectedElement.properties.facingMode)'),
+      'Camera Aktifkan/Matikan button preserves ON/OFF toggle wiring',
+    );
+
+    const screenCaptureSection = extractBetween(
+      studioSource,
+      "{selectedElement.type === 'screen_capture' && (",
+      "{selectedElement.type === 'event_alert' && (",
+      'screen_capture inspector section',
+    );
+    assert(
+      screenCaptureSection.includes('getDisplayMedia') &&
+        screenCaptureSection.includes('MediaProjection native') &&
+        screenCaptureSection.includes('Go Live Mode B'),
+      'Screen capture inspector distinguishes browser getDisplayMedia preview from native Mode B MediaProjection',
+    );
+    assert(
+      !screenCaptureSection.includes('Menangkap feed game Android atau tampilan layar dengan MediaProjection 60 FPS.'),
+      'Screen capture inspector no longer conflates browser button with native MediaProjection',
+    );
+  }
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 
-runStudioInspectorControlsTests();
+runStudioInspectorControlsTests().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

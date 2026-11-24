@@ -4,12 +4,14 @@ import {
   ensureModeBNotificationPermission,
   executeOperatingModeSwitch,
   hasConfirmedModeBReadiness,
+  normalizeElementsForModeBSnapshot,
   prepareAndStartModeBStream,
   resolveModeBVideoDimensions,
   stopModeBStreamAndWaitForCleanup,
   validateModeBRtmpConfig,
   waitForModeBSessionReadiness,
 } from '../modeBController';
+import { createModeBOverlaySnapshot } from '../modeBComposition';
 import {
   __resetNativeStreamingBridgeForTests,
   __setNativeStreamingBridgeTestAdapter,
@@ -1077,6 +1079,154 @@ async function runTests(): Promise<void> {
     assertEqual(invalidLayerOrderRes.allowed, false, 'snapshot validation error fails closed in Apply-to-LIVE');
     assertEqual(invalidLayerOrderRes.applied, false, 'snapshot validation error never marks applied=true');
     assert(Boolean(invalidLayerOrderRes.message), 'snapshot validation error returns descriptive message');
+
+    // A2.8.1 P1.2 — Camera aspectFit -> cameraFit mapping for Mode B Native
+    const camCoverSrc = makeEl({
+      id: 'el_cam_cover',
+      type: 'camera',
+      layer: 2,
+      properties: {
+        facingMode: 'user',
+        aspectFit: 'cover',
+        borderColor: '#F2C230',
+        borderWidth: 2,
+        borderRadius: 14,
+        mirror: true,
+      },
+    });
+    const camContainSrc = makeEl({
+      id: 'el_cam_contain',
+      type: 'camera',
+      layer: 2,
+      properties: {
+        facingMode: 'environment',
+        aspectFit: 'contain',
+        borderColor: '#10B981',
+        borderWidth: 4,
+        borderRadius: 20,
+      },
+    });
+    const camLegacyFitSrc = makeEl({
+      id: 'el_cam_legacy',
+      type: 'camera',
+      layer: 2,
+      properties: {
+        facingMode: 'user',
+        cameraFit: 'contain',
+      },
+    });
+    const camDefaultFitSrc = makeEl({
+      id: 'el_cam_default',
+      type: 'camera',
+      layer: 2,
+      properties: {
+        facingMode: 'environment',
+        aspectFit: 'invalid_mode',
+      },
+    });
+
+    const normalizedCams = normalizeElementsForModeBSnapshot([
+      camCoverSrc,
+      camContainSrc,
+      camLegacyFitSrc,
+      camDefaultFitSrc,
+    ]);
+
+    assertEqual(normalizedCams[0].properties.cameraFit, 'cover', 'aspectFit=cover maps to cameraFit=cover');
+    assertEqual(normalizedCams[0].properties.aspectFit, 'cover', 'original aspectFit=cover preserved on normalized copy');
+    assertEqual(normalizedCams[0].properties.facingMode, 'user', 'camera facingMode preserved');
+    assertEqual(normalizedCams[0].properties.borderColor, '#F2C230', 'camera borderColor preserved');
+    assertEqual(normalizedCams[0].properties.borderWidth, 2, 'camera borderWidth preserved');
+    assertEqual(normalizedCams[0].properties.borderRadius, 14, 'camera borderRadius preserved');
+    assertEqual(normalizedCams[0].properties.mirror, true, 'camera mirror preserved');
+
+    assertEqual(normalizedCams[1].properties.cameraFit, 'contain', 'aspectFit=contain maps to cameraFit=contain');
+    assertEqual(normalizedCams[1].properties.aspectFit, 'contain', 'original aspectFit=contain preserved on normalized copy');
+    assertEqual(normalizedCams[1].properties.facingMode, 'environment', 'back camera facingMode preserved');
+
+    assertEqual(normalizedCams[2].properties.cameraFit, 'contain', 'legacy cameraFit=contain preserved when aspectFit missing');
+    assertEqual(normalizedCams[3].properties.cameraFit, 'cover', 'invalid or missing camera fit defaults to cover');
+    assertEqual(camContainSrc.properties.cameraFit, undefined, 'source camera element is not mutated');
+
+    const snapshotWithCamContain = createModeBOverlaySnapshot(
+      normalizeElementsForModeBSnapshot([camContainSrc]),
+    );
+    assertEqual(
+      snapshotWithCamContain[0]?.properties?.cameraFit,
+      'contain',
+      'Mode B overlay snapshot retains mapped cameraFit=contain',
+    );
+    assertEqual(
+      snapshotWithCamContain[0]?.properties?.aspectFit,
+      undefined,
+      'Mode B overlay snapshot whitelist still omits raw aspectFit',
+    );
+
+    // Also verify prepareAndStartModeBStream forwards mapped cameraFit in startStream payload
+    let capturedCamStartArgs: Parameters<NativeStreamingPluginInterface['startStream']>[0] | null = null;
+    __setNativeStreamingBridgeTestAdapter({
+      isNativeAvailable: true,
+      plugin: {
+        ...mockPlugin,
+        startStream: async (opts) => {
+          capturedCamStartArgs = opts;
+          return {
+            success: true,
+            status: 'starting',
+            message: 'Memulai encoder...',
+          };
+        },
+        getStatus: async () => ({
+          status: 'idle',
+          message: 'Siap',
+          isStreaming: false,
+          bitrateKbps: 0,
+          canStartNewSession: true,
+        }),
+      },
+    });
+    const camStartPreset = createPreset({
+      id: 'preset_cam_fit',
+      elements: [
+        makeEl({ id: 'el_screen_base', type: 'screen_capture', layer: 0 }),
+        camContainSrc,
+      ],
+    });
+    const camStartRes = await prepareAndStartModeBStream({
+      elements: camStartPreset.elements,
+      activePreset: camStartPreset,
+      settings: {
+        ...DEFAULT_SETTINGS,
+        operatingMode: 'MODE_B_STREAMING_ENCODER',
+        rtmpServer: 'rtmp://live.example.com/app/',
+        streamKey: 'cam_fit_key',
+      },
+      notificationAdapter: {
+        isNativeAndroid: () => true,
+        checkNotificationPermission: async () => ({ granted: true }),
+        requestNotificationPermission: async () => ({ granted: true }),
+      },
+      resolveAssets: async () => [],
+    });
+    assertEqual(
+      camStartRes.snapshot.status,
+      'starting',
+      `prepareAndStartModeBStream succeeds with camera aspectFit=contain (${camStartRes.snapshot.message})`,
+    );
+    const resolvedCamStartArgs = capturedCamStartArgs as
+      | Parameters<NativeStreamingPluginInterface['startStream']>[0]
+      | null;
+    const startedCamOverlay = resolvedCamStartArgs?.overlayElements?.find((el) => el.type === 'camera');
+    assertEqual(
+      startedCamOverlay?.properties?.cameraFit,
+      'contain',
+      'prepareAndStartModeBStream forwards cameraFit=contain to native startStream',
+    );
+    assertEqual(
+      startedCamOverlay?.properties?.facingMode,
+      'environment',
+      'prepareAndStartModeBStream preserves camera facingMode alongside cameraFit',
+    );
   } finally {
     __resetNativeStreamingBridgeForTests();
   }
