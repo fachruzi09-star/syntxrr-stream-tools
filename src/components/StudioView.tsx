@@ -61,7 +61,9 @@ import {
 } from '../services/studioOrientationBridge';
 import { SOURCE_CATALOG } from './SourcesLibraryView';
 import {
+  CAMERA_CANONICAL_DEFAULTS,
   createStudioElementFromSource,
+  normalizeCameraProperties,
   normalizeStudioElementProperties,
 } from '../services/studioElementCatalog';
 import { soundboardEngine } from '../services/soundboardEngine';
@@ -2367,14 +2369,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
     switch (normalizedElem.type) {
       case 'camera': {
-        const aspectFit = props.aspectFit === 'contain' ? 'object-contain' : 'object-cover';
+        const cameraProps = normalizeCameraProperties(props);
+        const aspectFitClass = cameraProps.aspectFit === 'contain' ? 'object-contain' : 'object-cover';
+        const shouldMirrorPreview =
+          cameraProps.facingMode !== 'environment' && cameraProps.mirror !== false;
         return (
           <div
             className={`w-full h-full rounded-xl bg-zinc-950 border relative overflow-hidden flex flex-col items-center justify-center transition-all ${animClass}`}
             style={{
-              borderColor: props.borderColor || '#F2C230',
-              borderRadius: `${props.borderRadius ?? 14}px`,
-              borderWidth: `${props.borderWidth ?? 2}px`,
+              borderColor: cameraProps.borderColor,
+              borderRadius: `${cameraProps.borderRadius}px`,
+              borderWidth: `${cameraProps.borderWidth}px`,
             }}
           >
             {isCameraActive ? (
@@ -2389,7 +2394,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full ${aspectFit}`}
+                style={shouldMirrorPreview ? { transform: 'scaleX(-1)' } : undefined}
+                className={`w-full h-full ${aspectFitClass}`}
               />
             ) : (
               <div className="flex flex-col items-center justify-center text-zinc-400 p-2 text-center select-none">
@@ -4675,85 +4681,170 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     }`}
                   >
                     {/* Camera */}
-                    {selectedElement.type === 'camera' && (
-                      <div className="py-4 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
-                            <Camera className="w-4 h-4" /> Sumber Kamera Siaran
-                          </span>
-                          <span className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">
-                            Canvas Multi-Cam
-                          </span>
-                        </div>
+                    {selectedElement.type === 'camera' && (() => {
+                      const cameraProps = normalizeCameraProperties(selectedElement.properties);
+                      return (
+                        <div className="py-4 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                              <Camera className="w-4 h-4" /> Sumber Kamera Siaran
+                            </span>
+                            <span className="text-[11px] text-[var(--app-text-secondary)] tabular-metrics">
+                              Canvas Multi-Cam
+                            </span>
+                          </div>
 
-                        <div>
-                          <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Pilihan Lensa / Arah Kamera</label>
-                          <select
-                            value={selectedElement.properties.facingMode || 'user'}
-                            onChange={(e) => {
-                              const facing = e.target.value as CameraFacingMode;
-                              updateElementProperty(selectedElement.id, 'facingMode', facing);
-                              if (
-                                activeCameraStreams[selectedElement.id] ||
-                                activeCameraStreamsRef.current[selectedElement.id]
-                              ) {
-                                void restartCameraPreview(selectedElement.id, facing);
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Pilihan Lensa / Arah Kamera</label>
+                            <select
+                              value={cameraProps.facingMode}
+                              onChange={(e) => {
+                                const facing = e.target.value as CameraFacingMode;
+                                updateElementProperty(selectedElement.id, 'facingMode', facing);
+                                if (
+                                  activeCameraStreams[selectedElement.id] ||
+                                  activeCameraStreamsRef.current[selectedElement.id]
+                                ) {
+                                  void restartCameraPreview(selectedElement.id, facing);
+                                }
+                              }}
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            >
+                              <option value="user">Kamera Depan (Facecam / Selfie)</option>
+                              <option value="environment">Kamera Belakang (Handcam / Meja)</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Tampilan Frame (Aspect Fit)</label>
+                            <select
+                              value={cameraProps.aspectFit}
+                              onChange={(e) =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'aspectFit',
+                                  e.target.value === 'contain' ? 'contain' : 'cover',
+                                )
                               }
-                            }}
-                            className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
-                          >
-                            <option value="user">Kamera Depan (Facecam / Selfie)</option>
-                            <option value="environment">Kamera Belakang (Handcam / Meja)</option>
-                          </select>
-                        </div>
+                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
+                            >
+                              <option value="cover">Cover (Penuh)</option>
+                              <option value="contain">Contain (Utuh)</option>
+                            </select>
+                          </div>
 
-                        <div className="flex items-center justify-between gap-2 pt-1">
-                          <span className="text-xs text-[var(--app-text-secondary)]">Uji Live Feed Kamera:</span>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleCameraForElement(selectedElement.id, selectedElement.properties.facingMode)}
-                            className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${
-                              activeCameraStreams[selectedElement.id]
-                                ? 'bg-rose-600 hover:bg-rose-500 text-white'
-                                : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
-                            }`}
-                          >
-                            <Camera className="w-3.5 h-3.5" />
-                            {activeCameraStreams[selectedElement.id] ? 'Matikan Kamera' : 'Aktifkan Kamera'}
-                          </button>
-                        </div>
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            <span className="text-xs text-[var(--app-text-secondary)]">Uji Live Feed Kamera:</span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleCameraForElement(selectedElement.id, selectedElement.properties.facingMode)}
+                              className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                                activeCameraStreams[selectedElement.id]
+                                  ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                                  : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)]'
+                              }`}
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              {activeCameraStreams[selectedElement.id] ? 'Matikan Kamera' : 'Aktifkan Kamera'}
+                            </button>
+                          </div>
 
-                        <div className="pl-3 border-l-2 border-[var(--app-border)] text-[11px] text-[var(--app-text-secondary)] leading-relaxed space-y-1">
-                          <div>
-                            Canvas Studio dapat menampilkan lebih dari satu elemen kamera sesuai izin browser.
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-[var(--app-text-secondary)]">Cermin Kamera Depan</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'mirror',
+                                    !(selectedElement.properties.mirror !== false),
+                                  )
+                                }
+                                className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
+                                  cameraProps.mirror
+                                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+                                    : 'bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[var(--app-text-secondary)]'
+                                }`}
+                              >
+                                {cameraProps.mirror ? 'Aktif' : 'Nonaktif'}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
+                              Hanya mencerminkan kamera depan (selfie). Kamera belakang tidak dicerminkan agar teks atau arah meja tetap terbaca normal.
+                            </p>
                           </div>
-                          <div>
-                            <strong className="text-[var(--app-text)]">Batas Mode B Android:</strong> Saat ini hanya mendukung maksimal 1 kamera fisik aktif dengan 1 arah lensa per sesi LIVE. Mengganti arah lensa atau berpindah ke scene dengan kamera berbeda memerlukan hentikan lalu mulai ulang LIVE.
-                          </div>
-                        </div>
 
-                        <div className="grid grid-cols-2 gap-3 pt-1">
-                          <div>
-                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Warna Border</label>
-                            <input
-                              type="color"
-                              value={selectedElement.properties.borderColor || '#F2C230'}
-                              onChange={(e) => updateElementProperty(selectedElement.id, 'borderColor', e.target.value)}
-                              className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
-                            />
+                          <div className="pl-3 border-l-2 border-[var(--app-border)] text-[11px] text-[var(--app-text-secondary)] leading-relaxed space-y-1">
+                            <div>
+                              Canvas Studio dapat menampilkan lebih dari satu elemen kamera sesuai izin browser.
+                            </div>
+                            <div>
+                              <strong className="text-[var(--app-text)]">Batas Mode B Android:</strong> Saat ini hanya mendukung maksimal 1 kamera fisik aktif dengan 1 arah lensa per sesi LIVE. Mengganti arah lensa atau berpindah ke scene dengan kamera berbeda memerlukan hentikan lalu mulai ulang LIVE.
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Radius Sudut (px)</label>
-                            <input
-                              type="number"
-                              value={selectedElement.properties.borderRadius || 14}
-                              onChange={(e) => updateElementProperty(selectedElement.id, 'borderRadius', parseInt(e.target.value) || 0)}
-                              className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
-                            />
+
+                          <div className="grid grid-cols-3 gap-2.5 pt-1">
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Warna Border</label>
+                              <input
+                                type="color"
+                                value={toSafeHexColor(
+                                  selectedElement.properties.borderColor,
+                                  CAMERA_CANONICAL_DEFAULTS.borderColor,
+                                )}
+                                onChange={(e) => updateElementProperty(selectedElement.id, 'borderColor', e.target.value)}
+                                className="w-full min-h-[44px] mt-1 p-1 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] cursor-pointer"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Tebal Border</label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={20}
+                                value={cameraProps.borderWidth}
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'borderWidth',
+                                    clampNumericRange(
+                                      e.target.value,
+                                      1,
+                                      20,
+                                      CAMERA_CANONICAL_DEFAULTS.borderWidth,
+                                    ),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-bold text-[var(--app-text-secondary)]">Radius Sudut (px)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={cameraProps.borderRadius}
+                                onChange={(e) =>
+                                  updateElementProperty(
+                                    selectedElement.id,
+                                    'borderRadius',
+                                    clampNumericRange(
+                                      e.target.value,
+                                      0,
+                                      100,
+                                      CAMERA_CANONICAL_DEFAULTS.borderRadius,
+                                    ),
+                                  )
+                                }
+                                className="w-full min-h-[44px] mt-1 px-2.5 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics focus:outline-none focus:border-[var(--app-accent)]"
+                              />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Screen Capture */}
                     {selectedElement.type === 'screen_capture' && (

@@ -1845,6 +1845,88 @@ async function runStudioInspectorControlsTests(): Promise<void> {
     );
   }
 
+  // A2.8.3 Camera Inspector, Canvas Camera Renderer & Native drawCamera Parity
+  {
+    const cameraInspectorSection = extractBetween(
+      inspectorSection,
+      "selectedElement.type === 'camera'",
+      "selectedElement.type === 'screen_capture'",
+      'camera inspector',
+    );
+    assert(
+      updatesProp(cameraInspectorSection, 'facingMode') &&
+        updatesProp(cameraInspectorSection, 'aspectFit') &&
+        updatesProp(cameraInspectorSection, 'mirror') &&
+        updatesProp(cameraInspectorSection, 'borderColor') &&
+        updatesProp(cameraInspectorSection, 'borderWidth') &&
+        updatesProp(cameraInspectorSection, 'borderRadius'),
+      'Camera inspector updates facingMode, aspectFit, mirror, borderColor, borderWidth, and borderRadius via updateElementProperty',
+    );
+    assert(
+      cameraInspectorSection.includes('Cover (Penuh)') &&
+        cameraInspectorSection.includes('Contain (Utuh)') &&
+        cameraInspectorSection.includes('Cermin Kamera Depan') &&
+        cameraInspectorSection.includes('Kamera belakang tidak dicerminkan') &&
+        cameraInspectorSection.includes('!(selectedElement.properties.mirror !== false)'),
+      'Camera inspector includes aspectFit options and default-true mirror toggle with front-only note',
+    );
+    assert(
+      cameraInspectorSection.includes('toSafeHexColor(') &&
+        cameraInspectorSection.includes('clampNumericRange(\n                                      e.target.value,\n                                      1,\n                                      20,\n                                      CAMERA_CANONICAL_DEFAULTS.borderWidth') &&
+        cameraInspectorSection.includes('clampNumericRange(\n                                      e.target.value,\n                                      0,\n                                      100,\n                                      CAMERA_CANONICAL_DEFAULTS.borderRadius') &&
+        !cameraInspectorSection.includes('|| 14') &&
+        !cameraInspectorSection.includes('|| 16'),
+      'Camera inspector uses toSafeHexColor and safe numeric clamping preserving borderRadius=0',
+    );
+
+    const cameraCanvasSection = extractBetween(
+      studioSource,
+      "case 'camera': {",
+      "case 'screen_capture': {",
+      'camera canvas renderer',
+    );
+    assert(
+      cameraCanvasSection.includes('normalizeCameraProperties(props)') &&
+        cameraCanvasSection.includes("cameraProps.facingMode !== 'environment' && cameraProps.mirror !== false") &&
+        cameraCanvasSection.includes("transform: 'scaleX(-1)'") &&
+        cameraCanvasSection.includes('cameraProps.borderColor') &&
+        cameraCanvasSection.includes('cameraProps.borderRadius') &&
+        cameraCanvasSection.includes('cameraProps.borderWidth') &&
+        !cameraCanvasSection.includes('?? 14') &&
+        !cameraCanvasSection.includes('?? 2'),
+      'Canvas camera renderer uses normalized properties, canonical fallbacks, and front-only scaleX(-1) mirroring',
+    );
+
+    const overlayJavaPath = join(
+      process.cwd(),
+      'android',
+      'app',
+      'src',
+      'main',
+      'java',
+      'com',
+      'syntxrr',
+      'streamtools',
+      'StudioOverlayView.java',
+    );
+    const overlayJavaSource = readFileSync(overlayJavaPath, 'utf8');
+    const drawCameraSection = extractBetween(
+      overlayJavaSource,
+      'private void drawCamera(',
+      '/** Start local MP4 timelines',
+      'StudioOverlayView drawCamera',
+    );
+    assert(
+      drawCameraSection.includes('number(properties, "borderRadius", 16f)') &&
+        drawCameraSection.includes('parseColor(properties.optString("borderColor", "#F2C230"), 0xFFF2C230)') &&
+        drawCameraSection.includes('number(properties, "borderWidth", 3f)') &&
+        drawCameraSection.includes('if (cameraFrontFacing && properties.optBoolean("mirror", true))') &&
+        drawCameraSection.includes('properties.optString("aspectFit"') &&
+        drawCameraSection.includes('properties.optString("cameraFit"'),
+      'StudioOverlayView.drawCamera uses canonical visual fallbacks (#F2C230, 16f, 3f), front-only mirror, and aspectFit/cameraFit parity',
+    );
+  }
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

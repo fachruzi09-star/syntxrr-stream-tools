@@ -1227,6 +1227,44 @@ async function runTests(): Promise<void> {
       'environment',
       'prepareAndStartModeBStream preserves camera facingMode alongside cameraFit',
     );
+
+    // A2.8.3 — Canonical camera defaults & explicit visual parity propagation to Mode B snapshot
+    const camMinimalSrc = makeEl({
+      id: 'el_cam_minimal',
+      type: 'camera',
+      layer: 2,
+      properties: {},
+    });
+    const camCustomBorderZeroSrc = makeEl({
+      id: 'el_cam_custom_zero',
+      type: 'camera',
+      layer: 3,
+      properties: {
+        facingMode: 'user',
+        aspectFit: 'contain',
+        mirror: false,
+        borderColor: '#10B981',
+        borderWidth: 5,
+        borderRadius: 0,
+      },
+    });
+    const normalizedA283 = normalizeElementsForModeBSnapshot([camMinimalSrc, camCustomBorderZeroSrc]);
+    assertEqual(normalizedA283[0].properties.facingMode, 'user', 'minimal camera defaults facingMode=user');
+    assertEqual(normalizedA283[0].properties.cameraFit, 'cover', 'minimal camera defaults cameraFit=cover');
+    assertEqual(normalizedA283[0].properties.aspectFit, 'cover', 'minimal camera defaults aspectFit=cover');
+    assertEqual(normalizedA283[0].properties.mirror, true, 'minimal camera defaults mirror=true');
+    assertEqual(normalizedA283[0].properties.borderColor, '#F2C230', 'minimal camera defaults borderColor=#F2C230');
+    assertEqual(normalizedA283[0].properties.borderWidth, 3, 'minimal camera defaults borderWidth=3');
+    assertEqual(normalizedA283[0].properties.borderRadius, 16, 'minimal camera defaults borderRadius=16');
+    assertEqual(camMinimalSrc.properties.borderColor, undefined, 'source minimal camera element is not mutated');
+
+    const snapshotCustomZero = createModeBOverlaySnapshot(normalizedA283);
+    const customOverlay = snapshotCustomZero.find((item) => item.id === 'el_cam_custom_zero');
+    assertEqual(customOverlay?.properties?.cameraFit, 'contain', 'snapshot keeps cameraFit=contain');
+    assertEqual(customOverlay?.properties?.mirror, false, 'snapshot keeps explicit mirror=false');
+    assertEqual(customOverlay?.properties?.borderColor, '#10B981', 'snapshot keeps explicit borderColor');
+    assertEqual(customOverlay?.properties?.borderWidth, 5, 'snapshot keeps explicit borderWidth=5');
+    assertEqual(customOverlay?.properties?.borderRadius, 0, 'snapshot keeps explicit borderRadius=0');
   } finally {
     __resetNativeStreamingBridgeForTests();
   }

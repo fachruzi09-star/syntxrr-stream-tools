@@ -31,6 +31,78 @@ export interface StudioElementCreationOverrides {
 
 let elementIdSequence = 0;
 
+export const CAMERA_CANONICAL_DEFAULTS = {
+  facingMode: 'user' as 'user' | 'environment',
+  borderColor: '#F2C230',
+  borderRadius: 16,
+  borderWidth: 3,
+  aspectFit: 'cover' as 'cover' | 'contain',
+  cameraFit: 'cover' as 'cover' | 'contain',
+  mirror: true,
+};
+
+export interface NormalizedCameraProperties {
+  facingMode: 'user' | 'environment';
+  borderColor: string;
+  borderRadius: number;
+  borderWidth: number;
+  aspectFit: 'cover' | 'contain';
+  cameraFit: 'cover' | 'contain';
+  mirror: boolean;
+  [key: string]: unknown;
+}
+
+export function normalizeCameraProperties(
+  rawProps: Record<string, unknown> | undefined | null,
+): NormalizedCameraProperties {
+  const props = cloneRecord(rawProps);
+
+  const facingMode: 'user' | 'environment' =
+    props.facingMode === 'environment' ? 'environment' : CAMERA_CANONICAL_DEFAULTS.facingMode;
+
+  let resolvedFit: 'cover' | 'contain' = CAMERA_CANONICAL_DEFAULTS.aspectFit;
+  if (props.aspectFit === 'cover' || props.aspectFit === 'contain') {
+    resolvedFit = props.aspectFit;
+  } else if (props.cameraFit === 'cover' || props.cameraFit === 'contain') {
+    resolvedFit = props.cameraFit;
+  }
+
+  const mirror =
+    typeof props.mirror === 'boolean' ? props.mirror : CAMERA_CANONICAL_DEFAULTS.mirror;
+
+  const borderColor =
+    typeof props.borderColor === 'string' && props.borderColor.trim().length > 0
+      ? props.borderColor
+      : CAMERA_CANONICAL_DEFAULTS.borderColor;
+
+  const borderWidth =
+    typeof props.borderWidth === 'number' &&
+    Number.isFinite(props.borderWidth) &&
+    props.borderWidth >= 1 &&
+    props.borderWidth <= 20
+      ? props.borderWidth
+      : CAMERA_CANONICAL_DEFAULTS.borderWidth;
+
+  const borderRadius =
+    typeof props.borderRadius === 'number' &&
+    Number.isFinite(props.borderRadius) &&
+    props.borderRadius >= 0 &&
+    props.borderRadius <= 100
+      ? props.borderRadius
+      : CAMERA_CANONICAL_DEFAULTS.borderRadius;
+
+  return {
+    ...props,
+    facingMode,
+    borderColor,
+    borderRadius,
+    borderWidth,
+    aspectFit: resolvedFit,
+    cameraFit: resolvedFit,
+    mirror,
+  };
+}
+
 function cloneRecord(value: Record<string, unknown> | undefined | null): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const copy: Record<string, unknown> = {};
@@ -220,11 +292,7 @@ export const STUDIO_ELEMENT_CATALOG: readonly StudioSourceCatalogEntry[] = [
     description: 'Feed video kamera depan/belakang smartphone secara real-time dengan border modern.',
     defaultDimensions: { width: 38, height: 24 },
     defaultProperties: {
-      facingMode: 'user',
-      borderColor: '#F2C230',
-      borderRadius: 16,
-      borderWidth: 3,
-      aspectFit: 'cover',
+      ...CAMERA_CANONICAL_DEFAULTS,
     },
   },
   {
@@ -564,6 +632,11 @@ export function normalizeStudioElementProperties(element: StudioElement): Studio
   const props = cloneRecord(element?.properties);
 
   switch (element.type) {
+    case 'camera': {
+      Object.assign(props, normalizeCameraProperties(props));
+      break;
+    }
+
     case 'image': {
       if (props.imageUrl === undefined && typeof props.url === 'string' && props.url.trim().length > 0) {
         props.imageUrl = props.url;

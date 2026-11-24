@@ -31,6 +31,7 @@ import { normalizeModeBPresetTransition } from './modeBPresetTransitionPolicy';
 import { normalizeModeBScreensaver } from './modeBScreensaverPolicy';
 import { applyPresetGroupStateToElements } from './presetModel';
 import { getStudioMediaAssetIdFromUri, normalizeModeBAudioSource } from './storage';
+import { normalizeCameraProperties } from './studioElementCatalog';
 
 export interface ModeBRtmpValidationResult {
   valid: boolean;
@@ -134,11 +135,7 @@ export function normalizeElementsForModeBSnapshot(elements: StudioElement[]): St
       const parsedId = getStudioMediaAssetIdFromUri(props.videoUrl);
       if (parsedId) props.videoAssetId = parsedId;
     } else if (elem.type === 'camera') {
-      if (props.aspectFit === 'cover' || props.aspectFit === 'contain') {
-        props.cameraFit = props.aspectFit;
-      } else if (props.cameraFit !== 'cover' && props.cameraFit !== 'contain') {
-        props.cameraFit = 'cover';
-      }
+      return { ...elem, properties: normalizeCameraProperties(props) };
     }
     return { ...elem, properties: props };
   });

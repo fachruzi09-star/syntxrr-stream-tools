@@ -3,12 +3,14 @@
 
 import type { SourceType, StudioElement } from '../../types';
 import {
+  CAMERA_CANONICAL_DEFAULTS,
   STUDIO_ELEMENT_CATALOG,
   createStudioElementFromSource,
   getStudioSourceCatalogEntry,
   normalizeStudioElementProperties,
   parseSafeNumericNominal,
 } from '../studioElementCatalog';
+import { DEFAULT_STUDIO_ELEMENTS } from '../storage';
 
 let assertionCount = 0;
 
@@ -355,8 +357,28 @@ function runStudioElementsConsistencyTests(): void {
   assertEqual(parseSafeNumericNominal('Rp 450.000'), 450000, 'parseSafeNumericNominal handles Rp dot separators');
   assertEqual(parseSafeNumericNominal('invalid'), undefined, 'parseSafeNumericNominal returns undefined instead of NaN');
 
+  // 10. A2.8.3 Canonical camera defaults parity across Catalog and DEFAULT_STUDIO_ELEMENTS
+  const cameraCatalog = getStudioSourceCatalogEntry('camera');
+  assertEqual(cameraCatalog.defaultProperties.facingMode, CAMERA_CANONICAL_DEFAULTS.facingMode, 'catalog camera facingMode matches canonical default');
+  assertEqual(cameraCatalog.defaultProperties.borderColor, '#F2C230', 'catalog camera borderColor matches canonical default');
+  assertEqual(cameraCatalog.defaultProperties.borderRadius, 16, 'catalog camera borderRadius matches canonical default');
+  assertEqual(cameraCatalog.defaultProperties.borderWidth, 3, 'catalog camera borderWidth matches canonical default');
+  assertEqual(cameraCatalog.defaultProperties.aspectFit, 'cover', 'catalog camera aspectFit matches canonical default');
+  assertEqual(cameraCatalog.defaultProperties.cameraFit, 'cover', 'catalog camera cameraFit matches canonical default');
+  assertEqual(cameraCatalog.defaultProperties.mirror, true, 'catalog camera mirror matches canonical default');
+
+  const defaultCamElem = DEFAULT_STUDIO_ELEMENTS.find((el) => el.id === 'elem_camera');
+  assert(Boolean(defaultCamElem), 'DEFAULT_STUDIO_ELEMENTS contains elem_camera');
+  assertEqual(defaultCamElem?.properties.facingMode, 'user', 'DEFAULT_STUDIO_ELEMENTS camera uses canonical facingMode');
+  assertEqual(defaultCamElem?.properties.borderColor, '#F2C230', 'DEFAULT_STUDIO_ELEMENTS camera uses canonical borderColor');
+  assertEqual(defaultCamElem?.properties.borderRadius, 16, 'DEFAULT_STUDIO_ELEMENTS camera uses canonical borderRadius');
+  assertEqual(defaultCamElem?.properties.borderWidth, 3, 'DEFAULT_STUDIO_ELEMENTS camera uses canonical borderWidth');
+  assertEqual(defaultCamElem?.properties.aspectFit, 'cover', 'DEFAULT_STUDIO_ELEMENTS camera uses canonical aspectFit');
+  assertEqual(defaultCamElem?.properties.cameraFit, 'cover', 'DEFAULT_STUDIO_ELEMENTS camera uses canonical cameraFit');
+  assertEqual(defaultCamElem?.properties.mirror, true, 'DEFAULT_STUDIO_ELEMENTS camera uses canonical mirror');
+
   console.log(
-    `Studio elements consistency tests passed: ${assertionCount} assertions (26 catalog sources, factory parity, non-mutation, multi-cam facingMode, non-destructive alias normalization).`,
+    `Studio elements consistency tests passed: ${assertionCount} assertions (26 catalog sources, factory parity, non-mutation, multi-cam facingMode, non-destructive alias normalization, A2.8.3 camera parity).`,
   );
 }
 

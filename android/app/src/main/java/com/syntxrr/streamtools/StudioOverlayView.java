@@ -704,7 +704,9 @@ public final class StudioOverlayView extends View {
 
     private void drawCamera(Canvas canvas, RectF bounds, JSONObject properties, int alpha) {
         int save = canvas.save();
-        float radius = Math.max(0f, number(properties, "borderRadius", 0f) * previewScale);
+        float rawRadius = number(properties, "borderRadius", 16f);
+        float clampedRadius = rawRadius < 0f || rawRadius > 100f ? 16f : rawRadius;
+        float radius = Math.max(0f, clampedRadius * previewScale);
         Path clip = new Path();
         clip.addRoundRect(bounds, radius, radius, Path.Direction.CW);
         canvas.clipPath(clip);
@@ -717,7 +719,16 @@ public final class StudioOverlayView extends View {
                 float sourceHeight = frame.getHeight();
                 float sx = bounds.width() / sourceWidth;
                 float sy = bounds.height() / sourceHeight;
-                boolean cover = "cover".equalsIgnoreCase(properties.optString("cameraFit", "cover"));
+                String aspectFitRaw = properties.optString("aspectFit", "").trim();
+                String cameraFitRaw = properties.optString("cameraFit", "").trim();
+                boolean cover;
+                if ("contain".equalsIgnoreCase(aspectFitRaw)) {
+                    cover = false;
+                } else if ("cover".equalsIgnoreCase(aspectFitRaw)) {
+                    cover = true;
+                } else {
+                    cover = !"contain".equalsIgnoreCase(cameraFitRaw);
+                }
                 float scale = cover ? Math.max(sx, sy) : Math.min(sx, sy);
                 float drawWidth = sourceWidth * scale;
                 float drawHeight = sourceHeight * scale;
@@ -750,9 +761,11 @@ public final class StudioOverlayView extends View {
         }
 
         paint.setStyle(Paint.Style.STROKE);
-        paint.setColor(parseColor(properties.optString("borderColor", "#2563EB"), 0xFF2563EB));
+        paint.setColor(parseColor(properties.optString("borderColor", "#F2C230"), 0xFFF2C230));
         paint.setAlpha(alpha);
-        paint.setStrokeWidth(Math.max(1f, number(properties, "borderWidth", 2f) * previewScale));
+        float rawBorderWidth = number(properties, "borderWidth", 3f);
+        float clampedBorderWidth = rawBorderWidth < 1f || rawBorderWidth > 20f ? 3f : rawBorderWidth;
+        paint.setStrokeWidth(Math.max(1f, clampedBorderWidth * previewScale));
         canvas.drawRoundRect(bounds, radius, radius, paint);
         paint.setStyle(Paint.Style.FILL);
         canvas.restoreToCount(save);

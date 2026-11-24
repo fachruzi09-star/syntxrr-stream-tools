@@ -21,6 +21,7 @@ import {
 import { DEFAULT_TTS_CONFIG } from './ttsService';
 import { normalizeStudioPreset } from './presetModel';
 import { DEFAULT_APP_THEME, normalizeStoredAppTheme } from '../theme/themeEngine';
+import { CAMERA_CANONICAL_DEFAULTS } from './studioElementCatalog';
 
 const DB_NAME = 'syntxrr_stream_tools_db';
 const DB_VERSION = 3; // Incremented for SYNTXRR STREAM Master Architecture
@@ -128,9 +129,7 @@ export const DEFAULT_STUDIO_ELEMENTS: StudioElement[] = [
     opacity: 100,
     rotation: 0,
     properties: {
-      facingMode: 'user',
-      borderColor: '#2563EB',
-      borderRadius: 12,
+      ...CAMERA_CANONICAL_DEFAULTS,
     },
   },
   {

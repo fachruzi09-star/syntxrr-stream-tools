@@ -3,7 +3,9 @@
 
 import type { StreamEvent, StudioElement } from '../../types';
 import {
+  CAMERA_CANONICAL_DEFAULTS,
   createStudioElementFromSource,
+  normalizeCameraProperties,
   normalizeStudioElementProperties,
 } from '../studioElementCatalog';
 import {
@@ -1146,8 +1148,93 @@ function runStudioElementRenderModelTests(): void {
   });
   assertEqual(nonScreenRot.rotation, 42, 'normalizeStudioElementProperties keeps free rotation on non-screen_capture');
 
+  // --- A2.8.3 Camera Canonical Normalization & Non-Destructive Parity ---
+  const camDefaultNorm = normalizeCameraProperties({});
+  assertEqual(camDefaultNorm.facingMode, CAMERA_CANONICAL_DEFAULTS.facingMode, 'empty camera defaults facingMode=user');
+  assertEqual(camDefaultNorm.borderColor, '#F2C230', 'empty camera defaults borderColor=#F2C230');
+  assertEqual(camDefaultNorm.borderRadius, 16, 'empty camera defaults borderRadius=16');
+  assertEqual(camDefaultNorm.borderWidth, 3, 'empty camera defaults borderWidth=3');
+  assertEqual(camDefaultNorm.aspectFit, 'cover', 'empty camera defaults aspectFit=cover');
+  assertEqual(camDefaultNorm.cameraFit, 'cover', 'empty camera defaults cameraFit=cover');
+  assertEqual(camDefaultNorm.mirror, true, 'empty camera defaults mirror=true');
+
+  const rawLegacyCamInput: Record<string, unknown> = {
+    cameraFit: 'contain',
+    mirror: false,
+    facingMode: 'environment',
+    borderColor: '#2563EB',
+    borderWidth: 1,
+    borderRadius: 0,
+    customLegacyTag: 'keep-me',
+  };
+  const camLegacyNorm = normalizeCameraProperties(rawLegacyCamInput);
+  assertEqual(camLegacyNorm.aspectFit, 'contain', 'legacy cameraFit=contain populates aspectFit=contain');
+  assertEqual(camLegacyNorm.cameraFit, 'contain', 'legacy cameraFit=contain preserved');
+  assertEqual(camLegacyNorm.mirror, false, 'explicit mirror=false preserved');
+  assertEqual(camLegacyNorm.facingMode, 'environment', 'explicit facingMode=environment preserved');
+  assertEqual(camLegacyNorm.borderColor, '#2563EB', 'explicit legacy borderColor preserved');
+  assertEqual(camLegacyNorm.borderWidth, 1, 'boundary borderWidth=1 preserved');
+  assertEqual(camLegacyNorm.borderRadius, 0, 'boundary borderRadius=0 preserved without fallback');
+  assertEqual(camLegacyNorm.customLegacyTag, 'keep-me', 'unknown legacy camera keys preserved');
+  assertEqual(rawLegacyCamInput.aspectFit, undefined, 'normalizeCameraProperties does not mutate input object');
+
+  const camPriorityNorm = normalizeCameraProperties({
+    aspectFit: 'contain',
+    cameraFit: 'cover',
+  });
+  assertEqual(camPriorityNorm.aspectFit, 'contain', 'valid aspectFit stays contain');
+  assertEqual(camPriorityNorm.cameraFit, 'contain', 'valid aspectFit takes priority over legacy cameraFit');
+
+  const camFallbackToLegacyFit = normalizeCameraProperties({
+    aspectFit: 'stretch',
+    cameraFit: 'contain',
+  });
+  assertEqual(camFallbackToLegacyFit.aspectFit, 'contain', 'invalid aspectFit falls back to valid legacy cameraFit');
+  assertEqual(camFallbackToLegacyFit.cameraFit, 'contain', 'valid legacy cameraFit kept when aspectFit invalid');
+
+  const camInvalidAllNorm = normalizeCameraProperties({
+    facingMode: 'sideways',
+    aspectFit: 'zoom',
+    cameraFit: 'fill',
+    mirror: 'false',
+    borderColor: '   ',
+    borderWidth: 0,
+    borderRadius: -5,
+  });
+  assertEqual(camInvalidAllNorm.facingMode, 'user', 'invalid facingMode falls back to user');
+  assertEqual(camInvalidAllNorm.aspectFit, 'cover', 'invalid aspectFit+cameraFit falls back to cover');
+  assertEqual(camInvalidAllNorm.cameraFit, 'cover', 'invalid aspectFit+cameraFit maps cameraFit=cover');
+  assertEqual(camInvalidAllNorm.mirror, true, 'non-boolean mirror falls back to true');
+  assertEqual(camInvalidAllNorm.borderColor, '#F2C230', 'empty/whitespace borderColor falls back to #F2C230');
+  assertEqual(camInvalidAllNorm.borderWidth, 3, 'out-of-range borderWidth=0 falls back to 3');
+  assertEqual(camInvalidAllNorm.borderRadius, 16, 'negative borderRadius falls back to 16');
+
+  const camHighBoundaryNorm = normalizeCameraProperties({
+    borderWidth: 20,
+    borderRadius: 100,
+  });
+  assertEqual(camHighBoundaryNorm.borderWidth, 20, 'max borderWidth=20 preserved');
+  assertEqual(camHighBoundaryNorm.borderRadius, 100, 'max borderRadius=100 preserved');
+
+  const camOverMaxNorm = normalizeCameraProperties({
+    borderWidth: 21,
+    borderRadius: 101,
+  });
+  assertEqual(camOverMaxNorm.borderWidth, 3, 'borderWidth>20 falls back to 3');
+  assertEqual(camOverMaxNorm.borderRadius, 16, 'borderRadius>100 falls back to 16');
+
+  const rawCameraElement: StudioElement = {
+    ...createStudioElementFromSource('camera', []),
+    properties: { cameraFit: 'contain', borderRadius: 0, mirror: false },
+  };
+  const normCameraElement = normalizeStudioElementProperties(rawCameraElement);
+  assertEqual(normCameraElement.properties.aspectFit, 'contain', 'normalizeStudioElementProperties bridges cameraFit->aspectFit');
+  assertEqual(normCameraElement.properties.borderRadius, 0, 'normalizeStudioElementProperties keeps camera borderRadius=0');
+  assertEqual(normCameraElement.properties.borderWidth, 3, 'normalizeStudioElementProperties fills default borderWidth=3');
+  assertEqual(normCameraElement.properties.mirror, false, 'normalizeStudioElementProperties keeps camera mirror=false');
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 + A2.5 + A2.8.2 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 + A2.5 + A2.8.2 + A2.8.3 checks).`,
   );
 }
 
