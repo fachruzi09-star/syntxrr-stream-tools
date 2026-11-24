@@ -4736,7 +4736,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <span className="text-xs text-[var(--app-text-secondary)]">Tampilkan Lencana VIP / Sub</span>
                           <button
                             type="button"
-                            onClick={() => updateElementProperty(selectedElement.id, 'showBadges', !selectedElement.properties.showBadges)}
+                            onClick={() => updateElementProperty(selectedElement.id, 'showBadges', !(selectedElement.properties.showBadges !== false))}
                             className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${
                               selectedElement.properties.showBadges !== false
                                 ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
@@ -5451,7 +5451,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <span className="text-xs text-[var(--app-text-secondary)]">Tampilkan Nama Pengirim Request</span>
                           <button
                             type="button"
-                            onClick={() => updateElementProperty(selectedElement.id, 'showRequester', !selectedElement.properties.showRequester)}
+                            onClick={() => updateElementProperty(selectedElement.id, 'showRequester', !(selectedElement.properties.showRequester !== false))}
                             className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold ${
                               selectedElement.properties.showRequester !== false
                                 ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'

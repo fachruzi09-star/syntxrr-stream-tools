@@ -1076,6 +1076,83 @@ function runStudioInspectorControlsTests(): void {
     'chat_message canvas renderer uses resolveChatMessageBackground(props).backgroundColor',
   );
 
+  // 20. A2.6 Default-True Toggle Regression Fix (chat_message.showBadges & song_request.showRequester)
+  assert(
+    chatInspectorSection.includes(
+      "updateElementProperty(selectedElement.id, 'showBadges', !(selectedElement.properties.showBadges !== false))",
+    ) &&
+      !chatInspectorSection.includes("'showBadges', !selectedElement.properties.showBadges)") &&
+      chatInspectorSection.includes('selectedElement.properties.showBadges !== false') &&
+      chatInspectorSection.includes("'Aktif' : 'Nonaktif'"),
+    'chat_message inspector uses !(selectedElement.properties.showBadges !== false) handler and !== false button display',
+  );
+  assert(
+    chatRendererSection.includes('props.showBadges !== false'),
+    'chat_message canvas renderer preserves props.showBadges !== false check',
+  );
+
+  const songRequestInspectorSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'song_request'",
+    "selectedElement.type === 'lyrics'",
+    'song_request inspector',
+  );
+  assert(
+    songRequestInspectorSection.includes(
+      "updateElementProperty(selectedElement.id, 'showRequester', !(selectedElement.properties.showRequester !== false))",
+    ) &&
+      !songRequestInspectorSection.includes("'showRequester', !selectedElement.properties.showRequester)") &&
+      songRequestInspectorSection.includes('selectedElement.properties.showRequester !== false') &&
+      songRequestInspectorSection.includes("'Aktif' : 'Nonaktif'"),
+    'song_request inspector uses !(selectedElement.properties.showRequester !== false) handler and !== false button display',
+  );
+
+  const songRequestRendererSection = extractBetween(
+    studioSource,
+    "case 'song_request':",
+    "case 'lyrics': {",
+    'song_request renderer',
+  );
+  assert(
+    songRequestRendererSection.includes('props.showRequester !== false'),
+    'song_request canvas renderer preserves props.showRequester !== false check',
+  );
+
+  assert(
+    inspectorFieldsetSection.includes("selectedElement.type === 'chat_message'") &&
+      inspectorFieldsetSection.includes("selectedElement.type === 'song_request'"),
+    'chat_message and song_request toggle buttons remain inside <fieldset disabled={isSelectedElementReadOnly}>',
+  );
+
+  // Verify boolean transition semantics for default-true (!== false) properties:
+  // undefined -> effective true -> 1st tap false -> 2nd tap true; true -> false; false -> true
+  const isDefaultTrueEffective = (value: unknown): boolean => value !== false;
+  const computeDefaultTrueNextToggle = (value: unknown): boolean => !(value !== false);
+
+  // 20a. chat_message.showBadges state machine
+  let chatProps: Record<string, unknown> = {};
+  assertEqual(isDefaultTrueEffective(chatProps.showBadges), true, 'chat_message.showBadges undefined defaults to effective Aktif (true)');
+  chatProps = { ...chatProps, showBadges: computeDefaultTrueNextToggle(chatProps.showBadges) };
+  assertEqual(chatProps.showBadges, false, 'chat_message.showBadges first tap from undefined produces false');
+  assertEqual(isDefaultTrueEffective(chatProps.showBadges), false, 'chat_message.showBadges becomes Nonaktif after first tap');
+  chatProps = { ...chatProps, showBadges: computeDefaultTrueNextToggle(chatProps.showBadges) };
+  assertEqual(chatProps.showBadges, true, 'chat_message.showBadges second tap from false produces true');
+  assertEqual(isDefaultTrueEffective(chatProps.showBadges), true, 'chat_message.showBadges becomes Aktif after second tap');
+  assertEqual(computeDefaultTrueNextToggle(true), false, 'chat_message.showBadges explicit true toggles to false');
+  assertEqual(computeDefaultTrueNextToggle(false), true, 'chat_message.showBadges explicit false toggles to true');
+
+  // 20b. song_request.showRequester state machine
+  let srProps: Record<string, unknown> = {};
+  assertEqual(isDefaultTrueEffective(srProps.showRequester), true, 'song_request.showRequester undefined defaults to effective Aktif (true)');
+  srProps = { ...srProps, showRequester: computeDefaultTrueNextToggle(srProps.showRequester) };
+  assertEqual(srProps.showRequester, false, 'song_request.showRequester first tap from undefined produces false');
+  assertEqual(isDefaultTrueEffective(srProps.showRequester), false, 'song_request.showRequester becomes Nonaktif after first tap');
+  srProps = { ...srProps, showRequester: computeDefaultTrueNextToggle(srProps.showRequester) };
+  assertEqual(srProps.showRequester, true, 'song_request.showRequester second tap from false produces true');
+  assertEqual(isDefaultTrueEffective(srProps.showRequester), true, 'song_request.showRequester becomes Aktif after second tap');
+  assertEqual(computeDefaultTrueNextToggle(true), false, 'song_request.showRequester explicit true toggles to false');
+  assertEqual(computeDefaultTrueNextToggle(false), true, 'song_request.showRequester explicit false toggles to true');
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 
