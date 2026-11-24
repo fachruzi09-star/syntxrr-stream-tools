@@ -4758,7 +4758,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                   updateElementProperty(
                                     selectedElement.id,
                                     'mirror',
-                                    !(selectedElement.properties.mirror !== false),
+                                    !cameraProps.mirror,
                                   )
                                 }
                                 className={`btn-press min-h-[44px] px-3.5 rounded-xl text-xs font-bold transition-colors ${

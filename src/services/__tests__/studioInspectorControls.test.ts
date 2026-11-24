@@ -7,6 +7,7 @@ import { percentToUnitVolume, type StudioElement } from '../../types';
 import {
   createStudioElementFromSource,
   getStudioSourceCatalogEntry,
+  normalizeCameraProperties,
   normalizeStudioElementProperties,
 } from '../studioElementCatalog';
 import {
@@ -1867,9 +1868,26 @@ async function runStudioInspectorControlsTests(): Promise<void> {
         cameraInspectorSection.includes('Contain (Utuh)') &&
         cameraInspectorSection.includes('Cermin Kamera Depan') &&
         cameraInspectorSection.includes('Kamera belakang tidak dicerminkan') &&
-        cameraInspectorSection.includes('!(selectedElement.properties.mirror !== false)'),
-      'Camera inspector includes aspectFit options and default-true mirror toggle with front-only note',
+        cameraInspectorSection.includes('!cameraProps.mirror') &&
+        !cameraInspectorSection.includes('!(selectedElement.properties.mirror !== false)'),
+      'Camera inspector includes aspectFit options and normalized !cameraProps.mirror toggle with front-only note',
     );
+
+    // Camera mirror toggle sequence via normalized cameraProps.mirror
+    const defaultCamProps = normalizeCameraProperties({});
+    assertEqual(defaultCamProps.mirror, true, 'unsaved mirror defaults to true');
+    const firstClickValue = !defaultCamProps.mirror;
+    assertEqual(firstClickValue, false, 'first click on default mirror toggles true -> false');
+
+    const afterFirstClickProps = normalizeCameraProperties({ mirror: firstClickValue });
+    assertEqual(afterFirstClickProps.mirror, false, 'saved false mirror stays false');
+    const secondClickValue = !afterFirstClickProps.mirror;
+    assertEqual(secondClickValue, true, 'second click toggles false -> true');
+
+    const explicitFalseProps = normalizeCameraProperties({ mirror: false, facingMode: 'environment' });
+    assertEqual(explicitFalseProps.mirror, false, 'explicit mirror: false is preserved');
+    assertEqual(!explicitFalseProps.mirror, true, 'first click on explicit false toggles false -> true');
+    assertEqual(explicitFalseProps.facingMode, 'environment', 'back camera facingMode remains unaffected');
     assert(
       cameraInspectorSection.includes('toSafeHexColor(') &&
         cameraInspectorSection.includes('clampNumericRange(\n                                      e.target.value,\n                                      1,\n                                      20,\n                                      CAMERA_CANONICAL_DEFAULTS.borderWidth') &&
