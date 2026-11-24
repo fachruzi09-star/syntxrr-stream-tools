@@ -4855,14 +4855,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-[var(--app-text-secondary)] leading-relaxed">
-                          Tombol preview di bawah menggunakan <span className="text-[var(--app-text)] font-medium">getDisplayMedia</span> pada platform browser yang mendukungnya. Pada Android produksi, tangkapan layar <strong className="text-[var(--app-text)]">Mode B</strong> menggunakan <span className="text-[var(--app-text)] font-medium">MediaProjection native</span> ketika <strong className="text-[var(--app-text)]">Go Live Mode B</strong> dimulai.
+                          Tombol preview di bawah menggunakan <span className="text-[var(--app-text)] font-medium">getDisplayMedia</span> hanya untuk pratinjau browser, sehingga tampilan crop pada preview browser dapat berbeda dari output native. Pada Android produksi, tangkapan layar <strong className="text-[var(--app-text)]">Mode B</strong> tetap menggunakan <span className="text-[var(--app-text)] font-medium">MediaProjection native</span> saat <strong className="text-[var(--app-text)]">Go Live Mode B</strong> dimulai.
                         </p>
                         <div className="pl-3 border-l-2 border-rose-500/50 text-[11px] text-[var(--app-text-secondary)] space-y-1">
                           <div>
                             <strong className="text-[var(--app-error)]">Aturan Mode B RTMP:</strong> Screen Capture harus berada di bawah semua overlay yang terlihat. Pastikan layer Screen Capture lebih rendah daripada setiap overlay aktif.
                           </div>
                           <div>
-                            Crop Mode aktif: <span className="tabular-metrics text-[var(--app-text)] font-medium">Fit</span> · Rotasi didukung: <span className="tabular-metrics text-[var(--app-text)] font-medium">0° / 90° / 180° / 270°</span>.
+                            Crop Mode native Mode B saat ini hanya mendukung <span className="tabular-metrics text-[var(--app-text)] font-medium">Fit</span> · Rotasi didukung: <span className="tabular-metrics text-[var(--app-text)] font-medium">0° / 90° / 180° / 270°</span>.
                           </div>
                           <div>
                             Output FPS Mode B mengikuti pengaturan frame rate encoder global (bukan FPS per elemen).

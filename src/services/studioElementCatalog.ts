@@ -801,6 +801,11 @@ export function normalizeStudioElementProperties(element: StudioElement): Studio
       break;
     }
 
+    case 'screen_capture': {
+      props.cropMode = 'fit';
+      break;
+    }
+
     default:
       break;
   }

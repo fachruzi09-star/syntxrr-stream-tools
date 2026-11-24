@@ -1510,6 +1510,13 @@ async function runStudioInspectorControlsTests(): Promise<void> {
         screenCaptureSection.includes('0° / 90° / 180° / 270°'),
       'Screen capture inspector uses accurate layer rule, global FPS copy, and quarter-turn info',
     );
+    assert(
+      !screenCaptureSection.includes('<select') &&
+        !updatesProp(screenCaptureSection, 'cropMode') &&
+        screenCaptureSection.includes('Crop Mode native Mode B saat ini hanya mendukung') &&
+        screenCaptureSection.includes('tampilan crop pada preview browser dapat berbeda dari output native'),
+      'Screen capture inspector omits Crop Mode dropdown and clarifies Fit-only native support vs browser preview crop difference',
+    );
   }
 
   // --- A2.8.2 Screen Capture Preview Lifecycle, Rotation Policy, FPS & Layer Copy Tests ---

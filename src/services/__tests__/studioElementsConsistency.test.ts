@@ -377,8 +377,66 @@ function runStudioElementsConsistencyTests(): void {
   assertEqual(defaultCamElem?.properties.cameraFit, 'cover', 'DEFAULT_STUDIO_ELEMENTS camera uses canonical cameraFit');
   assertEqual(defaultCamElem?.properties.mirror, true, 'DEFAULT_STUDIO_ELEMENTS camera uses canonical mirror');
 
+  // 11. A2.8.4 Screen Capture cropMode normalization to 'fit' & non-destructive preservation
+  const baseScreenCapture = createStudioElementFromSource('screen_capture', []);
+  const screenMissingCrop: StudioElement = {
+    ...baseScreenCapture,
+    id: 'sc_missing_crop',
+    properties: { fps: 60, borderRadius: 12 },
+  };
+  const normScreenMissing = normalizeStudioElementProperties(screenMissingCrop);
+  assertEqual(normScreenMissing.properties.cropMode, 'fit', 'missing screen_capture cropMode normalizes to fit');
+  assertEqual(screenMissingCrop.properties.cropMode, undefined, 'does not mutate original screen_capture element');
+
+  const normScreenFit = normalizeStudioElementProperties({
+    ...baseScreenCapture,
+    properties: { cropMode: 'fit', fps: 60, borderRadius: 12 },
+  });
+  assertEqual(normScreenFit.properties.cropMode, 'fit', 'screen_capture cropMode=fit stays fit');
+
+  const normScreenCover = normalizeStudioElementProperties({
+    ...baseScreenCapture,
+    properties: { cropMode: 'cover', fps: 60, borderRadius: 12 },
+  });
+  assertEqual(normScreenCover.properties.cropMode, 'fit', 'legacy screen_capture cropMode=cover normalizes to fit');
+
+  const normScreenFill = normalizeStudioElementProperties({
+    ...baseScreenCapture,
+    properties: { cropMode: 'fill', fps: 30, borderRadius: 0, customTag: 'legacy-sc' },
+  });
+  assertEqual(normScreenFill.properties.cropMode, 'fit', 'legacy screen_capture cropMode=fill normalizes to fit');
+  assertEqual(normScreenFill.properties.fps, 30, 'preserves screen_capture fps property');
+  assertEqual(normScreenFill.properties.borderRadius, 0, 'preserves screen_capture borderRadius=0');
+  assertEqual(normScreenFill.properties.customTag, 'legacy-sc', 'preserves unknown screen_capture legacy keys');
+
+  for (const unknownCrop of ['stretch', 'zoom', '', 123, null]) {
+    const normUnknown = normalizeStudioElementProperties({
+      ...baseScreenCapture,
+      properties: { cropMode: unknownCrop, fps: 60, borderRadius: 12 },
+    });
+    assertEqual(
+      normUnknown.properties.cropMode,
+      'fit',
+      `unknown screen_capture cropMode (${String(unknownCrop)}) normalizes to fit`,
+    );
+  }
+
+  // Other SourceTypes must not be affected or injected with cropMode: 'fit'
+  const normNonScreenVideo = normalizeStudioElementProperties({
+    ...createStudioElementFromSource('video', []),
+    properties: { videoUrl: 'https://example.com/clip.mp4', videoFit: 'cover', borderRadius: 8 },
+  });
+  assertEqual(normNonScreenVideo.properties.cropMode, undefined, 'video element does not receive screen_capture cropMode');
+  assertEqual(normNonScreenVideo.properties.videoFit, 'cover', 'video element keeps videoFit=cover');
+
+  const normNonScreenText = normalizeStudioElementProperties({
+    ...createStudioElementFromSource('text', []),
+    properties: { text: 'Hello', color: '#FFFFFF' },
+  });
+  assertEqual(normNonScreenText.properties.cropMode, undefined, 'text element does not receive screen_capture cropMode');
+
   console.log(
-    `Studio elements consistency tests passed: ${assertionCount} assertions (26 catalog sources, factory parity, non-mutation, multi-cam facingMode, non-destructive alias normalization, A2.8.3 camera parity).`,
+    `Studio elements consistency tests passed: ${assertionCount} assertions (26 catalog sources, factory parity, non-mutation, multi-cam facingMode, non-destructive alias normalization, A2.8.3 camera parity, A2.8.4 screen_capture cropMode).`,
   );
 }
 
