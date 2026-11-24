@@ -1,6 +1,7 @@
 import type { StreamEvent, StudioElement } from '../types';
 import { normalizeUnitVolume } from '../types';
 import type { ModeBStreamSnapshot } from './nativeStreamingBridge';
+import { isStudioElementReadOnly } from './studioCanvasGesture';
 import { parseSafeNumericNominal } from './studioElementCatalog';
 
 export const SUPPORTED_SOUNDBOARD_SFX = [
@@ -900,5 +901,205 @@ export function buildLiveTextRenderModel(params: {
     fpsLabel,
     resolutionLabel,
     bitrateLabel,
+  };
+}
+
+export function applyMediaReplacementToElements(params: {
+  elements: readonly StudioElement[];
+  selectedElement: StudioElement | null | undefined;
+  url: string;
+  assetId?: string;
+  assetUri?: string;
+  isElementGroupLocked: boolean;
+  isStrictModeBLocked: boolean;
+}): { applied: boolean; elements: StudioElement[] } {
+  const {
+    elements,
+    selectedElement,
+    url,
+    assetId,
+    assetUri,
+    isElementGroupLocked,
+    isStrictModeBLocked,
+  } = params;
+
+  if (
+    !selectedElement ||
+    isStudioElementReadOnly({
+      elementLocked: selectedElement.locked,
+      isElementGroupLocked,
+      isStrictModeBLocked,
+    })
+  ) {
+    return { applied: false, elements: [...elements] };
+  }
+
+  if (
+    selectedElement.type !== 'image' &&
+    selectedElement.type !== 'sticker' &&
+    selectedElement.type !== 'video'
+  ) {
+    return { applied: false, elements: [...elements] };
+  }
+
+  const resolvedUrl = assetUri || url;
+  let matched = false;
+  const updated = elements.map((elem) => {
+    if (elem.id !== selectedElement.id || elem.locked) return elem;
+    matched = true;
+    const nextProps = { ...elem.properties };
+    if (selectedElement.type === 'image' || selectedElement.type === 'sticker') {
+      nextProps.imageUrl = resolvedUrl;
+      if (assetId) nextProps.imageAssetId = assetId;
+      else delete nextProps.imageAssetId;
+    } else {
+      nextProps.videoUrl = resolvedUrl;
+      if (assetId) nextProps.videoAssetId = assetId;
+      else delete nextProps.videoAssetId;
+    }
+    return { ...elem, properties: nextProps };
+  });
+
+  return { applied: matched, elements: updated };
+}
+
+function parseRgbChannelsFromColor(color: unknown): { r: number; g: number; b: number } | null {
+  if (typeof color !== 'string') return null;
+  const trimmed = color.trim();
+  if (!trimmed) return null;
+
+  const rgbMatch = trimmed.match(
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:\d*\.?\d+))?\s*\)$/i,
+  );
+  if (rgbMatch) {
+    const r = Number(rgbMatch[1]);
+    const g = Number(rgbMatch[2]);
+    const b = Number(rgbMatch[3]);
+    if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+      return {
+        r: Math.min(255, Math.max(0, Math.round(r))),
+        g: Math.min(255, Math.max(0, Math.round(g))),
+        b: Math.min(255, Math.max(0, Math.round(b))),
+      };
+    }
+  }
+
+  const hex6 = trimmed.match(/^#([0-9a-f]{6})$/i);
+  if (hex6) {
+    const hex = hex6[1];
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+
+  const hex3 = trimmed.match(/^#([0-9a-f]{3})$/i);
+  if (hex3) {
+    const hex = hex3[1];
+    return {
+      r: parseInt(hex[0] + hex[0], 16),
+      g: parseInt(hex[1] + hex[1], 16),
+      b: parseInt(hex[2] + hex[2], 16),
+    };
+  }
+
+  return null;
+}
+
+function parseAlphaPercentFromRgba(color: unknown): number | null {
+  if (typeof color !== 'string') return null;
+  const match = color
+    .trim()
+    .match(/^rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(\d*\.?\d+)\s*\)$/i);
+  if (!match) return null;
+  const alpha = Number(match[1]);
+  if (!Number.isFinite(alpha)) return null;
+  return Math.min(100, Math.max(0, Math.round(alpha * 100)));
+}
+
+export function clampChatMessageOpacity(rawValue: unknown, fallback = 85): number {
+  const safeFallback =
+    typeof fallback === 'number' && Number.isFinite(fallback)
+      ? Math.min(100, Math.max(10, Math.round(fallback)))
+      : 85;
+
+  if (typeof rawValue === 'number') {
+    if (!Number.isFinite(rawValue)) return safeFallback;
+    return Math.min(100, Math.max(10, Math.round(rawValue)));
+  }
+
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return safeFallback;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return safeFallback;
+    return Math.min(100, Math.max(10, Math.round(parsed)));
+  }
+
+  return safeFallback;
+}
+
+export function resolveChatMessageBackground(
+  props: Record<string, unknown> | undefined | null,
+): { bgOpacity: number; backgroundColor: string } {
+  const safeProps = props && typeof props === 'object' ? props : {};
+  const hasNumericBgOpacity =
+    typeof safeProps.bgOpacity === 'number' && Number.isFinite(safeProps.bgOpacity);
+  const rawBackgroundColor =
+    typeof safeProps.backgroundColor === 'string' ? safeProps.backgroundColor.trim() : '';
+
+  if (hasNumericBgOpacity) {
+    const bgOpacity = clampChatMessageOpacity(safeProps.bgOpacity, 85);
+    const alpha = Number((bgOpacity / 100).toFixed(2));
+    const rgb = parseRgbChannelsFromColor(rawBackgroundColor);
+    if (rgb) {
+      return {
+        bgOpacity,
+        backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`,
+      };
+    }
+    if (rawBackgroundColor) {
+      return {
+        bgOpacity,
+        backgroundColor: rawBackgroundColor,
+      };
+    }
+    return {
+      bgOpacity,
+      backgroundColor: `rgba(12, 14, 18, ${alpha})`,
+    };
+  }
+
+  if (rawBackgroundColor) {
+    const parsedAlpha = parseAlphaPercentFromRgba(rawBackgroundColor);
+    const bgOpacity = clampChatMessageOpacity(parsedAlpha ?? 85, 85);
+    return {
+      bgOpacity,
+      backgroundColor: rawBackgroundColor,
+    };
+  }
+
+  return {
+    bgOpacity: 85,
+    backgroundColor: 'rgba(12, 14, 18, 0.85)',
+  };
+}
+
+export function buildChatMessageBgOpacityPatch(
+  currentProps: Record<string, unknown> | undefined | null,
+  rawOpacity: unknown,
+): { bgOpacity: number; backgroundColor: string } {
+  const safeProps = currentProps && typeof currentProps === 'object' ? currentProps : {};
+  const current = resolveChatMessageBackground(safeProps);
+  const nextOpacity = clampChatMessageOpacity(rawOpacity, current.bgOpacity);
+  const rgb =
+    parseRgbChannelsFromColor(safeProps.backgroundColor) ??
+    parseRgbChannelsFromColor(current.backgroundColor) ?? { r: 15, g: 19, b: 27 };
+  const alpha = Number((nextOpacity / 100).toFixed(2));
+
+  return {
+    bgOpacity: nextOpacity,
+    backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`,
   };
 }

@@ -2,15 +2,21 @@
 // Run in the project environment with: bun run src/services/__tests__/studioElementRenderModel.test.ts
 
 import type { StreamEvent, StudioElement } from '../../types';
-import { normalizeStudioElementProperties } from '../studioElementCatalog';
+import {
+  createStudioElementFromSource,
+  normalizeStudioElementProperties,
+} from '../studioElementCatalog';
 import {
   appendChatMessageFromEvent,
   appendUniqueStreamEvent,
   applyLikeEventToCount,
+  applyMediaReplacementToElements,
+  buildChatMessageBgOpacityPatch,
   buildChatMessagesFromHistory,
   buildEventFeedItems,
   buildLeaderboardEntries,
   buildLiveTextRenderModel,
+  clampChatMessageOpacity,
   computeProgressBarModel,
   deduplicateStreamEvents,
   deriveInitialLikeCountFromHistory,
@@ -19,6 +25,7 @@ import {
   getLatestAudienceUsernameFromHistory,
   getLatestViewerCountFromHistory,
   resolveActiveUsernameModel,
+  resolveChatMessageBackground,
   resolveDynamicAvatarModel,
   resolveDynamicTextOutput,
   resolveSeparatorStyle,
@@ -861,8 +868,227 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(bitrateHiddenByToggle.bitrateLabel, '—', 'showBitrate=false hides valid live bitrate');
   assertEqual(bitrateHiddenByToggle.fpsLabel, '—', 'unavailable fps stays — even when showFps=true');
 
+  // --- A2.5 P2.1 Media Replacement Lock Enforcement ---
+  const baseImgElem: StudioElement = {
+    ...createStudioElementFromSource('image', []),
+    id: 'media_img_1',
+    locked: true,
+    properties: {
+      imageUrl: 'https://example.com/original.png',
+      imageAssetId: 'asset_old',
+    },
+  };
+  const baseVideoElem: StudioElement = {
+    ...createStudioElementFromSource('video', []),
+    id: 'media_vid_1',
+    locked: false,
+    properties: {
+      videoUrl: 'https://example.com/old.mp4',
+      videoAssetId: 'asset_vid_old',
+    },
+  };
+  const baseStickerElem: StudioElement = {
+    ...createStudioElementFromSource('sticker', []),
+    id: 'media_stk_1',
+    locked: true,
+    properties: {
+      imageUrl: 'https://example.com/sticker.webp',
+    },
+  };
+
+  const lockedImgReplace = applyMediaReplacementToElements({
+    elements: [baseImgElem, baseVideoElem],
+    selectedElement: baseImgElem,
+    url: 'https://example.com/new.png',
+    assetId: 'asset_new',
+    assetUri: 'studio-media://asset_new',
+    isElementGroupLocked: false,
+    isStrictModeBLocked: false,
+  });
+  assertEqual(lockedImgReplace.applied, false, 'locked image blocks media replacement');
+  assertEqual(
+    lockedImgReplace.elements[0].properties.imageUrl,
+    'https://example.com/original.png',
+    'locked image preserves original imageUrl',
+  );
+  assertEqual(
+    lockedImgReplace.elements[0].properties.imageAssetId,
+    'asset_old',
+    'locked image preserves original imageAssetId',
+  );
+
+  const lockedStickerReplace = applyMediaReplacementToElements({
+    elements: [baseStickerElem],
+    selectedElement: baseStickerElem,
+    url: 'https://example.com/new-sticker.webp',
+    isElementGroupLocked: false,
+    isStrictModeBLocked: false,
+  });
+  assertEqual(lockedStickerReplace.applied, false, 'locked sticker blocks media replacement');
+  assertEqual(
+    lockedStickerReplace.elements[0].properties.imageUrl,
+    'https://example.com/sticker.webp',
+    'locked sticker keeps original imageUrl',
+  );
+
+  const groupLockedVideoReplace = applyMediaReplacementToElements({
+    elements: [baseVideoElem],
+    selectedElement: baseVideoElem,
+    url: 'https://example.com/new.mp4',
+    isElementGroupLocked: true,
+    isStrictModeBLocked: false,
+  });
+  assertEqual(groupLockedVideoReplace.applied, false, 'group-locked video blocks media replacement');
+  assertEqual(
+    groupLockedVideoReplace.elements[0].properties.videoUrl,
+    'https://example.com/old.mp4',
+    'group-locked video preserves videoUrl',
+  );
+
+  const strictLockedVideoReplace = applyMediaReplacementToElements({
+    elements: [baseVideoElem],
+    selectedElement: baseVideoElem,
+    url: 'https://example.com/new.mp4',
+    isElementGroupLocked: false,
+    isStrictModeBLocked: true,
+  });
+  assertEqual(strictLockedVideoReplace.applied, false, 'strict Mode B lock blocks media replacement');
+
+  const unlockedImgElem: StudioElement = { ...baseImgElem, locked: false };
+  const unlockedImgUrlOnly = applyMediaReplacementToElements({
+    elements: [unlockedImgElem, baseVideoElem],
+    selectedElement: unlockedImgElem,
+    url: 'https://example.com/replaced.png',
+    isElementGroupLocked: false,
+    isStrictModeBLocked: false,
+  });
+  assertEqual(unlockedImgUrlOnly.applied, true, 'unlocked image allows media replacement');
+  assertEqual(
+    unlockedImgUrlOnly.elements[0].properties.imageUrl,
+    'https://example.com/replaced.png',
+    'unlocked image updates imageUrl',
+  );
+  assertEqual(
+    unlockedImgUrlOnly.elements[0].properties.imageAssetId,
+    undefined,
+    'unlocked image URL-only replacement clears stale imageAssetId',
+  );
+
+  const unlockedVideoWithAsset = applyMediaReplacementToElements({
+    elements: [baseVideoElem],
+    selectedElement: baseVideoElem,
+    url: 'blob:video-fallback',
+    assetId: 'asset_vid_new',
+    assetUri: 'studio-media://asset_vid_new',
+    isElementGroupLocked: false,
+    isStrictModeBLocked: false,
+  });
+  assertEqual(unlockedVideoWithAsset.applied, true, 'unlocked video allows asset replacement');
+  assertEqual(
+    unlockedVideoWithAsset.elements[0].properties.videoUrl,
+    'studio-media://asset_vid_new',
+    'unlocked video uses studio-media assetUri when assetId present',
+  );
+  assertEqual(
+    unlockedVideoWithAsset.elements[0].properties.videoAssetId,
+    'asset_vid_new',
+    'unlocked video stores new videoAssetId',
+  );
+
+  const textElem = createStudioElementFromSource('text', []);
+  const nonMediaReplace = applyMediaReplacementToElements({
+    elements: [textElem],
+    selectedElement: textElem,
+    url: 'https://example.com/new.png',
+    isElementGroupLocked: false,
+    isStrictModeBLocked: false,
+  });
+  assertEqual(nonMediaReplace.applied, false, 'non-media element ignores media replacement');
+
+  // --- A2.5 P2.2 Chat Message Background Opacity Synchronization ---
+  const defaultChat = createStudioElementFromSource('chat_message', []);
+  const resolvedDefaultChatBg = resolveChatMessageBackground(defaultChat.properties);
+  assertEqual(resolvedDefaultChatBg.bgOpacity, 82, 'catalog default chat_message resolves bgOpacity 82');
+  assertEqual(
+    resolvedDefaultChatBg.backgroundColor,
+    'rgba(15, 19, 27, 0.82)',
+    'catalog default chat_message preserves rgba(15, 19, 27, 0.82)',
+  );
+
+  const normalizedDefaultChat = normalizeStudioElementProperties(defaultChat);
+  assertEqual(
+    resolveChatMessageBackground(normalizedDefaultChat.properties).backgroundColor,
+    'rgba(15, 19, 27, 0.82)',
+    'normalized catalog chat_message stays identical',
+  );
+
+  const patch50 = buildChatMessageBgOpacityPatch(defaultChat.properties, 50);
+  assertEqual(patch50.bgOpacity, 50, 'chat opacity patch sets bgOpacity 50');
+  assertEqual(
+    patch50.backgroundColor,
+    'rgba(15, 19, 27, 0.5)',
+    'chat opacity patch preserves catalog RGB (15, 19, 27) at 0.5 alpha',
+  );
+  const updatedChatElem: StudioElement = {
+    ...defaultChat,
+    properties: { ...defaultChat.properties, ...patch50 },
+  };
+  const normalizedUpdatedChat = normalizeStudioElementProperties(updatedChatElem);
+  const resolvedUpdatedChat = resolveChatMessageBackground(normalizedUpdatedChat.properties);
+  assertEqual(resolvedUpdatedChat.bgOpacity, 50, 'Inspector value remains 50 after normalize');
+  assertEqual(
+    resolvedUpdatedChat.backgroundColor,
+    'rgba(15, 19, 27, 0.5)',
+    'Canvas renderer background stays rgba(15, 19, 27, 0.5) after normalize',
+  );
+  assertEqual(updatedChatElem.properties.maxMessages, 5, 'unrelated maxMessages preserved');
+  assertEqual(updatedChatElem.properties.fontSize, 13, 'unrelated fontSize preserved');
+  assertEqual(updatedChatElem.properties.showBadges, true, 'unrelated showBadges preserved');
+
+  // Clamping boundaries 10..100 & invalid fallback
+  assertEqual(clampChatMessageOpacity(0, 82), 10, 'clamps numeric 0 to min 10');
+  assertEqual(clampChatMessageOpacity(-5, 82), 10, 'clamps negative number to min 10');
+  assertEqual(clampChatMessageOpacity('5', 82), 10, 'clamps string 5 to min 10');
+  assertEqual(clampChatMessageOpacity(150, 82), 100, 'clamps numeric 150 to max 100');
+  assertEqual(clampChatMessageOpacity('999', 82), 100, 'clamps string 999 to max 100');
+  assertEqual(clampChatMessageOpacity('', 82), 82, 'empty string falls back to current valid opacity without becoming 10 or NaN');
+  assertEqual(clampChatMessageOpacity('abc', 82), 82, 'non-numeric string falls back safely without NaN');
+  assertEqual(clampChatMessageOpacity(Number.NaN, 82), 82, 'NaN falls back safely');
+
+  const patchMin = buildChatMessageBgOpacityPatch(defaultChat.properties, '0');
+  assertEqual(patchMin.bgOpacity, 10, 'patch clamps 0 input to 10');
+  assertEqual(patchMin.backgroundColor, 'rgba(15, 19, 27, 0.1)', 'patch reflects 0.1 alpha');
+
+  const patchMax = buildChatMessageBgOpacityPatch(defaultChat.properties, '125');
+  assertEqual(patchMax.bgOpacity, 100, 'patch clamps 125 input to 100');
+  assertEqual(patchMax.backgroundColor, 'rgba(15, 19, 27, 1)', 'patch reflects 1.0 alpha');
+
+  // Legacy without backgroundColor preserves (12, 14, 18) RGB
+  const legacyOpacityOnly = resolveChatMessageBackground({ bgOpacity: 85 });
+  assertEqual(legacyOpacityOnly.bgOpacity, 85, 'legacy bgOpacity-only resolves 85');
+  assertEqual(
+    legacyOpacityOnly.backgroundColor,
+    'rgba(12, 14, 18, 0.85)',
+    'legacy bgOpacity-only falls back to rgba(12, 14, 18, 0.85)',
+  );
+  const legacyPatch = buildChatMessageBgOpacityPatch({ bgOpacity: 85 }, 40);
+  assertEqual(
+    legacyPatch.backgroundColor,
+    'rgba(12, 14, 18, 0.4)',
+    'updating legacy bgOpacity-only preserves (12, 14, 18) RGB',
+  );
+
+  // Custom hex/rgb backgroundColor preserves RGB channels
+  const customHexPatch = buildChatMessageBgOpacityPatch({ backgroundColor: '#1E293B', bgOpacity: 75 }, 60);
+  assertEqual(customHexPatch.bgOpacity, 60, 'custom hex chat bg updates bgOpacity to 60');
+  assertEqual(
+    customHexPatch.backgroundColor,
+    'rgba(30, 41, 59, 0.6)',
+    'custom hex chat bg preserves RGB (30, 41, 59) at 0.6 alpha',
+  );
+
   console.log(
-    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 checks).`,
+    `Studio element render model tests passed: ${assertionCount} assertions (Tahap 2 + Tahap 2.1 + A1.1 + A2.1 + A2.2 + A2.3 + A2.4 + A2.5 checks).`,
   );
 }
 

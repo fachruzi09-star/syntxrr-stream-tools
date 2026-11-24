@@ -914,6 +914,59 @@ function runStudioInspectorControlsTests(): void {
     'live_text canvas renderer connects to buildLiveTextRenderModel and modeBStatus without fabricating fps/resolution',
   );
 
+  // 18. A2.5 Targeted P2 Regression Fixes (Media Lock & Chat Message Background Opacity)
+  const applyMediaFnSection = extractBetween(
+    studioSource,
+    'const handleApplyMediaToSelectedElement = (url: string, assetId?: string) => {',
+    '// Event Simulator Emitter',
+    'handleApplyMediaToSelectedElement',
+  );
+  assert(
+    applyMediaFnSection.includes('isStudioElementReadOnly({') &&
+      applyMediaFnSection.includes('elementLocked: selectedElement.locked') &&
+      applyMediaFnSection.includes('isElementGroupLocked: isGroupLocked') &&
+      applyMediaFnSection.includes('isStrictModeBLocked') &&
+      applyMediaFnSection.includes('applyMediaReplacementToElements('),
+    'handleApplyMediaToSelectedElement enforces isStudioElementReadOnly (element, group, strict Mode B) and delegates to applyMediaReplacementToElements',
+  );
+
+  const mediaReplaceBtnSection = extractBetween(
+    studioSource,
+    'Pasang Sebagai Elemen Baru',
+    'Daftar Media Tersimpan',
+    'Tab Media replace selected element button',
+  );
+  assert(
+    mediaReplaceBtnSection.includes('disabled={isSelectedElementReadOnly}') &&
+      !mediaReplaceBtnSection.includes('disabled={isStrictModeBLocked}'),
+    'Tab Media Ganti Elemen Terpilih button uses disabled={isSelectedElementReadOnly} consistently',
+  );
+
+  const chatInspectorSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'chat_message'",
+    "selectedElement.type === 'text'",
+    'chat_message inspector',
+  );
+  assert(
+    chatInspectorSection.includes('resolveChatMessageBackground(selectedElement.properties).bgOpacity') &&
+      chatInspectorSection.includes('updateElementProperties(') &&
+      chatInspectorSection.includes('buildChatMessageBgOpacityPatch(selectedElement.properties, e.target.value)'),
+    'chat_message inspector reads synchronized bgOpacity and writes atomic bgOpacity+backgroundColor patch via updateElementProperties',
+  );
+
+  const chatRendererSection = extractBetween(
+    studioSource,
+    "case 'chat_message': {",
+    "case 'combo_counter': {",
+    'chat_message renderer',
+  );
+  assert(
+    chatRendererSection.includes('resolveChatMessageBackground(props).backgroundColor') &&
+      chatRendererSection.includes('style={{ backgroundColor: chatBg }}'),
+    'chat_message canvas renderer uses resolveChatMessageBackground(props).backgroundColor',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

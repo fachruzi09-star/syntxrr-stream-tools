@@ -69,6 +69,8 @@ import {
   appendChatMessageFromEvent,
   appendUniqueStreamEvent,
   applyLikeEventToCount,
+  applyMediaReplacementToElements,
+  buildChatMessageBgOpacityPatch,
   buildChatMessagesFromHistory,
   buildEventFeedItems,
   buildLeaderboardEntries,
@@ -82,6 +84,7 @@ import {
   getLatestViewerCountFromHistory,
   getTopDonorNameFromHistory,
   resolveActiveUsernameModel,
+  resolveChatMessageBackground,
   resolveDynamicAvatarModel,
   resolveDynamicTextOutput,
   resolveSeparatorStyle,
@@ -1138,7 +1141,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     commitElements(updated);
   };
 
-  const updateElementProperty = (id: string, key: string, value: any) => {
+  const updateElementProperties = (id: string, patch: Record<string, any>) => {
     const targetElem = elementsRef.current.find((elem) => elem.id === id);
     if (
       !targetElem ||
@@ -1154,12 +1157,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (elem.id === id) {
         const nextProperties = {
           ...elem.properties,
-          [key]: value,
+          ...patch,
         };
-        if (key === 'imageUrl' && typeof value === 'string' && !value.startsWith('studio-media://')) {
+        if (typeof patch.imageUrl === 'string' && !patch.imageUrl.startsWith('studio-media://')) {
           delete nextProperties.imageAssetId;
         }
-        if (key === 'videoUrl' && typeof value === 'string' && !value.startsWith('studio-media://')) {
+        if (typeof patch.videoUrl === 'string' && !patch.videoUrl.startsWith('studio-media://')) {
           delete nextProperties.videoAssetId;
         }
         return {
@@ -1170,6 +1173,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       return elem;
     });
     commitElements(updated);
+  };
+
+  const updateElementProperty = (id: string, key: string, value: any) => {
+    updateElementProperties(id, { [key]: value });
   };
 
   const updateElementTrigger = (id: string, partial: any) => {
@@ -2022,23 +2029,29 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleApplyMediaToSelectedElement = (url: string, assetId?: string) => {
-    if (!selectedElement || isStrictModeBLocked || isElementLockedByGroup(selectedElement.id)) return;
+    if (!selectedElement) return;
+    const isGroupLocked = isElementLockedByGroup(selectedElement.id);
+    if (
+      isStudioElementReadOnly({
+        elementLocked: selectedElement.locked,
+        isElementGroupLocked: isGroupLocked,
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
     const assetUri = assetId ? createStudioMediaAssetUri(assetId) : undefined;
-    const updated = elements.map((elem) => {
-      if (elem.id !== selectedElement.id) return elem;
-      const nextProps = { ...elem.properties };
-      if (selectedElement.type === 'image' || selectedElement.type === 'sticker') {
-        nextProps.imageUrl = assetUri || url;
-        if (assetId) nextProps.imageAssetId = assetId;
-        else delete nextProps.imageAssetId;
-      } else if (selectedElement.type === 'video') {
-        nextProps.videoUrl = assetUri || url;
-        if (assetId) nextProps.videoAssetId = assetId;
-        else delete nextProps.videoAssetId;
-      }
-      return { ...elem, properties: nextProps };
+    const result = applyMediaReplacementToElements({
+      elements: elementsRef.current,
+      selectedElement,
+      url,
+      assetId,
+      assetUri,
+      isElementGroupLocked: isGroupLocked,
+      isStrictModeBLocked,
     });
-    commitElements(updated);
+    if (!result.applied) return;
+    commitElements(result.elements);
     setIsMobilePanelOpen(false);
   };
 
@@ -2451,10 +2464,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           typeof props.maxMessages === 'number' && Number.isFinite(props.maxMessages) && props.maxMessages > 0
             ? Math.max(1, Math.min(10, Math.floor(props.maxMessages)))
             : 5;
-        const chatBg =
-          typeof props.backgroundColor === 'string' && props.backgroundColor.trim()
-            ? props.backgroundColor
-            : `rgba(12, 14, 18, ${(typeof props.bgOpacity === 'number' ? props.bgOpacity : 85) / 100})`;
+        const chatBg = resolveChatMessageBackground(props).backgroundColor;
         const chatFontSize =
           typeof props.fontSize === 'number' && Number.isFinite(props.fontSize) && props.fontSize > 0
             ? props.fontSize
@@ -4645,8 +4655,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               type="number"
                               min="10"
                               max="100"
-                              value={selectedElement.properties.bgOpacity || 85}
-                              onChange={(e) => updateElementProperty(selectedElement.id, 'bgOpacity', parseInt(e.target.value) || 85)}
+                              value={resolveChatMessageBackground(selectedElement.properties).bgOpacity}
+                              onChange={(e) =>
+                                updateElementProperties(
+                                  selectedElement.id,
+                                  buildChatMessageBgOpacityPatch(selectedElement.properties, e.target.value),
+                                )
+                              }
                               className="w-full min-h-[44px] mt-1 px-3 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] tabular-metrics"
                             />
                           </div>
@@ -7596,7 +7611,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     {selectedElement && (selectedElement.type === 'image' || selectedElement.type === 'sticker' || selectedElement.type === 'video') && (
                       <button
                         type="button"
-                        disabled={isStrictModeBLocked}
+                        disabled={isSelectedElementReadOnly}
                         onClick={() => handleApplyMediaToSelectedElement(previewMediaUrl, previewAssetId)}
                         className="btn-press min-h-[44px] px-3 bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] rounded-xl text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Terapkan ke elemen yang sedang dipilih di canvas"
