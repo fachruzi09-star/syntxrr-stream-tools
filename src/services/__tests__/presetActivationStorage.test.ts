@@ -401,7 +401,210 @@ async function runPresetActivationStorageTests(): Promise<void> {
       'localStorage fallback restores studio_presets snapshot on partial write error',
     );
 
-    console.log(`Preset activation storage tests passed: ${assertionCount} assertions (atomic commit, abort rollback, input validation, and fallback rollback).`);
+    // E. A2.9.1 Atomic Studio Autosave Snapshot (studio_presets + studio_elements only)
+    // E1. Success in single readwrite transaction without touching active_preset_id or settings
+    const committedE1 = new Map<string, unknown>([
+      ['active_preset_id', 'preset_old'],
+      ['settings', { ...DEFAULT_SETTINGS, streamKey: 'keep_stream_key' }],
+    ]);
+    const fakeE1 = createFakeIndexedDB({ committedData: committedE1 });
+    const fakeLsE1 = createFakeLocalStorage();
+    fakeLsE1.store.set('syntxrr_active_preset_id', JSON.stringify('preset_old'));
+    g.indexedDB = fakeE1.fakeFactory;
+    g.localStorage = fakeLsE1.storage;
+
+    const snapPresetInput = makePreset('preset_auto', 'Autosave Preset', '9:16');
+    const dupElemA: StudioElement = {
+      ...snapPresetInput.elements[0],
+      id: 'dup_el',
+      x: 15,
+      y: 25,
+      properties: { text: 'First Dup' },
+    };
+    const dupElemB: StudioElement = {
+      ...snapPresetInput.elements[0],
+      id: 'dup_el',
+      x: 50,
+      y: 60,
+      properties: { text: 'Second Dup' },
+    };
+    const sourceElementsSnapshot: StudioElement[] = [dupElemA, dupElemB];
+    const sourcePresetsSnapshot: StudioPreset[] = [
+      {
+        ...snapPresetInput,
+        elements: [dupElemA, dupElemB],
+      },
+      oldPreset,
+    ];
+
+    await StorageService.saveStudioSnapshotAtomically({
+      presets: sourcePresetsSnapshot,
+      studioElements: sourceElementsSnapshot,
+    });
+
+    assertEqual(fakeE1.stats.transactionsOpened, 1, 'autosave opens exactly one readwrite transaction');
+    assertEqual(fakeE1.stats.completedCount, 1, 'autosave transaction completes once');
+    assertEqual(fakeE1.stats.closedCount, 1, 'autosave closes DB after transaction');
+    assertEqual(
+      fakeE1.stats.putCalls.map((call) => call.key).join(','),
+      'studio_presets,studio_elements',
+      'autosave writes only studio_presets and studio_elements inside the single transaction',
+    );
+    assertEqual(committedE1.get('active_preset_id'), 'preset_old', 'autosave preserves active_preset_id');
+    assertEqual(
+      (committedE1.get('settings') as AppSettings).streamKey,
+      'keep_stream_key',
+      'autosave preserves settings',
+    );
+    const savedAutoPresets = committedE1.get('studio_presets') as StudioPreset[];
+    const savedAutoElements = committedE1.get('studio_elements') as StudioElement[];
+    assertEqual(savedAutoPresets.length, 2, 'autosave commits both presets');
+    assertEqual(savedAutoElements.length, 2, 'autosave keeps distinct non-identical elements');
+    assert(
+      savedAutoElements[0].id !== savedAutoElements[1].id,
+      'autosave sanitizes duplicate element IDs cleanly',
+    );
+    assert(
+      savedAutoPresets[0].elements[0].id !== savedAutoPresets[0].elements[1].id,
+      'autosave sanitizes duplicate element IDs inside presets',
+    );
+    // Source non-mutation checks
+    assertEqual(dupElemA.id, 'dup_el', 'source element A id is not mutated');
+    assertEqual(dupElemB.id, 'dup_el', 'source element B id is not mutated');
+    assertEqual(sourceElementsSnapshot[1].id, 'dup_el', 'source elements array is not mutated');
+    assertEqual(sourcePresetsSnapshot[0].elements[1].id, 'dup_el', 'source preset elements array is not mutated');
+
+    // E2. Failure on second key ("studio_elements") aborts transaction & leaves old data intact
+    const committedE2 = new Map<string, unknown>([
+      ['studio_presets', [oldPreset]],
+      ['studio_elements', oldPreset.elements],
+      ['active_preset_id', 'preset_old'],
+      ['settings', { ...DEFAULT_SETTINGS, streamKey: 'keep_stream_key' }],
+    ]);
+    const fakeE2 = createFakeIndexedDB({
+      committedData: committedE2,
+      failOnKey: 'studio_elements',
+    });
+    const fakeLsE2 = createFakeLocalStorage();
+    fakeLsE2.store.set('syntxrr_studio_presets', JSON.stringify([oldPreset]));
+    fakeLsE2.store.set('syntxrr_studio_elements', JSON.stringify(oldPreset.elements));
+    g.indexedDB = fakeE2.fakeFactory;
+    g.localStorage = fakeLsE2.storage;
+
+    let autosaveAborted = false;
+    try {
+      await StorageService.saveStudioSnapshotAtomically({
+        presets: [newPreset, oldPreset],
+        studioElements: newPreset.elements,
+      });
+    } catch (error) {
+      autosaveAborted = error instanceof Error && error.message.includes('studio_elements');
+    }
+    assert(autosaveAborted, 'autosave rejects when put for studio_elements fails');
+    assertEqual(fakeE2.stats.transactionsOpened, 1, 'aborted autosave uses only one transaction');
+    assertEqual(fakeE2.stats.abortedCount, 1, 'aborted autosave triggers tx.abort()');
+    assertEqual(fakeE2.stats.completedCount, 0, 'aborted autosave never completes');
+    assertEqual(fakeE2.stats.closedCount, 1, 'aborted autosave still closes DB');
+    assertEqual(
+      (committedE2.get('studio_presets') as StudioPreset[]).length,
+      1,
+      'old studio_presets stays intact after abort',
+    );
+    assertEqual(
+      (committedE2.get('studio_elements') as StudioElement[])[0].id,
+      oldPreset.elements[0].id,
+      'old studio_elements stays intact after abort',
+    );
+    assertEqual(
+      JSON.parse(fakeLsE2.store.get('syntxrr_studio_presets') || '[]').length,
+      1,
+      'localStorage studio_presets untouched on IDB abort',
+    );
+
+    // E3. Fallback localStorage succeeds when IndexedDB fails to open
+    const fakeE3 = createFakeIndexedDB({ committedData: new Map(), failOpen: true });
+    const fakeLsE3 = createFakeLocalStorage();
+    fakeLsE3.store.set('syntxrr_active_preset_id', JSON.stringify('preset_old'));
+    g.indexedDB = fakeE3.fakeFactory;
+    g.localStorage = fakeLsE3.storage;
+
+    await StorageService.saveStudioSnapshotAtomically({
+      presets: [newPreset, oldPreset],
+      studioElements: newPreset.elements,
+    });
+    assertEqual(
+      JSON.parse(fakeLsE3.store.get('syntxrr_studio_presets') || '[]').length,
+      2,
+      'fallback localStorage saves studio_presets when openDB fails',
+    );
+    assertEqual(
+      JSON.parse(fakeLsE3.store.get('syntxrr_studio_elements') || '[]')[0].id,
+      newPreset.elements[0].id,
+      'fallback localStorage saves studio_elements when openDB fails',
+    );
+    assertEqual(
+      JSON.parse(fakeLsE3.store.get('syntxrr_active_preset_id') || 'null'),
+      'preset_old',
+      'fallback localStorage does not modify active_preset_id',
+    );
+
+    // E4. Fallback localStorage rollback restores both keys on partial write failure
+    const fakeE4 = createFakeIndexedDB({ committedData: new Map(), failOpen: true });
+    const fakeLsE4 = createFakeLocalStorage({ failOnKey: 'syntxrr_studio_elements' });
+    fakeLsE4.store.set('syntxrr_studio_presets', JSON.stringify([oldPreset]));
+    fakeLsE4.store.set('syntxrr_studio_elements', JSON.stringify(oldPreset.elements));
+    g.indexedDB = fakeE4.fakeFactory;
+    g.localStorage = fakeLsE4.storage;
+
+    let fallbackAutosaveFailed = false;
+    try {
+      await StorageService.saveStudioSnapshotAtomically({
+        presets: [newPreset, oldPreset],
+        studioElements: newPreset.elements,
+      });
+    } catch {
+      fallbackAutosaveFailed = true;
+    }
+    assert(fallbackAutosaveFailed, 'autosave fallback throws when second key write fails');
+    assertEqual(
+      JSON.parse(fakeLsE4.store.get('syntxrr_studio_presets') || '[]').length,
+      1,
+      'autosave fallback rollback restores previous studio_presets',
+    );
+    assertEqual(
+      JSON.parse(fakeLsE4.store.get('syntxrr_studio_elements') || '[]')[0].id,
+      oldPreset.elements[0].id,
+      'autosave fallback rollback keeps previous studio_elements intact',
+    );
+
+    // E5. Invalid inputs rejected BEFORE opening IndexedDB
+    const committedE5 = new Map<string, unknown>([['studio_presets', [oldPreset]]]);
+    const fakeE5 = createFakeIndexedDB({ committedData: committedE5 });
+    g.indexedDB = fakeE5.fakeFactory;
+
+    for (const invalidCase of [
+      { presets: [], studioElements: oldPreset.elements },
+      { presets: [oldPreset], studioElements: 'bad' as unknown as StudioElement[] },
+      { presets: [oldPreset], studioElements: [null as unknown as StudioElement] },
+      { presets: [oldPreset, oldPreset], studioElements: oldPreset.elements },
+      { presets: [{ ...oldPreset, elements: null as unknown as StudioElement[] }], studioElements: [] },
+    ]) {
+      let rejected = false;
+      try {
+        await StorageService.saveStudioSnapshotAtomically(invalidCase);
+      } catch {
+        rejected = true;
+      }
+      assert(rejected, 'invalid autosave snapshot input is rejected');
+    }
+    assertEqual(fakeE5.stats.openAttempts, 0, 'invalid autosave snapshot never opens IndexedDB');
+    assertEqual(
+      (committedE5.get('studio_presets') as StudioPreset[]).length,
+      1,
+      'database remains untouched after invalid autosave rejection',
+    );
+
+    console.log(`Preset activation storage tests passed: ${assertionCount} assertions (atomic commit, abort rollback, input validation, fallback rollback, and A2.9.1 atomic autosave).`);
   } finally {
     g.indexedDB = originalIndexedDB;
     g.localStorage = originalLocalStorage;

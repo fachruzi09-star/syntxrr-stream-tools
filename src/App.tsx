@@ -212,10 +212,10 @@ export default function App() {
     studioPersistenceControllerRef.current = createStudioPersistenceController({
       debounceMs: STUDIO_PERSISTENCE_DEBOUNCE_MS,
       writeSnapshot: async (snapshot) => {
-        await Promise.all([
-          StorageService.saveStudioElements(snapshot.elements),
-          StorageService.savePresets(snapshot.presets),
-        ]);
+        await StorageService.saveStudioSnapshotAtomically({
+          presets: snapshot.presets,
+          studioElements: snapshot.elements,
+        });
       },
       onStateChange: (nextState) => {
         setStudioSaveState(nextState);
