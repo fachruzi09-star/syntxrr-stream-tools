@@ -1153,6 +1153,139 @@ function runStudioInspectorControlsTests(): void {
   assertEqual(computeDefaultTrueNextToggle(true), false, 'song_request.showRequester explicit true toggles to false');
   assertEqual(computeDefaultTrueNextToggle(false), true, 'song_request.showRequester explicit false toggles to true');
 
+  // 21. A2.7 Layer Controls Disabled-State Consistency (Tab Lapisan: Elemen Lepas)
+  const looseLayerSection = extractBetween(
+    studioSource,
+    '>Elemen Lepas</div>',
+    '</section>',
+    'Tab Lapisan Elemen Lepas',
+  );
+  assert(
+    looseLayerSection.includes('const isGroupLocked = isElementLockedByGroup(elem.id);') &&
+      looseLayerSection.includes('canMutateStudioElementField({') &&
+      looseLayerSection.includes('elementLocked: elem.locked') &&
+      looseLayerSection.includes('isElementGroupLocked: isGroupLocked') &&
+      looseLayerSection.includes('isStrictModeBLocked') &&
+      looseLayerSection.includes("field: 'visible'") &&
+      looseLayerSection.includes("field: 'locked'") &&
+      !looseLayerSection.includes('isSelectedElementReadOnly'),
+    'Elemen Lepas computes visible and locked mutability via canMutateStudioElementField without using isSelectedElementReadOnly',
+  );
+
+  const visibleBtnSection = extractBetween(
+    looseLayerSection,
+    'disabled={!canMutateVisible}',
+    'disabled={!canMutateLocked}',
+    'Elemen Lepas visible button',
+  );
+  assert(
+    visibleBtnSection.includes("onClick={() => updateElementField(elem.id, 'visible', !elem.visible)}") &&
+      visibleBtnSection.includes('disabled:opacity-40') &&
+      visibleBtnSection.includes('disabled:cursor-not-allowed'),
+    'Elemen Lepas visible button binds disabled={!canMutateVisible}, disabled styling, and updateElementField visible handler',
+  );
+
+  const lockBtnSection = looseLayerSection.slice(looseLayerSection.indexOf('disabled={!canMutateLocked}'));
+  assert(
+    lockBtnSection.includes("onClick={() => updateElementField(elem.id, 'locked', !elem.locked)}") &&
+      lockBtnSection.includes('disabled:opacity-40') &&
+      lockBtnSection.includes('disabled:cursor-not-allowed'),
+    'Elemen Lepas locked button binds disabled={!canMutateLocked}, disabled styling, and updateElementField locked handler',
+  );
+
+  const updateElementFieldFnSection = extractBetween(
+    studioSource,
+    'const updateElementField = (id: string, field: keyof StudioElement, value: any) => {',
+    'const updateElementProperties =',
+    'updateElementField guard',
+  );
+  assert(
+    updateElementFieldFnSection.includes('!canMutateStudioElementField({'),
+    'updateElementField preserves canMutateStudioElementField guard',
+  );
+
+  // Policy matrix against actual canMutateStudioElementField helper
+  const policyCases: Array<{
+    label: string;
+    elementLocked: boolean;
+    isElementGroupLocked: boolean;
+    isStrictModeBLocked: boolean;
+    expectedVisible: boolean;
+    expectedLocked: boolean;
+  }> = [
+    {
+      label: 'Unlocked normal',
+      elementLocked: false,
+      isElementGroupLocked: false,
+      isStrictModeBLocked: false,
+      expectedVisible: true,
+      expectedLocked: true,
+    },
+    {
+      label: 'Individual locked',
+      elementLocked: true,
+      isElementGroupLocked: false,
+      isStrictModeBLocked: false,
+      expectedVisible: false,
+      expectedLocked: true,
+    },
+    {
+      label: 'Group locked (unlocked child)',
+      elementLocked: false,
+      isElementGroupLocked: true,
+      isStrictModeBLocked: false,
+      expectedVisible: false,
+      expectedLocked: false,
+    },
+    {
+      label: 'Group locked (locked child)',
+      elementLocked: true,
+      isElementGroupLocked: true,
+      isStrictModeBLocked: false,
+      expectedVisible: false,
+      expectedLocked: false,
+    },
+    {
+      label: 'Strict Mode B locked (unlocked element)',
+      elementLocked: false,
+      isElementGroupLocked: false,
+      isStrictModeBLocked: true,
+      expectedVisible: false,
+      expectedLocked: false,
+    },
+    {
+      label: 'Strict Mode B locked (locked element)',
+      elementLocked: true,
+      isElementGroupLocked: false,
+      isStrictModeBLocked: true,
+      expectedVisible: false,
+      expectedLocked: false,
+    },
+  ];
+
+  for (const c of policyCases) {
+    assertEqual(
+      canMutateStudioElementField({
+        elementLocked: c.elementLocked,
+        isElementGroupLocked: c.isElementGroupLocked,
+        isStrictModeBLocked: c.isStrictModeBLocked,
+        field: 'visible',
+      }),
+      c.expectedVisible,
+      `${c.label}: visible mutability`,
+    );
+    assertEqual(
+      canMutateStudioElementField({
+        elementLocked: c.elementLocked,
+        isElementGroupLocked: c.isElementGroupLocked,
+        isStrictModeBLocked: c.isStrictModeBLocked,
+        field: 'locked',
+      }),
+      c.expectedLocked,
+      `${c.label}: locked mutability`,
+    );
+  }
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

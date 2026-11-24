@@ -7888,6 +7888,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     {elements.filter((elem) => !activeGroups.some((group) => group.elementIds.includes(elem.id))).map((elem) => {
                       const isSelected = selectedId === elem.id;
                       const isLayerSelected = selectedLayerElementIds.includes(elem.id);
+                      const isGroupLocked = isElementLockedByGroup(elem.id);
+                      const canMutateVisible = canMutateStudioElementField({
+                        elementLocked: elem.locked,
+                        isElementGroupLocked: isGroupLocked,
+                        isStrictModeBLocked,
+                        field: 'visible',
+                      });
+                      const canMutateLocked = canMutateStudioElementField({
+                        elementLocked: elem.locked,
+                        isElementGroupLocked: isGroupLocked,
+                        isStrictModeBLocked,
+                        field: 'locked',
+                      });
                       return (
                         <div key={elem.id} className={`py-2 flex items-center justify-between gap-2 ${isSelected ? 'pl-2.5 border-l-2 border-l-[var(--app-accent)]' : ''}`}>
                           <input
@@ -7901,10 +7914,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <span className="block text-xs font-bold text-[var(--app-text)] truncate">{elem.name}</span>
                             <span className="block text-[10px] text-[var(--app-text-secondary)] tabular-metrics">Layer #{elem.layer} · {elem.type}</span>
                           </button>
-                          <button type="button" onClick={() => updateElementField(elem.id, 'visible', !elem.visible)} className="btn-press min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center" title={elem.visible ? 'Sembunyikan' : 'Tampilkan'}>
+                          <button
+                            type="button"
+                            disabled={!canMutateVisible}
+                            onClick={() => updateElementField(elem.id, 'visible', !elem.visible)}
+                            className="btn-press min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-secondary)] hover:text-[var(--app-text)] flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={elem.visible ? 'Sembunyikan' : 'Tampilkan'}
+                          >
                             {elem.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                           </button>
-                          <button type="button" onClick={() => updateElementField(elem.id, 'locked', !elem.locked)} className={`btn-press min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center ${elem.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'}`} title={elem.locked ? 'Buka kunci' : 'Kunci'}>
+                          <button
+                            type="button"
+                            disabled={!canMutateLocked}
+                            onClick={() => updateElementField(elem.id, 'locked', !elem.locked)}
+                            className={`btn-press min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed ${elem.locked ? 'text-[var(--app-warn)]' : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'}`}
+                            title={elem.locked ? 'Buka kunci' : 'Kunci'}
+                          >
                             {elem.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                           </button>
                         </div>
