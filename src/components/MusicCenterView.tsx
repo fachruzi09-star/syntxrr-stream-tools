@@ -8,7 +8,13 @@ import {
   SpotifySearchResult,
 } from '../types';
 import { audioEngine, AudioEngineState } from '../services/localAudioEngine';
-import { songRequestEngine, type SongRequestState } from '../services/songRequestEngine';
+import {
+  songRequestEngine,
+  type SongRequestHistoryEntry,
+  type SongRequestProvider,
+  type SongRequestRequeueResult,
+  type SongRequestState,
+} from '../services/songRequestEngine';
 import { LocalAudioPlayer } from './music/LocalAudioPlayer';
 import { YouTubeConnector } from './music/YouTubeConnector';
 import { SpotifyConnector } from './music/SpotifyConnector';
@@ -28,6 +34,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   X,
+  History,
+  Plus,
 } from 'lucide-react';
 
 interface MusicCenterViewProps {
@@ -51,9 +59,56 @@ interface MusicCenterViewProps {
   onNavigateToSettings: () => void;
   onUpdateSpotifyToken: (token: string) => void;
   songRequestState?: SongRequestState;
+  onRequeueHistoryItem?: (
+    historyEntryId: string
+  ) => Promise<SongRequestRequeueResult> | SongRequestRequeueResult;
 }
 
-type ActiveTab = 'local_audio' | 'youtube' | 'spotify' | 'queue' | 'viewer_portal';
+type ActiveTab = 'local_audio' | 'youtube' | 'spotify' | 'queue' | 'history' | 'viewer_portal';
+
+function formatHistoryProviderLabel(provider: SongRequestProvider): string {
+  switch (provider) {
+    case 'youtube_music':
+      return 'YouTube Music';
+    case 'youtube':
+      return 'YouTube';
+    case 'spotify':
+      return 'Spotify';
+    case 'authorized_stream':
+      return 'Authorized Stream';
+    default:
+      return 'Catalog';
+  }
+}
+
+function formatHistoryStatusLabel(status: SongRequestHistoryEntry['status']): string {
+  switch (status) {
+    case 'playing':
+      return 'Playing';
+    case 'completed':
+      return 'Completed';
+    case 'skipped':
+      return 'Skipped';
+    case 'error':
+      return 'Error';
+    default:
+      return status;
+  }
+}
+
+function formatPlaybackTimestamp(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '-';
+  try {
+    return new Date(ts).toLocaleString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return new Date(ts).toISOString();
+  }
+}
 
 export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   nowPlayingSong,
@@ -72,10 +127,11 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
   onNavigateToSettings,
   onUpdateSpotifyToken,
   songRequestState,
+  onRequeueHistoryItem,
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('queue');
   const [audioState, setAudioState] = useState<AudioEngineState>(audioEngine.getState());
-  const [notice, setNotice] = useState<{ text: string; tone: 'warn' | 'error' } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'warn' | 'error' } | null>(null);
 
   useEffect(() => {
     const unsub = audioEngine.subscribe(setAudioState);
@@ -216,6 +272,23 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
     }
   };
 
+  const handleRequeueFromHistory = async (entry: SongRequestHistoryEntry) => {
+    const result = onRequeueHistoryItem
+      ? await onRequeueHistoryItem(entry.id)
+      : songRequestEngine.requeueFromHistory(entry.id, 'Streamer');
+    if (!result.success) {
+      setNotice({
+        text: result.error || `Antrean penuh. Tidak dapat menambahkan "${entry.title}".`,
+        tone: 'error',
+      });
+      return;
+    }
+    setNotice({
+      text: `"${result.item?.title || entry.title}" ditambahkan ke antrean (#${result.queuePosition ?? '-'}).`,
+      tone: 'ok',
+    });
+  };
+
   const activeQueuePlaying = unifiedQueue.find((q) => q.status === 'playing');
   const isSongRequestActive = Boolean(songRequestState?.currentTrack);
   const displayTitle = isSongRequestActive
@@ -228,12 +301,16 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
     : audioState.currentTrackId
     ? audioState.artist
     : activeQueuePlaying?.artist || nowPlayingSong?.artist || 'Pilih lagu dari antrean atau perangkat';
+  const displayThumb =
+    (isSongRequestActive ? songRequestState?.currentTrack?.thumbnailUrl : undefined) ||
+    activeQueuePlaying?.thumbnailUrl;
   const isLocalEngineActive = Boolean(audioState.currentTrackId) && !isSongRequestActive;
   const isPlayingNow = isSongRequestActive
     ? !!songRequestState?.isPlaying
     : audioState.isPlaying || isPlaying;
 
   const pendingCount = unifiedQueue.filter((q) => q.status === 'pending').length;
+  const srHistory = songRequestState?.history || [];
 
   return (
     <div className="space-y-3.5 pb-2">
@@ -289,6 +366,12 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
                   borderColor: 'color-mix(in srgb, var(--app-error) 45%, transparent)',
                   color: 'var(--app-text)',
                 }
+              : notice.tone === 'ok'
+              ? {
+                  backgroundColor: 'var(--app-ok-soft)',
+                  borderColor: 'color-mix(in srgb, var(--app-ok) 45%, transparent)',
+                  color: 'var(--app-text)',
+                }
               : {
                   backgroundColor: 'var(--app-warn-soft)',
                   borderColor: 'color-mix(in srgb, var(--app-warn) 45%, transparent)',
@@ -316,9 +399,9 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-accent-border)] flex items-center justify-center shrink-0 overflow-hidden">
-              {activeQueuePlaying?.thumbnailUrl ? (
+              {displayThumb ? (
                 <img
-                  src={activeQueuePlaying.thumbnailUrl}
+                  src={displayThumb}
                   alt={displayTitle}
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
@@ -453,7 +536,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
         </div>
       </section>
 
-      {/* 5-Tab Segmented Navigation */}
+      {/* 6-Tab Segmented Navigation */}
       <div className="flex overflow-x-auto gap-1 p-1 bg-[var(--app-surface)] rounded-xl border border-[var(--app-border)] no-scrollbar">
         <button
           type="button"
@@ -469,6 +552,24 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
           {pendingCount > 0 && (
             <span className="px-1.5 py-0.5 rounded-md bg-black/25 text-[10px] font-mono-num font-bold">
               {pendingCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('history')}
+          className={`btn-press min-h-[44px] px-3.5 rounded-[9px] text-xs font-bold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 ${
+            activeTab === 'history'
+              ? 'bg-[var(--app-accent)] text-[var(--app-accent-ink)]'
+              : 'text-[var(--app-text-secondary)] hover:text-[var(--app-text)]'
+          }`}
+        >
+          <History className="w-3.5 h-3.5 shrink-0" />
+          <span>History</span>
+          {srHistory.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-md bg-black/25 text-[10px] font-mono-num font-bold">
+              {srHistory.length}
             </span>
           )}
         </button>
@@ -537,6 +638,127 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
             onPlayLocalItem={handlePlayLocalQueueItem}
             currentlyPlayingId={audioState.currentTrackId || activeQueuePlaying?.id}
           />
+        )}
+
+        {activeTab === 'history' && (
+          <section className="p-3.5 sm:p-4 rounded-2xl bg-[var(--app-surface)] border border-[var(--app-border)] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--app-border)]">
+              <div>
+                <h3 className="font-display text-sm font-bold text-[var(--app-text)]">
+                  Riwayat Song Request
+                </h3>
+                <p className="text-[11px] text-[var(--app-text-secondary)]">
+                  Menampilkan hingga 100 sesi pemutaran terakhir. Tambahkan kembali ke bagian belakang antrean tanpa memutus lagu aktif.
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-lg bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-[11px] font-mono-num text-[var(--app-text-secondary)]">
+                {srHistory.length} / 100 Sesi
+              </span>
+            </div>
+
+            {srHistory.length === 0 ? (
+              <div className="py-10 text-center space-y-1.5">
+                <History className="w-8 h-8 mx-auto text-[var(--app-text-muted)]" />
+                <p className="text-sm font-semibold text-[var(--app-text)]">
+                  Belum ada riwayat pemutaran Song Request
+                </p>
+                <p className="text-xs text-[var(--app-text-secondary)]">
+                  Entri riwayat tercatat otomatis saat lagu Song Request mulai diputar.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {srHistory.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="p-3 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="w-12 h-12 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center justify-center shrink-0 overflow-hidden">
+                        {entry.thumbnailUrl ? (
+                          <img
+                            src={entry.thumbnailUrl}
+                            alt={entry.title}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <Disc3 className="w-5 h-5 text-[var(--app-accent-text)]" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-semibold text-sm text-[var(--app-text)] truncate max-w-full">
+                            {entry.title}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-[var(--app-surface)] border border-[var(--app-border)] text-[10px] font-semibold text-[var(--app-text-secondary)]">
+                            {formatHistoryProviderLabel(entry.provider)}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              entry.status === 'error'
+                                ? 'bg-rose-950/60 border border-rose-700/60 text-rose-200'
+                                : entry.status === 'skipped'
+                                ? 'bg-amber-950/60 border border-amber-700/60 text-amber-200'
+                                : entry.status === 'playing'
+                                ? 'bg-sky-950/60 border border-sky-700/60 text-sky-200'
+                                : 'bg-emerald-950/60 border border-emerald-700/60 text-emerald-200'
+                            }`}
+                          >
+                            {formatHistoryStatusLabel(entry.status)}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--app-text-secondary)]">
+                          <span className="truncate">{entry.artist}</span>
+                          {entry.album && (
+                            <>
+                              <span className="text-[var(--app-border-strong)]">·</span>
+                              <span className="truncate">{entry.album}</span>
+                            </>
+                          )}
+                          <span className="text-[var(--app-border-strong)]">·</span>
+                          <span>@{entry.requester}</span>
+                          <span className="text-[var(--app-border-strong)]">·</span>
+                          <span className="font-mono-num text-[11px]">
+                            {formatPlaybackTimestamp(entry.startedAt || entry.timestamp)}
+                          </span>
+                        </div>
+
+                        {entry.errorMessage && (
+                          <p className="text-[11px] text-rose-300">{entry.errorMessage}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {entry.externalUrl && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            window.open(entry.externalUrl, '_blank', 'noopener,noreferrer')
+                          }
+                          className="btn-press min-h-[40px] px-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text-secondary)] hover:text-[var(--app-text)] inline-flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Referensi</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void handleRequeueFromHistory(entry)}
+                        className="btn-press min-h-[40px] px-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-ink)] text-xs font-bold inline-flex items-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah ke antrean</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         )}
 
         {activeTab === 'local_audio' && (

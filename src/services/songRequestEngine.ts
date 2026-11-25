@@ -1,7 +1,8 @@
 // Dedicated Mode A Song Request Engine — SYNTXRR STREAM
 // Integrates with streamEventBus (!play, !sr, !songrequest, !queue, !np, !nowplaying),
-// user's imported Local Audio Library, official YouTube Data API v3 & Spotify Web API catalogs,
-// Android NativeMusicPlayer (MediaPlayer + MediaSession inside CompanionService), and HTML5 Audio fallback on Web.
+// official YouTube Data API v3 & Spotify Web API metadata catalogs,
+// Android NativeMusicPlayer (MediaPlayer + MediaSession inside CompanionService), and HTML5 Audio fallback on Web
+// strictly for authorized direct playback sources.
 // All Now Playing / isPlaying / progress / error states reflect actual playback engine state.
 
 import { streamEventBus } from './eventBus';
@@ -10,13 +11,17 @@ import { YouTubeService } from './youtubeService';
 import { SpotifyService } from './spotifyService';
 import {
   isModeAOperatingMode,
-  type LocalAudioTrackMeta,
   type OperatingMode,
   type StreamEvent,
 } from '../types';
 
+export type SongRequestProvider =
+  | 'youtube_music'
+  | 'youtube'
+  | 'spotify'
+  | 'authorized_stream';
+
 export type SongRequestSourceType =
-  | 'local_file'
   | 'remote_url'
   | 'youtube_metadata'
   | 'spotify_metadata';
@@ -25,17 +30,19 @@ export interface SongRequestItem {
   id: string;
   title: string;
   artist: string;
+  album?: string;
   requester: string;
   durationSec: number;
   requestedAt: number;
   sourceType: SongRequestSourceType;
+  provider: SongRequestProvider;
+  providerTrackId?: string;
   playable: boolean;
-  localFileId?: string;
   audioUrl?: string;
   externalUrl?: string;
   thumbnailUrl?: string;
   mimeType?: string;
-  platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'Spotify' | 'Local' | 'Manual';
+  platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'YouTube Music' | 'Spotify' | 'Stream' | 'Manual';
   notes?: string;
 }
 
@@ -62,14 +69,53 @@ export type AudioPlaybackMode =
   | 'real_html5_audio'
   | 'pending_source';
 
-export interface SongRequestHistoryEntry {
+export interface SongRequestHistoryTrackSnapshot {
   id: string;
   title: string;
   artist: string;
+  album?: string;
   requester: string;
-  status: 'playing' | 'completed' | 'skipped' | 'error';
+  durationSec: number;
+  requestedAt: number;
+  sourceType: SongRequestSourceType;
+  provider: SongRequestProvider;
+  providerTrackId?: string;
+  playable: boolean;
+  audioUrl?: string;
+  externalUrl?: string;
+  thumbnailUrl?: string;
+  mimeType?: string;
+  platform?: SongRequestItem['platform'];
+  notes?: string;
+}
+
+export interface SongRequestHistoryEntry {
+  id: string;
+  sessionId: string;
+  trackId: string;
+  title: string;
+  artist: string;
+  album?: string;
+  provider: SongRequestProvider;
+  providerTrackId?: string;
+  sourceType: SongRequestSourceType;
+  thumbnailUrl?: string;
+  durationSec: number;
+  externalUrl?: string;
+  requester: string;
+  startedAt: number;
+  updatedAt: number;
   timestamp: number;
+  status: 'playing' | 'completed' | 'skipped' | 'error';
   errorMessage?: string;
+  trackSnapshot: SongRequestHistoryTrackSnapshot;
+}
+
+export interface SongRequestRequeueResult {
+  success: boolean;
+  item?: SongRequestItem;
+  queuePosition?: number;
+  error?: string;
 }
 
 export interface SongRequestState {
@@ -128,25 +174,220 @@ export interface SongRequestContextConfig {
 
 type SongRequestListener = (state: SongRequestState) => void;
 
-const MAX_NATIVE_BRIDGE_BYTES = 25 * 1024 * 1024;
+export const MAX_SONG_REQUEST_HISTORY = 100;
 
-function normalizeText(value: string): string {
-  return (value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+const SENSITIVE_URL_PARAM_PATTERN = /(token|api[_-]?key|key|secret|signature|sig|expires|auth|credential|x-amz-)/i;
+
+export function normalizeSongRequestProvider(
+  provider: unknown,
+  sourceType?: SongRequestSourceType
+): SongRequestProvider {
+  if (
+    provider === 'youtube_music' ||
+    provider === 'youtube' ||
+    provider === 'spotify' ||
+    provider === 'authorized_stream'
+  ) {
+    return provider;
+  }
+  if (sourceType === 'youtube_metadata') return 'youtube';
+  if (sourceType === 'spotify_metadata') return 'spotify';
+  return 'authorized_stream';
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
+export function normalizeSongRequestSourceType(
+  sourceType: unknown,
+  provider?: SongRequestProvider
+): SongRequestSourceType {
+  if (
+    sourceType === 'youtube_metadata' ||
+    sourceType === 'spotify_metadata' ||
+    sourceType === 'remote_url'
+  ) {
+    return sourceType;
   }
-  return btoa(binary);
+  if (provider === 'youtube' || provider === 'youtube_music') return 'youtube_metadata';
+  if (provider === 'spotify') return 'spotify_metadata';
+  return 'remote_url';
+}
+
+export function isPersistentAuthorizedAudioUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (/^(blob|data):/i.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    if (parsed.username || parsed.password) return false;
+    for (const [paramKey] of parsed.searchParams.entries()) {
+      if (SENSITIVE_URL_PARAM_PATTERN.test(paramKey)) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isAuthorizedPlaybackAudioUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed || /^(blob|data):/i.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeReferenceUrl(url: unknown): string | undefined {
+  if (typeof url !== 'string') return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || /^(blob|data):/i.test(trimmed)) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined;
+    if (parsed.username || parsed.password) return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function sanitizeHistoryTrackSnapshot(
+  item: Partial<SongRequestItem | SongRequestHistoryTrackSnapshot>
+): SongRequestHistoryTrackSnapshot {
+  const provider = normalizeSongRequestProvider(
+    item.provider,
+    item.sourceType === 'youtube_metadata' || item.sourceType === 'spotify_metadata' || item.sourceType === 'remote_url'
+      ? item.sourceType
+      : undefined
+  );
+  const sourceType = normalizeSongRequestSourceType(item.sourceType, provider);
+  const safeAudioUrl =
+    sourceType === 'remote_url' && item.playable === true && isPersistentAuthorizedAudioUrl(item.audioUrl)
+      ? item.audioUrl.trim()
+      : undefined;
+
+  return {
+    id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `sr_hist_item_${Date.now()}`,
+    title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : 'Untitled Track',
+    artist: typeof item.artist === 'string' && item.artist.trim() ? item.artist.trim() : 'Unknown Artist',
+    ...(typeof item.album === 'string' && item.album.trim() ? { album: item.album.trim() } : {}),
+    requester: typeof item.requester === 'string' && item.requester.trim() ? item.requester.trim() : 'Viewer',
+    durationSec:
+      typeof item.durationSec === 'number' && Number.isFinite(item.durationSec) && item.durationSec > 0
+        ? Math.round(item.durationSec)
+        : 0,
+    requestedAt:
+      typeof item.requestedAt === 'number' && Number.isFinite(item.requestedAt) && item.requestedAt > 0
+        ? Math.round(item.requestedAt)
+        : Date.now(),
+    sourceType,
+    provider,
+    ...(typeof item.providerTrackId === 'string' && item.providerTrackId.trim()
+      ? { providerTrackId: item.providerTrackId.trim() }
+      : {}),
+    playable: sourceType === 'remote_url' && Boolean(safeAudioUrl) && item.playable === true,
+    ...(safeAudioUrl ? { audioUrl: safeAudioUrl } : {}),
+    ...(sanitizeReferenceUrl(item.externalUrl) ? { externalUrl: sanitizeReferenceUrl(item.externalUrl) } : {}),
+    ...(sanitizeReferenceUrl(item.thumbnailUrl) ? { thumbnailUrl: sanitizeReferenceUrl(item.thumbnailUrl) } : {}),
+    ...(typeof item.mimeType === 'string' && item.mimeType.trim() ? { mimeType: item.mimeType.trim() } : {}),
+    ...(item.platform ? { platform: item.platform } : {}),
+    ...(typeof item.notes === 'string' && item.notes.trim() ? { notes: item.notes.trim() } : {}),
+  };
+}
+
+export function sanitizeSongRequestHistoryEntries(entries: unknown): SongRequestHistoryEntry[] {
+  if (!Array.isArray(entries)) return [];
+  const bySession = new Map<string, SongRequestHistoryEntry>();
+
+  for (const raw of entries) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const candidate = raw as Partial<SongRequestHistoryEntry>;
+    const rawSnapshot =
+      candidate.trackSnapshot && typeof candidate.trackSnapshot === 'object'
+        ? candidate.trackSnapshot
+        : {
+            id: candidate.trackId || candidate.id || `track_${Date.now()}`,
+            title: candidate.title || 'Untitled Track',
+            artist: candidate.artist || 'Unknown Artist',
+            album: candidate.album,
+            requester: candidate.requester || 'Viewer',
+            durationSec: candidate.durationSec || 0,
+            requestedAt: candidate.startedAt || candidate.timestamp || Date.now(),
+            sourceType: candidate.sourceType,
+            provider: candidate.provider,
+            providerTrackId: candidate.providerTrackId,
+            playable: false,
+            externalUrl: candidate.externalUrl,
+            thumbnailUrl: candidate.thumbnailUrl,
+          };
+
+    const snapshot = sanitizeHistoryTrackSnapshot(rawSnapshot);
+    const sessionId =
+      typeof candidate.sessionId === 'string' && candidate.sessionId.trim()
+        ? candidate.sessionId.trim()
+        : typeof candidate.id === 'string' && candidate.id.trim()
+        ? candidate.id.trim()
+        : `sr_session_${snapshot.requestedAt}_${Math.random().toString(36).slice(2, 6)}`;
+    const startedAt =
+      typeof candidate.startedAt === 'number' && Number.isFinite(candidate.startedAt) && candidate.startedAt > 0
+        ? Math.round(candidate.startedAt)
+        : typeof candidate.timestamp === 'number' && Number.isFinite(candidate.timestamp) && candidate.timestamp > 0
+        ? Math.round(candidate.timestamp)
+        : snapshot.requestedAt;
+    const updatedAt =
+      typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt) && candidate.updatedAt > 0
+        ? Math.round(candidate.updatedAt)
+        : startedAt;
+    const status: SongRequestHistoryEntry['status'] =
+      candidate.status === 'playing' ||
+      candidate.status === 'completed' ||
+      candidate.status === 'skipped' ||
+      candidate.status === 'error'
+        ? candidate.status
+        : 'completed';
+
+    const sanitized: SongRequestHistoryEntry = {
+      id: sessionId,
+      sessionId,
+      trackId:
+        typeof candidate.trackId === 'string' && candidate.trackId.trim()
+          ? candidate.trackId.trim()
+          : snapshot.id,
+      title: snapshot.title,
+      artist: snapshot.artist,
+      ...(snapshot.album ? { album: snapshot.album } : {}),
+      provider: snapshot.provider,
+      ...(snapshot.providerTrackId ? { providerTrackId: snapshot.providerTrackId } : {}),
+      sourceType: snapshot.sourceType,
+      ...(snapshot.thumbnailUrl ? { thumbnailUrl: snapshot.thumbnailUrl } : {}),
+      durationSec: snapshot.durationSec,
+      ...(snapshot.externalUrl ? { externalUrl: snapshot.externalUrl } : {}),
+      requester: snapshot.requester,
+      startedAt,
+      updatedAt,
+      timestamp: startedAt,
+      status,
+      ...(status === 'error' && typeof candidate.errorMessage === 'string' && candidate.errorMessage.trim()
+        ? { errorMessage: candidate.errorMessage.trim() }
+        : {}),
+      trackSnapshot: snapshot,
+    };
+
+    const existing = bySession.get(sessionId);
+    if (!existing || sanitized.updatedAt >= existing.updatedAt) {
+      bySession.set(sessionId, sanitized);
+    }
+  }
+
+  return Array.from(bySession.values())
+    .sort((a, b) => (b.startedAt !== a.startedAt ? b.startedAt - a.startedAt : b.updatedAt - a.updatedAt))
+    .slice(0, MAX_SONG_REQUEST_HISTORY);
 }
 
 export class SongRequestEngine {
@@ -183,21 +424,19 @@ export class SongRequestEngine {
   private processedEventIdSet: Set<string> = new Set();
   private processedEventIdQueue: string[] = [];
   private audioElement: HTMLAudioElement | null = null;
-  private activeObjectUrl: string | null = null;
   private nativePollTimer: ReturnType<typeof setInterval> | null = null;
   private nativeListenersAttached = false;
   private playbackGeneration = 0;
+  private activePlaybackSessionId: string | null = null;
+  private requeueCounter = 0;
   private handlingTrackEnd = false;
   private lastEndedPlaybackGen = -1;
-  private lastRecordedPlayingKey = '';
   private busUnsubscribe: (() => void) | null = null;
 
   // Context supplied by App.tsx
   private operatingMode: OperatingMode = 'MODE_A_TIKTOK_COMPANION';
   private youtubeApiKey = '';
   private spotifyAccessToken = '';
-  private localTracksMeta: LocalAudioTrackMeta[] = [];
-  private localFilesMap: Map<string, File> = new Map();
 
   constructor() {
     this.initAudioElement();
@@ -223,7 +462,14 @@ export class SongRequestEngine {
           Number.isFinite(audio.duration) && audio.duration > 0
             ? Math.round(audio.duration)
             : this.state.currentTrack.durationSec;
-        this.recordHistory(this.state.currentTrack, 'playing');
+        if (this.activePlaybackSessionId) {
+          this.recordSessionHistory(
+            this.state.currentTrack,
+            'playing',
+            undefined,
+            this.activePlaybackSessionId
+          );
+        }
         this.updateState({
           isPlaying: true,
           playbackStatus: 'playing',
@@ -273,9 +519,15 @@ export class SongRequestEngine {
         const msg = mediaErr
           ? `Gagal memutar audio (kode ${mediaErr.code}). Format atau sumber tidak didukung.`
           : 'Gagal mendekode aliran audio.';
-        if (this.state.currentTrack) {
-          this.recordHistory(this.state.currentTrack, 'error', msg);
+        if (this.state.currentTrack && this.activePlaybackSessionId) {
+          this.recordSessionHistory(
+            this.state.currentTrack,
+            'error',
+            msg,
+            this.activePlaybackSessionId
+          );
         }
+        this.activePlaybackSessionId = null;
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
@@ -340,8 +592,8 @@ export class SongRequestEngine {
         break;
       case 'playing':
         this.startNativePositionPoll();
-        if (active) {
-          this.recordHistory(active, 'playing');
+        if (active && this.activePlaybackSessionId) {
+          this.recordSessionHistory(active, 'playing', undefined, this.activePlaybackSessionId);
         }
         this.updateState({
           isPlaying: true,
@@ -379,9 +631,10 @@ export class SongRequestEngine {
       case 'error': {
         this.stopNativePositionPoll();
         const errMsg = ev.errorMessage || 'Terjadi kesalahan pemutaran native Android.';
-        if (active) {
-          this.recordHistory(active, 'error', errMsg);
+        if (active && this.activePlaybackSessionId) {
+          this.recordSessionHistory(active, 'error', errMsg, this.activePlaybackSessionId);
         }
+        this.activePlaybackSessionId = null;
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
@@ -507,11 +760,6 @@ export class SongRequestEngine {
     }
   }
 
-  public registerLocalLibrary(tracksMeta: LocalAudioTrackMeta[], filesMap: Map<string, File>) {
-    this.localTracksMeta = Array.isArray(tracksMeta) ? tracksMeta : [];
-    this.localFilesMap = filesMap instanceof Map ? filesMap : new Map();
-  }
-
   private validatePolicy(query: string, requester: string, isSimulation: boolean): {
     stage1: SongRequestTestStage;
     stage2: SongRequestTestStage;
@@ -597,76 +845,14 @@ export class SongRequestEngine {
     };
   }
 
-  private findLocalTrackMatch(query: string): { meta: LocalAudioTrackMeta; file?: File } | null {
-    const normQuery = normalizeText(query);
-    if (!normQuery) return null;
-
-    // 1. Exact title match (with file in memory preferred)
-    const exactWithFile = this.localTracksMeta.find(
-      (m) => normalizeText(m.title) === normQuery && this.localFilesMap.has(m.id)
-    );
-    if (exactWithFile) {
-      return { meta: exactWithFile, file: this.localFilesMap.get(exactWithFile.id) };
-    }
-
-    // 2. Partial title / artist / filename match with file in memory
-    const tokens = normQuery.split(' ').filter((t) => t.length >= 2);
-    const partialWithFile = this.localTracksMeta.find((m) => {
-      if (!this.localFilesMap.has(m.id)) return false;
-      const haystack = normalizeText(`${m.title} ${m.artist} ${m.filename}`);
-      if (haystack.includes(normQuery)) return true;
-      return tokens.length > 0 && tokens.every((tok) => haystack.includes(tok));
-    });
-    if (partialWithFile) {
-      return { meta: partialWithFile, file: this.localFilesMap.get(partialWithFile.id) };
-    }
-
-    // 3. Metadata match without File in session memory (truthful missing-file detection)
-    const metaOnly = this.localTracksMeta.find((m) => {
-      const haystack = normalizeText(`${m.title} ${m.artist} ${m.filename}`);
-      return haystack.includes(normQuery);
-    });
-    if (metaOnly) {
-      return { meta: metaOnly, file: undefined };
-    }
-
-    return null;
-  }
-
   private async resolveSongFromProviders(
     query: string,
     requester: string
   ): Promise<{ item?: SongRequestItem; error?: string; providerNote?: string }> {
     const cleanQuery = query.trim();
-
-    // 1. Check imported Local Audio Library
-    const localMatch = this.findLocalTrackMatch(cleanQuery);
-    if (localMatch && localMatch.file) {
-      return {
-        item: {
-          id: `sr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          title: localMatch.meta.title,
-          artist: localMatch.meta.artist,
-          requester,
-          durationSec: Math.max(1, Math.round(localMatch.meta.duration || 0)),
-          requestedAt: Date.now(),
-          sourceType: 'local_file',
-          playable: true,
-          localFileId: localMatch.meta.id,
-          mimeType: localMatch.file.type || localMatch.meta.mimeType || 'audio/mpeg',
-          platform: 'Local',
-        },
-      };
-    }
-
     const errors: string[] = [];
-    if (localMatch && !localMatch.file) {
-      errors.push(
-        `Track lokal "${localMatch.meta.title}" belum dimuat ulang di sesi ini (impor ulang di Music -> Local Audio).`
-      );
-    }
 
-    // 2. Check YouTube Data API v3 catalog (real HTTP call when API key is configured)
+    // 1. Check YouTube Data API v3 catalog (metadata only — zero audio extraction)
     if (this.youtubeApiKey.trim()) {
       const ytRes = await YouTubeService.searchCatalog(cleanQuery, this.youtubeApiKey);
       if (ytRes.success && ytRes.results.length > 0) {
@@ -680,11 +866,13 @@ export class SongRequestEngine {
             durationSec: 0,
             requestedAt: Date.now(),
             sourceType: 'youtube_metadata',
+            provider: 'youtube',
+            providerTrackId: first.id,
             playable: false,
             externalUrl: first.videoUrl,
             thumbnailUrl: first.thumbnailUrl,
             platform: 'YouTube',
-            notes: 'Metadata katalog YouTube (ekstraksi audio langsung tidak tersedia).',
+            notes: 'Metadata katalog YouTube (sumber playback berizin belum tersedia).',
           },
         };
       }
@@ -693,7 +881,7 @@ export class SongRequestEngine {
       }
     }
 
-    // 3. Check Spotify Web API catalog (real HTTP call when access token is configured)
+    // 2. Check Spotify Web API catalog (metadata only — zero audio extraction)
     if (this.spotifyAccessToken.trim()) {
       const spRes = await SpotifyService.searchCatalog(cleanQuery, this.spotifyAccessToken);
       if (spRes.success && spRes.results.length > 0) {
@@ -703,15 +891,18 @@ export class SongRequestEngine {
             id: `sr_sp_${first.id}_${Date.now()}`,
             title: first.title,
             artist: first.artist || 'Spotify',
+            ...(first.albumName ? { album: first.albumName } : {}),
             requester,
             durationSec: Math.max(0, Math.round((first.durationMs || 0) / 1000)),
             requestedAt: Date.now(),
             sourceType: 'spotify_metadata',
+            provider: 'spotify',
+            providerTrackId: first.id,
             playable: false,
             externalUrl: first.spotifyUrl,
             thumbnailUrl: first.thumbnailUrl,
             platform: 'Spotify',
-            notes: 'Metadata katalog Spotify (ekstraksi audio langsung tidak tersedia).',
+            notes: 'Metadata katalog Spotify (sumber playback berizin belum tersedia).',
           },
         };
       }
@@ -727,8 +918,8 @@ export class SongRequestEngine {
     const hasRemoteProvider = Boolean(this.youtubeApiKey.trim() || this.spotifyAccessToken.trim());
     return {
       error: hasRemoteProvider
-        ? `Lagu "${cleanQuery}" tidak ditemukan di pustaka audio lokal maupun katalog YouTube/Spotify.`
-        : `Lagu "${cleanQuery}" tidak ditemukan di pustaka audio lokal, dan kunci YouTube / token Spotify belum dikonfigurasi.`,
+        ? `Lagu "${cleanQuery}" tidak ditemukan di katalog metadata YouTube/Spotify.`
+        : `Sumber metadata Song Request (YouTube Data API Key / token Spotify) belum dikonfigurasi.`,
     };
   }
 
@@ -765,7 +956,7 @@ export class SongRequestEngine {
         lastTestPipelineResult: this.buildPipelineResult(cleanQuery, username, isSimulation, policyCheck, {
           resolved: false,
           resolveSummary: errMsg,
-          resolveDetail: `Local tracks: ${this.localTracksMeta.length}, YT key: ${this.youtubeApiKey ? 'set' : 'missing'}, Spotify token: ${this.spotifyAccessToken ? 'set' : 'missing'}`,
+          resolveDetail: `YT key: ${this.youtubeApiKey ? 'set' : 'missing'}, Spotify token: ${this.spotifyAccessToken ? 'set' : 'missing'}`,
           playbackStarted: false,
           playbackSummary: 'Pemutaran dibatalkan karena sumber tidak tersedia.',
         }),
@@ -781,7 +972,8 @@ export class SongRequestEngine {
       !this.state.currentTrack ||
       this.state.playbackStatus === 'idle' ||
       this.state.playbackStatus === 'stopped' ||
-      this.state.playbackStatus === 'completed';
+      this.state.playbackStatus === 'completed' ||
+      this.state.playbackStatus === 'error';
 
     if (isIdle) {
       const started = await this.playItem(item);
@@ -790,19 +982,19 @@ export class SongRequestEngine {
         lastTestPipelineResult: this.buildPipelineResult(cleanQuery, username, isSimulation, policyCheck, {
           resolved: true,
           resolveSummary: item.playable
-            ? `Sumber audio lokal ditemukan: "${item.title}"`
-            : `Metadata katalog ditemukan (${item.sourceType}): "${item.title}" — belum ada audio lokal untuk playback`,
-          resolveDetail: `SourceType: ${item.sourceType} | Playable: ${item.playable}`,
+            ? `Sumber playback berizin ditemukan: "${item.title}"`
+            : `Metadata katalog ditemukan (${item.sourceType}): "${item.title}" — sumber playback berizin belum tersedia`,
+          resolveDetail: `Provider: ${item.provider} | SourceType: ${item.sourceType} | Playable: ${item.playable}`,
           playbackStarted: started,
           playbackSummary: started
             ? `Pemutaran dimulai melalui ${nativeAudioBridge.isNativeAndroid() ? 'NativeMusicPlayer (MediaPlayer)' : 'HTML5 Audio'}`
-            : this.state.lastError || 'Pemutaran tidak dapat dimulai.',
+            : this.state.lastError || 'Sumber playback berizin belum tersedia untuk metadata ini.',
         }),
       });
       if (started) {
         this.announce(`🎵 [${isSimulation ? 'SIMULASI' : 'LIVE'}] @${username} memutar "${item.title}"`);
       } else {
-        this.announce(`⚠️ [${isSimulation ? 'SIMULASI' : 'LIVE'}] @${username}: ${this.state.lastError || 'Gagal memutar lagu.'}`);
+        this.announce(`⚠️ [${isSimulation ? 'SIMULASI' : 'LIVE'}] @${username}: ${this.state.lastError || 'Sumber playback belum tersedia.'}`);
       }
       return { success: started, item, error: started ? undefined : this.state.lastError || undefined };
     }
@@ -830,7 +1022,8 @@ export class SongRequestEngine {
       !this.state.currentTrack ||
       this.state.playbackStatus === 'idle' ||
       this.state.playbackStatus === 'stopped' ||
-      this.state.playbackStatus === 'completed';
+      this.state.playbackStatus === 'completed' ||
+      this.state.playbackStatus === 'error';
     if (isIdle) {
       return this.playItem(item);
     }
@@ -840,18 +1033,20 @@ export class SongRequestEngine {
 
   public async playItem(item: SongRequestItem): Promise<boolean> {
     const gen = ++this.playbackGeneration;
+    this.activePlaybackSessionId = null;
     await this.stopActivePlaybackOnly();
     if (gen !== this.playbackGeneration) return false;
 
-    if (!item.playable) {
+    if (!item.playable || item.sourceType !== 'remote_url') {
       const platformLabel =
-        item.sourceType === 'youtube_metadata'
+        item.provider === 'youtube_music'
+          ? 'YouTube Music'
+          : item.sourceType === 'youtube_metadata' || item.provider === 'youtube'
           ? 'YouTube'
-          : item.sourceType === 'spotify_metadata'
+          : item.sourceType === 'spotify_metadata' || item.provider === 'spotify'
           ? 'Spotify'
           : 'Katalog';
-      const errMsg = `Lagu "${item.title}" hanya metadata ${platformLabel} (tidak memiliki file audio yang dapat diputar otomatis).`;
-      this.recordHistory(item, 'error', errMsg);
+      const errMsg = `Lagu "${item.title}" hanya metadata ${platformLabel} (sumber playback berizin belum tersedia).`;
       this.updateState({
         currentTrack: item,
         isPlaying: false,
@@ -866,70 +1061,28 @@ export class SongRequestEngine {
       return false;
     }
 
+    const authorizedUrl = isAuthorizedPlaybackAudioUrl(item.audioUrl) ? item.audioUrl.trim() : '';
+    if (!authorizedUrl) {
+      const msg = `Sumber playback berizin untuk "${item.title}" belum tersedia.`;
+      this.updateState({
+        currentTrack: item,
+        isPlaying: false,
+        playbackStatus: 'error',
+        currentTimeSec: 0,
+        durationSec: item.durationSec || 0,
+        audioPlaybackMode: 'pending_source',
+        audioSourceResolved: false,
+        audioRoutedToStream: false,
+        lastError: msg,
+      });
+      return false;
+    }
+
+    const sessionId = `sr_session_${Date.now()}_${gen}_${Math.random().toString(36).slice(2, 6)}`;
+    this.activePlaybackSessionId = sessionId;
+
     // Android Native MediaPlayer Path (persists in CompanionService foreground process)
     if (nativeAudioBridge.isNativeAndroid()) {
-      let base64Audio: string | undefined;
-      let sourceUri: string | undefined = item.audioUrl;
-
-      if (item.localFileId) {
-        const file = this.localFilesMap.get(item.localFileId);
-        if (!file) {
-          const msg = `File audio lokal "${item.title}" tidak ditemukan di sesi memori saat ini.`;
-          this.recordHistory(item, 'error', msg);
-          this.updateState({
-            currentTrack: item,
-            isPlaying: false,
-            playbackStatus: 'error',
-            audioPlaybackMode: 'idle',
-            audioSourceResolved: false,
-            audioRoutedToStream: false,
-            lastError: msg,
-          });
-          return false;
-        }
-        if (file.size > MAX_NATIVE_BRIDGE_BYTES) {
-          const msg = `File "${item.title}" melebihi batas transfer native 25 MB.`;
-          this.recordHistory(item, 'error', msg);
-          this.updateState({
-            currentTrack: item,
-            isPlaying: false,
-            playbackStatus: 'error',
-            audioPlaybackMode: 'idle',
-            lastError: msg,
-          });
-          return false;
-        }
-        try {
-          const buffer = await file.arrayBuffer();
-          if (gen !== this.playbackGeneration) return false;
-          base64Audio = arrayBufferToBase64(buffer);
-        } catch (err: any) {
-          const msg = `Gagal membaca file audio lokal: ${err?.message || 'error'}`;
-          this.recordHistory(item, 'error', msg);
-          this.updateState({
-            currentTrack: item,
-            isPlaying: false,
-            playbackStatus: 'error',
-            audioPlaybackMode: 'idle',
-            lastError: msg,
-          });
-          return false;
-        }
-      }
-
-      if (!base64Audio && !sourceUri) {
-        const msg = `Sumber audio untuk "${item.title}" tidak tersedia.`;
-        this.recordHistory(item, 'error', msg);
-        this.updateState({
-          currentTrack: item,
-          isPlaying: false,
-          playbackStatus: 'error',
-          audioPlaybackMode: 'idle',
-          lastError: msg,
-        });
-        return false;
-      }
-
       this.updateState({
         currentTrack: item,
         isPlaying: false,
@@ -946,8 +1099,7 @@ export class SongRequestEngine {
         trackId: item.id,
         title: item.title,
         artist: item.artist,
-        sourceUri,
-        base64Audio,
+        sourceUri: authorizedUrl,
         mimeType: item.mimeType || 'audio/mpeg',
         volume: this.effectiveVolumeUnit(),
       });
@@ -955,7 +1107,7 @@ export class SongRequestEngine {
       if (gen !== this.playbackGeneration) return false;
       if (!res.success) {
         const msg = res.message || 'Gagal memulai pemutaran di Android MediaPlayer.';
-        this.recordHistory(item, 'error', msg);
+        this.activePlaybackSessionId = null;
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
@@ -970,47 +1122,10 @@ export class SongRequestEngine {
       return true;
     }
 
-    // Web / Browser HTML5 Audio Path
+    // Web / Browser HTML5 Audio Path (authorized direct stream only)
     if (!this.audioElement) {
       const msg = 'HTML5 Audio tidak tersedia pada lingkungan ini.';
-      this.recordHistory(item, 'error', msg);
-      this.updateState({
-        currentTrack: item,
-        isPlaying: false,
-        playbackStatus: 'error',
-        audioPlaybackMode: 'idle',
-        lastError: msg,
-      });
-      return false;
-    }
-
-    let playUrl = item.audioUrl || '';
-    if (item.localFileId) {
-      const file = this.localFilesMap.get(item.localFileId);
-      if (!file) {
-        const msg = `File audio lokal "${item.title}" tidak tersedia di memori browser.`;
-        this.recordHistory(item, 'error', msg);
-        this.updateState({
-          currentTrack: item,
-          isPlaying: false,
-          playbackStatus: 'error',
-          audioPlaybackMode: 'idle',
-          audioSourceResolved: false,
-          lastError: msg,
-        });
-        return false;
-      }
-      if (this.activeObjectUrl) {
-        URL.revokeObjectURL(this.activeObjectUrl);
-        this.activeObjectUrl = null;
-      }
-      this.activeObjectUrl = URL.createObjectURL(file);
-      playUrl = this.activeObjectUrl;
-    }
-
-    if (!playUrl) {
-      const msg = `URL pemutaran untuk "${item.title}" tidak tersedia.`;
-      this.recordHistory(item, 'error', msg);
+      this.activePlaybackSessionId = null;
       this.updateState({
         currentTrack: item,
         isPlaying: false,
@@ -1035,7 +1150,7 @@ export class SongRequestEngine {
 
     try {
       this.audioElement.volume = this.effectiveVolumeUnit();
-      this.audioElement.src = playUrl;
+      this.audioElement.src = authorizedUrl;
       this.audioElement.load();
       await this.audioElement.play();
       if (gen !== this.playbackGeneration) return false;
@@ -1043,7 +1158,9 @@ export class SongRequestEngine {
         Number.isFinite(this.audioElement.duration) && this.audioElement.duration > 0
           ? Math.round(this.audioElement.duration)
           : item.durationSec || 0;
-      this.recordHistory(item, 'playing');
+      if (this.activePlaybackSessionId === sessionId) {
+        this.recordSessionHistory(item, 'playing', undefined, sessionId);
+      }
       this.updateState({
         isPlaying: true,
         playbackStatus: 'playing',
@@ -1056,7 +1173,10 @@ export class SongRequestEngine {
     } catch (err: any) {
       if (gen !== this.playbackGeneration) return false;
       const msg = err?.message || 'Pemutaran audio ditolak oleh browser atau format tidak didukung.';
-      this.recordHistory(item, 'error', msg);
+      this.recordSessionHistory(item, 'error', msg, sessionId);
+      if (this.activePlaybackSessionId === sessionId) {
+        this.activePlaybackSessionId = null;
+      }
       this.updateState({
         isPlaying: false,
         playbackStatus: 'error',
@@ -1082,18 +1202,16 @@ export class SongRequestEngine {
         // ignore cleanup errors
       }
     }
-    if (this.activeObjectUrl) {
-      URL.revokeObjectURL(this.activeObjectUrl);
-      this.activeObjectUrl = null;
-    }
   }
 
   public async handleSkipCommand(username: string = 'Streamer', isSimulation: boolean = false): Promise<boolean> {
     const skippedTrack = this.state.currentTrack;
+    const skippedSessionId = this.activePlaybackSessionId;
+    this.activePlaybackSessionId = null;
     this.playbackGeneration++;
     await this.stopActivePlaybackOnly();
-    if (skippedTrack) {
-      this.recordHistory(skippedTrack, 'skipped');
+    if (skippedTrack && skippedSessionId) {
+      this.recordSessionHistory(skippedTrack, 'skipped', undefined, skippedSessionId);
     }
 
     if (this.state.queue.length === 0) {
@@ -1166,8 +1284,10 @@ export class SongRequestEngine {
 
     try {
       const completedTrack = this.state.currentTrack;
-      if (completedTrack) {
-        this.recordHistory(completedTrack, 'completed');
+      const completedSessionId = this.activePlaybackSessionId;
+      this.activePlaybackSessionId = null;
+      if (completedTrack && completedSessionId) {
+        this.recordSessionHistory(completedTrack, 'completed', undefined, completedSessionId);
       }
 
       if (this.state.queue.length > 0) {
@@ -1208,27 +1328,23 @@ export class SongRequestEngine {
   ): SongRequestTestPipelineResult {
     const cleanQuery = (query || '').trim();
     const policyCheck = this.validatePolicy(cleanQuery, requester, isSimulation);
-    const localMatch = this.findLocalTrackMatch(cleanQuery);
-    const hasLocalPlayable = Boolean(localMatch && localMatch.file);
     const hasRemoteConfig = Boolean(this.youtubeApiKey.trim() || this.spotifyAccessToken.trim());
 
     return this.buildPipelineResult(cleanQuery, requester, isSimulation, policyCheck, {
-      resolved: hasLocalPlayable || hasRemoteConfig,
-      resolveSummary: hasLocalPlayable
-        ? `Sumber audio lokal ditemukan: "${localMatch!.meta.title}"`
-        : hasRemoteConfig
+      resolved: hasRemoteConfig,
+      resolveSummary: hasRemoteConfig
         ? `Siap mencari metadata di katalog terkonfigurasi (${[
             this.youtubeApiKey.trim() ? 'YouTube' : '',
             this.spotifyAccessToken.trim() ? 'Spotify' : '',
           ]
             .filter(Boolean)
             .join(' & ')})`
-        : `Tidak ditemukan di pustaka audio lokal & API YouTube/Spotify belum dikonfigurasi`,
-      resolveDetail: `LocalFilesReady: ${this.localFilesMap.size} | YTKey: ${!!this.youtubeApiKey.trim()} | SpotifyToken: ${!!this.spotifyAccessToken.trim()}`,
-      playbackStarted: hasLocalPlayable,
-      playbackSummary: hasLocalPlayable
-        ? `Siap diputar lewat ${nativeAudioBridge.isNativeAndroid() ? 'NativeMusicPlayer (MediaPlayer)' : 'HTML5 Audio'}`
-        : 'Membutuhkan file audio lokal yang dapat diputar untuk playback otomatis',
+        : 'API YouTube/Spotify belum dikonfigurasi untuk pencarian metadata Song Request',
+      resolveDetail: `YTKey: ${!!this.youtubeApiKey.trim()} | SpotifyToken: ${!!this.spotifyAccessToken.trim()}`,
+      playbackStarted: false,
+      playbackSummary: hasRemoteConfig
+        ? 'Tahap pencarian metadata aktif; playback otomatis membutuhkan sumber audio berizin'
+        : 'Konfigurasikan YouTube Data API Key atau token Spotify di Settings',
     });
   }
 
@@ -1377,6 +1493,7 @@ export class SongRequestEngine {
   }
 
   public async stop(): Promise<void> {
+    this.activePlaybackSessionId = null;
     this.playbackGeneration++;
     await this.stopActivePlaybackOnly();
     this.updateState({
@@ -1418,6 +1535,65 @@ export class SongRequestEngine {
     });
   }
 
+  public hydrateHistory(entries: SongRequestHistoryEntry[]): SongRequestHistoryEntry[] {
+    const sanitizedStored = sanitizeSongRequestHistoryEntries(entries);
+    const merged = sanitizeSongRequestHistoryEntries([...this.state.history, ...sanitizedStored]);
+    this.updateState({ history: merged });
+    return merged;
+  }
+
+  public requeueFromHistory(
+    historyEntryId: string,
+    actor: string = 'Streamer'
+  ): SongRequestRequeueResult {
+    if (!this.state.policy.enabled) {
+      return {
+        success: false,
+        error: 'Subsistem Song Request sedang dinonaktifkan.',
+      };
+    }
+
+    const sourceEntry = this.state.history.find(
+      (entry) => entry.id === historyEntryId || entry.sessionId === historyEntryId
+    );
+    if (!sourceEntry) {
+      return {
+        success: false,
+        error: 'Entri riwayat lagu tidak ditemukan.',
+      };
+    }
+
+    if (this.state.queue.length >= this.state.policy.maxQueueSize) {
+      const errMsg = `Antrean penuh (${this.state.queue.length}/${this.state.policy.maxQueueSize} lagu).`;
+      return {
+        success: false,
+        error: errMsg,
+      };
+    }
+
+    const snapshot = sanitizeHistoryTrackSnapshot(sourceEntry.trackSnapshot);
+    const requesterName = actor.trim() || 'Streamer';
+    const newId = `sr_requeue_${Date.now()}_${++this.requeueCounter}_${Math.random().toString(36).slice(2, 6)}`;
+    const newItem: SongRequestItem = {
+      ...snapshot,
+      id: newId,
+      requester: requesterName,
+      requestedAt: Date.now(),
+    };
+
+    const nextQueue = [...this.state.queue, newItem];
+    this.updateState({ queue: nextQueue });
+    this.announce(
+      `🔁 @${requesterName} menambahkan ulang "${newItem.title}" ke antrean (#${nextQueue.length}).`
+    );
+
+    return {
+      success: true,
+      item: newItem,
+      queuePosition: nextQueue.length,
+    };
+  }
+
   public setVolume(vol: number) {
     const clampedPct = Math.max(0, Math.min(100, Math.round(Number.isFinite(vol) ? vol : 85)));
     this.updateState({ volume: clampedPct });
@@ -1453,27 +1629,59 @@ export class SongRequestEngine {
     return this.state;
   }
 
-  private recordHistory(
+  private recordSessionHistory(
     item: SongRequestItem,
     status: SongRequestHistoryEntry['status'],
-    errorMessage?: string
+    errorMessage: string | undefined,
+    sessionId: string
   ) {
-    if (status === 'playing') {
-      const key = `${item.id}:${this.playbackGeneration}`;
-      if (this.lastRecordedPlayingKey === key) return;
-      this.lastRecordedPlayingKey = key;
+    if (!sessionId) return;
+    const now = Date.now();
+    const existingIndex = this.state.history.findIndex(
+      (entry) => entry.sessionId === sessionId || entry.id === sessionId
+    );
+
+    if (existingIndex === -1) {
+      // History entry is created only when a playback session actually starts playing.
+      if (status !== 'playing') return;
+      const snapshot = sanitizeHistoryTrackSnapshot(item);
+      const entry: SongRequestHistoryEntry = {
+        id: sessionId,
+        sessionId,
+        trackId: snapshot.id,
+        title: snapshot.title,
+        artist: snapshot.artist,
+        ...(snapshot.album ? { album: snapshot.album } : {}),
+        provider: snapshot.provider,
+        ...(snapshot.providerTrackId ? { providerTrackId: snapshot.providerTrackId } : {}),
+        sourceType: snapshot.sourceType,
+        ...(snapshot.thumbnailUrl ? { thumbnailUrl: snapshot.thumbnailUrl } : {}),
+        durationSec: snapshot.durationSec,
+        ...(snapshot.externalUrl ? { externalUrl: snapshot.externalUrl } : {}),
+        requester: snapshot.requester,
+        startedAt: now,
+        updatedAt: now,
+        timestamp: now,
+        status: 'playing',
+        trackSnapshot: snapshot,
+      };
+      this.updateState({
+        history: sanitizeSongRequestHistoryEntries([entry, ...this.state.history]),
+      });
+      return;
     }
-    const entry: SongRequestHistoryEntry = {
-      id: `${item.id}_${status}_${Date.now()}`,
-      title: item.title,
-      artist: item.artist,
-      requester: item.requester,
-      status,
-      timestamp: Date.now(),
-      ...(errorMessage ? { errorMessage } : {}),
-    };
+
+    const updatedHistory = this.state.history.map((entry, idx) => {
+      if (idx !== existingIndex) return entry;
+      return {
+        ...entry,
+        status,
+        updatedAt: now,
+        ...(status === 'error' && errorMessage ? { errorMessage } : { errorMessage: undefined }),
+      };
+    });
     this.updateState({
-      history: [entry, ...this.state.history.slice(0, 49)],
+      history: sanitizeSongRequestHistoryEntries(updatedHistory),
     });
   }
 

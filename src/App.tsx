@@ -309,6 +309,8 @@ export default function App() {
   const [nowPlayingSong, setNowPlayingSong] = useState<SongRequest | null>(null);
   const [audioEngineState, setAudioEngineState] = useState<AudioEngineState>(audioEngine.getState());
   const [srState, setSrState] = useState<SongRequestState>(songRequestEngine.getState());
+  const srHistorySyncReadyRef = useRef<boolean>(false);
+  const lastPersistedSrHistoryJsonRef = useRef<string>('');
   const [unifiedQueue, setUnifiedQueue] = useState<UnifiedQueueItem[]>([]);
   const [localTracksMeta, setLocalTracksMeta] = useState<LocalAudioTrackMeta[]>([]);
   const [localFilesMap, setLocalFilesMap] = useState<Map<string, File>>(new Map());
@@ -341,6 +343,7 @@ export default function App() {
           savedAlertSettings,
           savedAlertHistory,
           savedTikTokAccount,
+          savedSongRequestHistory,
         ] = await Promise.all([
           StorageService.getSettings(),
           StorageService.getPresets(),
@@ -358,6 +361,7 @@ export default function App() {
           StorageService.getAlertSettings(),
           StorageService.getAlertHistory(),
           StorageService.getTikTokAccount(),
+          StorageService.getSongRequestHistory(),
         ]);
 
         // The dedicated canvas record is the same source previously used by Studio on load.
@@ -439,6 +443,9 @@ export default function App() {
           spotifyAccessToken: savedSettings.spotifyAccessToken || '',
           volumeUnit: initialVolumeUnit,
         });
+        const hydratedSrHistory = songRequestEngine.hydrateHistory(savedSongRequestHistory);
+        lastPersistedSrHistoryJsonRef.current = JSON.stringify(hydratedSrHistory);
+        srHistorySyncReadyRef.current = true;
         soundboardEngine.setVolume(normalizeUnitVolume(savedSettings.soundboardVolume, 0.85));
 
         // Apply saved theme immediately on startup
@@ -492,7 +499,18 @@ export default function App() {
     return songRequestEngine.subscribe(setSrState);
   }, []);
 
-  // Keep Song Request Engine context & local audio library synchronized
+  // Persist Song Request history sequentially only AFTER startup hydration completes
+  useEffect(() => {
+    if (!srHistorySyncReadyRef.current) return;
+    const serialized = JSON.stringify(srState.history);
+    if (serialized === lastPersistedSrHistoryJsonRef.current) return;
+    lastPersistedSrHistoryJsonRef.current = serialized;
+    void StorageService.saveSongRequestHistory(srState.history).catch((err) => {
+      console.error('Failed to persist Song Request history:', err);
+    });
+  }, [srState.history]);
+
+  // Keep Song Request Engine context synchronized (independent of Local Audio library)
   useEffect(() => {
     songRequestEngine.configureContext({
       operatingMode: settings.operatingMode,
@@ -506,10 +524,6 @@ export default function App() {
     settings.spotifyAccessToken,
     settings.audioVolume,
   ]);
-
-  useEffect(() => {
-    songRequestEngine.registerLocalLibrary(localTracksMeta, localFilesMap);
-  }, [localTracksMeta, localFilesMap]);
 
   // Synchronize manual audioEngine playback state and automatic track progression
   useEffect(() => {
@@ -1605,9 +1619,7 @@ export default function App() {
     title: item.title,
     artist: item.artist,
     source:
-      item.sourceType === 'local_file'
-        ? 'local'
-        : item.sourceType === 'youtube_metadata'
+      item.sourceType === 'youtube_metadata'
         ? 'youtube'
         : item.sourceType === 'spotify_metadata'
         ? 'spotify'
@@ -1616,11 +1628,13 @@ export default function App() {
     thumbnailUrl: item.thumbnailUrl,
     duration: item.durationSec,
     requesterName: item.requester,
-    platform: item.platform || 'TikTok',
+    platform:
+      item.platform === 'YouTube Music' || item.platform === 'Stream'
+        ? 'YouTube'
+        : item.platform || 'TikTok',
     addedAt: item.requestedAt,
     status,
     notes: item.notes,
-    localFileKey: item.localFileId,
   });
 
   const srActiveIds = new Set<string>([
@@ -1643,13 +1657,14 @@ export default function App() {
         artist: srState.currentTrack.artist,
         duration: srState.durationSec || srState.currentTrack.durationSec,
         requesterName: srState.currentTrack.requester,
-        platform: srState.currentTrack.platform || 'TikTok',
+        platform:
+          srState.currentTrack.platform === 'YouTube Music' || srState.currentTrack.platform === 'Stream'
+            ? 'YouTube'
+            : srState.currentTrack.platform || 'TikTok',
         status: srState.isPlaying ? 'playing' : 'queued',
         requestedAt: srState.currentTrack.requestedAt,
         source:
-          srState.currentTrack.sourceType === 'local_file'
-            ? 'local'
-            : srState.currentTrack.sourceType === 'youtube_metadata'
+          srState.currentTrack.sourceType === 'youtube_metadata'
             ? 'youtube'
             : srState.currentTrack.sourceType === 'spotify_metadata'
             ? 'spotify'
@@ -1813,7 +1828,7 @@ export default function App() {
    * Buffer event LIVE untuk panel Chat HUD.
    * - terbatas di memori (HUD_EVENT_BUFFER_LIMIT), terbaru lebih dulu
    * - identitas event unik agar tidak duplikat saat reconnect
-   * - perintah !play / !next Mode A diproses oleh songRequestEngine.
+   * - perintah !play / !sr / !songrequest / !queue / !np Mode A diproses oleh songRequestEngine.
    */
   useEffect(() => {
     type BusEvent = ReturnType<typeof streamEventBus.getHistory>[number];
@@ -3045,6 +3060,9 @@ export default function App() {
               onNavigateToSettings={() => handleNavigate('settings')}
               onUpdateSpotifyToken={handleUpdateSpotifyToken}
               songRequestState={srState}
+              onRequeueHistoryItem={(historyId) =>
+                songRequestEngine.requeueFromHistory(historyId, 'Streamer')
+              }
             />
           )}
 

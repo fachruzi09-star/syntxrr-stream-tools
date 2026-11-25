@@ -22,9 +22,15 @@ import { DEFAULT_TTS_CONFIG } from './ttsService';
 import { normalizeStudioPreset } from './presetModel';
 import { DEFAULT_APP_THEME, normalizeStoredAppTheme } from '../theme/themeEngine';
 import { CAMERA_CANONICAL_DEFAULTS } from './studioElementCatalog';
+import {
+  sanitizeSongRequestHistoryEntries,
+  type SongRequestHistoryEntry,
+} from './songRequestEngine';
 
 const DB_NAME = 'syntxrr_stream_tools_db';
 const DB_VERSION = 3; // Incremented for SYNTXRR STREAM Master Architecture
+const SONG_REQUEST_HISTORY_KEY = 'song_request_history';
+let songRequestHistoryWriteChain: Promise<void> = Promise.resolve();
 
 export const STUDIO_MEDIA_URI_PREFIX = 'studio-media://';
 const VALID_STUDIO_MEDIA_ASSET_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -1557,6 +1563,112 @@ export const StorageService = {
 
   async saveSongRequests(requests: SongRequest[]): Promise<void> {
     await idbSet('song_requests', requests);
+  },
+
+  async getSongRequestHistory(): Promise<SongRequestHistoryEntry[]> {
+    let db: IDBDatabase;
+    try {
+      db = await openDB();
+    } catch {
+      return [];
+    }
+
+    try {
+      const stored = await new Promise<unknown>((resolve, reject) => {
+        let settled = false;
+        const finishResolve = (val: unknown) => {
+          if (settled) return;
+          settled = true;
+          resolve(val);
+        };
+        const finishReject = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          reject(err);
+        };
+
+        const tx = db.transaction('store', 'readonly');
+        const request = tx.objectStore('store').get(SONG_REQUEST_HISTORY_KEY);
+        let resultValue: unknown = null;
+
+        request.onsuccess = () => {
+          resultValue = request.result ?? null;
+        };
+        request.onerror = () =>
+          finishReject(
+            request.error || new Error('Gagal membaca riwayat Song Request dari IndexedDB.'),
+          );
+        tx.oncomplete = () => finishResolve(resultValue);
+        tx.onerror = () =>
+          finishReject(
+            tx.error || request.error || new Error('Transaksi pembacaan riwayat Song Request gagal.'),
+          );
+        tx.onabort = () =>
+          finishReject(
+            tx.error || new Error('Transaksi pembacaan riwayat Song Request dibatalkan.'),
+          );
+      });
+      return sanitizeSongRequestHistoryEntries(stored);
+    } catch {
+      return [];
+    } finally {
+      try {
+        db.close();
+      } catch {}
+    }
+  },
+
+  async saveSongRequestHistory(history: SongRequestHistoryEntry[]): Promise<void> {
+    if (!Array.isArray(history)) {
+      throw new Error('Riwayat Song Request harus berupa array.');
+    }
+
+    const sanitizedSnapshot = sanitizeSongRequestHistoryEntries(history);
+    const runWrite = songRequestHistoryWriteChain
+      .catch(() => {})
+      .then(async () => {
+        const db = await openDB();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const finishResolve = () => {
+              if (settled) return;
+              settled = true;
+              resolve();
+            };
+            const finishReject = (err: unknown) => {
+              if (settled) return;
+              settled = true;
+              reject(err);
+            };
+
+            const tx = db.transaction('store', 'readwrite');
+            const request = tx.objectStore('store').put(sanitizedSnapshot, SONG_REQUEST_HISTORY_KEY);
+
+            // Success is reported strictly on tx.oncomplete (never prematurely on request.onsuccess).
+            request.onerror = () =>
+              finishReject(
+                request.error || new Error('Gagal menulis riwayat Song Request ke IndexedDB.'),
+              );
+            tx.oncomplete = () => finishResolve();
+            tx.onerror = () =>
+              finishReject(
+                tx.error || request.error || new Error('Transaksi penyimpanan riwayat Song Request gagal.'),
+              );
+            tx.onabort = () =>
+              finishReject(
+                tx.error || new Error('Transaksi penyimpanan riwayat Song Request dibatalkan.'),
+              );
+          });
+        } finally {
+          try {
+            db.close();
+          } catch {}
+        }
+      });
+
+    songRequestHistoryWriteChain = runWrite.catch(() => {});
+    return runWrite;
   },
 
   async getAlertHistory(): Promise<AlertEvent[]> {

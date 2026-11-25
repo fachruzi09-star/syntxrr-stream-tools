@@ -2,8 +2,8 @@
 // Dijalankan via: bun run src/services/__tests__/songRequest.test.ts
 
 import { streamEventBus } from '../eventBus';
-import { SongRequestEngine, songRequestEngine } from '../songRequestEngine';
-import type { LocalAudioTrackMeta, StreamEvent } from '../../types';
+import { SongRequestEngine, songRequestEngine, type SongRequestItem } from '../songRequestEngine';
+import type { StreamEvent } from '../../types';
 
 function assert(condition: unknown, message: string): void {
   if (!condition) {
@@ -66,11 +66,35 @@ function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 15));
 }
 
+function makeAuthorizedTrack(
+  id: string,
+  title: string,
+  artist: string,
+  requester: string,
+  audioUrl: string
+): SongRequestItem {
+  return {
+    id,
+    title,
+    artist,
+    requester,
+    durationSec: 180,
+    requestedAt: Date.now(),
+    sourceType: 'remote_url',
+    provider: 'authorized_stream',
+    providerTrackId: id,
+    playable: true,
+    audioUrl,
+    platform: 'Stream',
+  };
+}
+
 async function runSongRequestTests(): Promise<void> {
   // Detach module singleton so test instance receives streamEventBus events cleanly without interference
   songRequestEngine.destroy();
 
   const originalAudio = (globalThis as { Audio?: unknown }).Audio;
+  const originalFetch = globalThis.fetch;
   let lastMockAudio: MockHtmlAudio | null = null;
   (globalThis as { Audio?: unknown }).Audio = class extends MockHtmlAudio {
     constructor() {
@@ -79,53 +103,91 @@ async function runSongRequestTests(): Promise<void> {
     }
   };
 
+  // Mock official YouTube Data API v3 & Spotify Web API catalog responses (metadata only)
+  const catalogFetchMock = (async (input: RequestInfo | URL) => {
+    const urlStr = typeof input === 'string' ? input : input.toString();
+    if (urlStr.startsWith('https://www.googleapis.com/youtube/v3/search')) {
+      const parsed = new URL(urlStr);
+      const q = (parsed.searchParams.get('q') || '').toLowerCase();
+      if (q.includes('lagu tidak ada')) {
+        return new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (q.includes('midnight drive')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: { videoId: 'yt_vid_midnight' },
+                snippet: {
+                  title: 'Midnight Drive',
+                  channelTitle: 'City Pop',
+                  thumbnails: { medium: { url: 'https://i.ytimg.com/vi/yt_vid_midnight/mqdefault.jpg' } },
+                  publishedAt: '2025-01-01T00:00:00Z',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (q.includes('sunset echo')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: { videoId: 'yt_vid_sunset' },
+                snippet: {
+                  title: 'Sunset Echo',
+                  channelTitle: 'LoFi Lab',
+                  thumbnails: { medium: { url: 'https://i.ytimg.com/vi/yt_vid_sunset/mqdefault.jpg' } },
+                  publishedAt: '2025-01-02T00:00:00Z',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: { videoId: 'yt_vid_neon' },
+              snippet: {
+                title: 'Neon Horizon',
+                channelTitle: 'Synth Wave',
+                thumbnails: { medium: { url: 'https://i.ytimg.com/vi/yt_vid_neon/mqdefault.jpg' } },
+                publishedAt: '2025-01-03T00:00:00Z',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (urlStr.startsWith('https://api.spotify.com/v1/search')) {
+      return new Response(JSON.stringify({ tracks: { items: [] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: { message: 'Unexpected URL' } }), { status: 404 });
+  }) as typeof fetch;
+  globalThis.fetch = catalogFetchMock;
+
   const engine = new SongRequestEngine();
 
   try {
     engine.configureContext({
       operatingMode: 'MODE_A_TIKTOK_COMPANION',
-      youtubeApiKey: '',
+      youtubeApiKey: 'test-youtube-catalog-key',
       spotifyAccessToken: '',
     });
-
-    const tracksMeta: LocalAudioTrackMeta[] = [
-      {
-        id: 'local_1',
-        title: 'Neon Horizon',
-        artist: 'Synth Wave',
-        duration: 180,
-        sizeBytes: 1024,
-        filename: 'neon_horizon.mp3',
-        addedAt: 1000,
-        mimeType: 'audio/mpeg',
-      },
-      {
-        id: 'local_2',
-        title: 'Midnight Drive',
-        artist: 'City Pop',
-        duration: 210,
-        sizeBytes: 1024,
-        filename: 'midnight_drive.mp3',
-        addedAt: 2000,
-        mimeType: 'audio/mpeg',
-      },
-      {
-        id: 'local_3',
-        title: 'Sunset Echo',
-        artist: 'LoFi Lab',
-        duration: 150,
-        sizeBytes: 1024,
-        filename: 'sunset_echo.mp3',
-        addedAt: 3000,
-        mimeType: 'audio/mpeg',
-      },
-    ];
-    const filesMap = new Map<string, File>([
-      ['local_1', new File([new Uint8Array([1, 2, 3])], 'neon_horizon.mp3', { type: 'audio/mpeg' })],
-      ['local_2', new File([new Uint8Array([4, 5, 6])], 'midnight_drive.mp3', { type: 'audio/mpeg' })],
-      ['local_3', new File([new Uint8Array([7, 8, 9])], 'sunset_echo.mp3', { type: 'audio/mpeg' })],
-    ]);
-    engine.registerLocalLibrary(tracksMeta, filesMap);
 
     // Initial announcement must not advertise !next or !skip as chat commands
     assert(
@@ -148,11 +210,53 @@ async function runSongRequestTests(): Promise<void> {
       'lastError describes missing track'
     );
 
-    // 2. Mode A !play via streamEventBus + duplicate event.id deduplication
+    // 1b. Metadata-only track from YouTube catalog when idle MUST NOT fake playback success
+    const metadataOnlyPlay = await engine.handlePlayCommand('viewer_meta', 'Midnight Drive', true);
+    assertEqual(metadataOnlyPlay.success, false, 'Metadata-only track does not claim playable success');
+    assertEqual(metadataOnlyPlay.item?.playable, false, 'Metadata item keeps playable=false');
+    assertEqual(engine.getState().isPlaying, false, 'Metadata-only track keeps isPlaying=false');
+    assertEqual(engine.getState().audioPlaybackMode, 'pending_source', 'Metadata-only track marks pending_source');
+    assertEqual(engine.getState().history.length, 0, 'Metadata-only failure does not create played session history');
+
+    // 2. Authorized direct stream starts playback cleanly; subsequent !play/!sr/!songrequest enqueue FIFO + dedup
+    const authTrack1 = makeAuthorizedTrack(
+      'auth_1',
+      'Neon Horizon',
+      'Synth Wave',
+      'penonton_a',
+      'https://cdn.example.com/audio/neon_horizon.mp3'
+    );
+    const authTrack2 = makeAuthorizedTrack(
+      'auth_2',
+      'Midnight Drive',
+      'City Pop',
+      'penonton_b',
+      'https://cdn.example.com/audio/midnight_drive.mp3'
+    );
+    const authTrack3 = makeAuthorizedTrack(
+      'auth_3',
+      'Sunset Echo',
+      'LoFi Lab',
+      'penonton_c',
+      'https://cdn.example.com/audio/sunset_echo.mp3'
+    );
+
+    const startedAuth1 = await engine.enqueueAndPlayItem(authTrack1);
+    assertEqual(startedAuth1, true, 'Authorized direct stream starts playback');
+
+    let state = engine.getState();
+    assertEqual(state.currentTrack?.title, 'Neon Horizon', 'Active track is Neon Horizon');
+    assertEqual(state.isPlaying, true, 'Playback status is playing');
+    assertEqual(state.playbackStatus, 'playing', 'playbackStatus=playing');
+    assertEqual(state.queue.length, 0, 'Queue empty when only 1 track playing');
+    assertEqual(state.history.length, 1, 'Single history session created when playback starts');
+    assertEqual(state.history[0].status, 'playing', 'Active session history starts as playing');
+
+    // Mode A !play via streamEventBus + duplicate event.id deduplication
     const chatPlay1: StreamEvent = {
       id: 'chat_evt_1',
       type: 'chat',
-      username: 'penonton_a',
+      username: 'penonton_chat_1',
       detail: '!play Neon Horizon',
       timestamp: Date.now(),
       isSimulation: false,
@@ -160,18 +264,17 @@ async function runSongRequestTests(): Promise<void> {
     streamEventBus.emit(chatPlay1);
     await flushMicrotasks();
 
-    let state = engine.getState();
-    assertEqual(state.currentTrack?.title, 'Neon Horizon', 'First !play starts playback immediately');
-    assertEqual(state.isPlaying, true, 'Playback status is playing');
-    assertEqual(state.playbackStatus, 'playing', 'playbackStatus=playing');
-    assertEqual(state.queue.length, 0, 'Queue empty when only 1 track playing');
+    state = engine.getState();
+    assertEqual(state.queue.length, 1, 'First queued !play added via streamEventBus');
+    assertEqual(state.queue[0].sourceType, 'youtube_metadata', 'Catalog request stores metadata reference');
+    assertEqual(state.queue[0].playable, false, 'Catalog request stays non-playable until authorized source');
     assertEqual(state.isLiveChatConnected, true, 'Real Mode A chat marks isLiveChatConnected=true');
 
-    // Re-emitting exact same event.id MUST be ignored by deduplicator (not queued twice, no cooldown error)
+    // Re-emitting exact same event.id MUST be ignored by deduplicator
     streamEventBus.emit(chatPlay1);
     await flushMicrotasks();
     state = engine.getState();
-    assertEqual(state.queue.length, 0, 'Duplicate event.id does not enqueue track again');
+    assertEqual(state.queue.length, 1, 'Duplicate event.id does not enqueue track again');
 
     // 3. Second & third requests via !sr and !songrequest go into queue in FIFO order
     streamEventBus.emit({
@@ -193,9 +296,10 @@ async function runSongRequestTests(): Promise<void> {
     await flushMicrotasks();
 
     state = engine.getState();
-    assertEqual(state.queue.length, 2, 'Two subsequent requests added to queue');
-    assertEqual(state.queue[0].title, 'Midnight Drive', 'Queue FIFO #1');
-    assertEqual(state.queue[1].title, 'Sunset Echo', 'Queue FIFO #2');
+    assertEqual(state.queue.length, 3, 'Three chat requests queued in FIFO order');
+    assertEqual(state.queue[0].title, 'Neon Horizon', 'Queue FIFO #1');
+    assertEqual(state.queue[1].title, 'Midnight Drive', 'Queue FIFO #2');
+    assertEqual(state.queue[2].title, 'Sunset Echo', 'Queue FIFO #3');
 
     // !queue, !np, and !nowplaying remain active chat commands
     streamEventBus.emit({
@@ -225,13 +329,16 @@ async function runSongRequestTests(): Promise<void> {
     await flushMicrotasks();
     state = engine.getState();
     assert(
-      state.recentAnnouncements.some((m) => m.includes('Antrean (2 lagu)')),
+      state.recentAnnouncements.some((m) => m.includes('Antrean (3 lagu)')),
       '!queue chat command announces current queue'
     );
     assert(
       state.recentAnnouncements.some((m) => m.includes('Now Playing') && m.includes('Neon Horizon')),
       '!np / !nowplaying chat command announces current track'
     );
+
+    // Replace queue with authorized playable tracks to test natural completion & skipTrack() playback transitions
+    engine.setQueue([authTrack2, authTrack3]);
 
     // 4. Duplicate handleTrackEnded() guard (race between native callback & position poll) must NOT double-skip
     await Promise.all([engine.handleTrackEnded(), engine.handleTrackEnded()]);
@@ -308,12 +415,12 @@ async function runSongRequestTests(): Promise<void> {
     assertEqual(state.audioPlaybackMode, 'idle', 'audioPlaybackMode=idle after stopping on empty queue');
     assertEqual(state.audioRoutedToStream, false, 'audioRoutedToStream=false after stopping on empty queue');
 
-    // 8. History records playing / completed / skipped transitions accurately
+    // 8. History updates the SAME session entry per playback session (3 sessions total: 1 completed, 2 skipped)
+    assertEqual(state.history.length, 3, 'One history entry per playback session (no duplicate rows)');
     const statuses = state.history.map((h) => `${h.title}:${h.status}`);
-    assert(statuses.includes('Neon Horizon:playing'), 'History recorded Neon Horizon playing');
-    assert(statuses.includes('Neon Horizon:completed'), 'History recorded Neon Horizon completed');
-    assert(statuses.includes('Midnight Drive:skipped'), 'History recorded Midnight Drive skipped via skipTrack()');
-    assert(statuses.includes('Sunset Echo:skipped'), 'History recorded Sunset Echo skipped via skipTrack()');
+    assert(statuses.includes('Neon Horizon:completed'), 'Session 1 updated in place to completed');
+    assert(statuses.includes('Midnight Drive:skipped'), 'Session 2 updated in place to skipped');
+    assert(statuses.includes('Sunset Echo:skipped'), 'Session 3 updated in place to skipped');
 
     // 9. Cooldown enforced for same non-sim user within cooldown window
     const cooldownErr = await engine.handlePlayCommand('penonton_b', 'Neon Horizon', false);
@@ -326,8 +433,10 @@ async function runSongRequestTests(): Promise<void> {
     // 10. Queue capacity policy: default 5, max configurable 20, clamped integer 1-20, no truncation of existing queue
     assertEqual(engine.getState().policy.maxQueueSize, 5, 'Default maxQueueSize is 5');
 
-    // Start 1 active track, then fill default 5 queue slots (simulation skips cooldown)
-    await engine.handlePlayCommand('cap_active', 'Neon Horizon', true);
+    // Start 1 active authorized track, then fill default 5 queue slots (simulation skips cooldown)
+    await engine.enqueueAndPlayItem(
+      makeAuthorizedTrack('cap_active_track', 'Neon Horizon', 'Synth Wave', 'cap_active', 'https://cdn.example.com/a.mp3')
+    );
     for (let i = 1; i <= 5; i++) {
       const enq = await engine.handlePlayCommand(`cap_u_${i}`, 'Midnight Drive', true);
       assertEqual(enq.success, true, `Default capacity allows queued track #${i}`);
@@ -387,6 +496,7 @@ async function runSongRequestTests(): Promise<void> {
   } finally {
     engine.destroy();
     (globalThis as { Audio?: unknown }).Audio = originalAudio;
+    globalThis.fetch = originalFetch;
   }
 }
 
