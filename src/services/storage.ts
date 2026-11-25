@@ -1328,19 +1328,59 @@ export const StorageService = {
   },
 
   async deleteSoundboardAudio(id: string): Promise<void> {
+    let idbError: unknown = null;
     try {
       const db = await openDB();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction('store', 'readwrite');
-        const request = tx.objectStore('store').delete(`soundboard_audio_${id}`);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    } catch {}
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction('store', 'readwrite');
+          const request = tx.objectStore('store').delete(`soundboard_audio_${id}`);
+          let settled = false;
+          const finishResolve = () => {
+            if (settled) return;
+            settled = true;
+            resolve();
+          };
+          const finishReject = (err: unknown) => {
+            if (settled) return;
+            settled = true;
+            reject(err);
+          };
+          tx.oncomplete = () => finishResolve();
+          tx.onerror = () =>
+            finishReject(
+              tx.error || request.error || new Error('Transaksi penghapusan audio Soundboard gagal.'),
+            );
+          tx.onabort = () =>
+            finishReject(
+              tx.error || new Error('Transaksi penghapusan audio Soundboard dibatalkan.'),
+            );
+          request.onsuccess = () => finishResolve();
+          request.onerror = () =>
+            finishReject(
+              request.error || new Error('Gagal menghapus Blob audio Soundboard dari IndexedDB.'),
+            );
+        });
+      } finally {
+        try {
+          db.close();
+        } catch {}
+      }
+    } catch (error) {
+      idbError = error;
+    }
 
     try {
-      localStorage.removeItem(`syntxrr_soundboard_audio_${id}`);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(`syntxrr_soundboard_audio_${id}`);
+      }
     } catch {}
+
+    if (idbError) {
+      throw idbError instanceof Error
+        ? idbError
+        : new Error('Gagal menghapus Blob audio Soundboard dari IndexedDB.');
+    }
   },
 
   async deleteAllSoundboardAudio(): Promise<void> {

@@ -43,6 +43,61 @@ interface LiveCenterViewProps {
   soundboardVolume?: number;
 }
 
+export type SoundboardDeleteExecutionResult =
+  | { status: 'ignored' }
+  | { status: 'deleted' }
+  | { status: 'deleted_with_cleanup_warning'; title: string; message: string; error: unknown }
+  | { status: 'list_save_failed'; title: string; message: string; error: unknown };
+
+export async function executeLiveCenterSoundboardDelete(params: {
+  item: SoundboardItem;
+  existingItems: readonly SoundboardItem[];
+  onSoundboardItemsChange: (items: SoundboardItem[]) => Promise<void>;
+  removeCustomFile: (id: string) => void;
+  deleteSoundboardAudio: (id: string) => Promise<void>;
+}): Promise<SoundboardDeleteExecutionResult> {
+  const { item, existingItems } = params;
+  if (!item.id.startsWith('sb_custom_')) {
+    return { status: 'ignored' };
+  }
+
+  const nextItems = existingItems.filter((candidate) => candidate.id !== item.id);
+  try {
+    await params.onSoundboardItemsChange(nextItems);
+  } catch (error) {
+    const detail =
+      error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : 'Gagal menghapus item audio kustom.';
+    return {
+      status: 'list_save_failed',
+      title: 'Gagal Menghapus Audio',
+      message: detail,
+      error,
+    };
+  }
+
+  // Daftar berhasil tersimpan: hentikan playback item dan bersihkan Blob audio terkait.
+  // Cleanup object URL tetap ditangani oleh lifecycle App.tsx tanpa double revoke.
+  try {
+    params.removeCustomFile(item.id);
+  } catch {}
+
+  try {
+    await params.deleteSoundboardAudio(item.id);
+    return { status: 'deleted' };
+  } catch (error) {
+    const detail =
+      error instanceof Error && error.message.trim() ? ` (${error.message.trim()})` : '';
+    return {
+      status: 'deleted_with_cleanup_warning',
+      title: 'Item Dihapus dengan Peringatan Pembersihan',
+      message: `Item "${item.name}" sudah dihapus dari daftar, namun pembersihan file audio gagal${detail}.`,
+      error,
+    };
+  }
+}
+
 export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   ttsConfig,
   onUpdateTTSConfig,
@@ -59,7 +114,11 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   );
   const [lastTriggered, setLastTriggered] = useState<string | null>(null);
   const [mobileFeedOpen, setMobileFeedOpen] = useState(false);
-  const [soundboardError, setSoundboardError] = useState<{ title: string; message: string } | null>(null);
+  const [soundboardError, setSoundboardError] = useState<{
+    title: string;
+    message: string;
+    tone?: 'error' | 'warn';
+  } | null>(null);
 
   useEffect(() => {
     setEvents(streamEventBus.getHistory());
@@ -97,13 +156,22 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     ttsService.speak(testVoiceText, true);
   };
 
-  const reportSoundboardError = (notice: { title: string; message: string }) => {
-    setSoundboardError(notice);
+  const reportSoundboardFeedback = (notice: {
+    title: string;
+    message: string;
+    tone?: 'error' | 'warn';
+  }) => {
+    const tone = notice.tone ?? 'error';
+    setSoundboardError({ title: notice.title, message: notice.message, tone });
     showInAppNotice({
-      tone: 'error',
+      tone,
       title: notice.title,
       message: notice.message,
     });
+  };
+
+  const reportSoundboardError = (notice: { title: string; message: string }) => {
+    reportSoundboardFeedback({ ...notice, tone: 'error' });
   };
 
   const handlePlaySoundboard = async (
@@ -184,20 +252,34 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   };
 
   const handleDeleteSound = async (item: SoundboardItem) => {
-    if (!item.id.startsWith('sb_custom_')) return;
-    try {
-      soundboardEngine.removeCustomFile(item.id);
-      await StorageService.deleteSoundboardAudio(item.id);
-      await onSoundboardItemsChange(soundboardItems.filter((candidate) => candidate.id !== item.id));
-      setSoundboardError(null);
-    } catch (error) {
-      reportSoundboardError({
-        title: 'Gagal Menghapus Audio',
-        message:
-          error instanceof Error && error.message.trim()
-            ? error.message.trim()
-            : 'Gagal menghapus item audio kustom.',
+    const result = await executeLiveCenterSoundboardDelete({
+      item,
+      existingItems: soundboardItems,
+      onSoundboardItemsChange,
+      removeCustomFile: (id) => soundboardEngine.removeCustomFile(id),
+      deleteSoundboardAudio: (id) => StorageService.deleteSoundboardAudio(id),
+    });
+
+    if (result.status === 'list_save_failed') {
+      reportSoundboardFeedback({
+        tone: 'error',
+        title: result.title,
+        message: result.message,
       });
+      return;
+    }
+
+    if (result.status === 'deleted_with_cleanup_warning') {
+      reportSoundboardFeedback({
+        tone: 'warn',
+        title: result.title,
+        message: result.message,
+      });
+      return;
+    }
+
+    if (result.status === 'deleted') {
+      setSoundboardError(null);
     }
   };
 
@@ -802,16 +884,36 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
               {soundboardError && (
                 <div
                   role="alert"
-                  className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start justify-between gap-2 text-xs"
+                  className={`p-3 rounded-xl border flex items-start justify-between gap-2 text-xs ${
+                    soundboardError.tone === 'warn'
+                      ? 'bg-amber-500/10 border-amber-500/30'
+                      : 'bg-rose-500/10 border-rose-500/30'
+                  }`}
                 >
                   <div className="min-w-0">
-                    <div className="font-bold text-rose-300">{soundboardError.title}</div>
-                    <div className="text-[11px] text-rose-200/90 mt-0.5">{soundboardError.message}</div>
+                    <div
+                      className={`font-bold ${
+                        soundboardError.tone === 'warn' ? 'text-amber-300' : 'text-rose-300'
+                      }`}
+                    >
+                      {soundboardError.title}
+                    </div>
+                    <div
+                      className={`text-[11px] mt-0.5 ${
+                        soundboardError.tone === 'warn' ? 'text-amber-200/90' : 'text-rose-200/90'
+                      }`}
+                    >
+                      {soundboardError.message}
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setSoundboardError(null)}
-                    className="btn-press min-w-[36px] min-h-[36px] rounded-lg text-rose-300 hover:bg-rose-500/20 flex items-center justify-center shrink-0"
+                    className={`btn-press min-w-[36px] min-h-[36px] rounded-lg flex items-center justify-center shrink-0 ${
+                      soundboardError.tone === 'warn'
+                        ? 'text-amber-300 hover:bg-amber-500/20'
+                        : 'text-rose-300 hover:bg-rose-500/20'
+                    }`}
                     aria-label="Tutup pesan error soundboard"
                   >
                     <X className="w-4 h-4" />
