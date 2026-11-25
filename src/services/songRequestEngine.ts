@@ -1,5 +1,5 @@
 // Dedicated Mode A Song Request Engine — SYNTXRR STREAM
-// Integrates with streamEventBus (!play, !sr, !songrequest, !next, !skip, !queue, !np),
+// Integrates with streamEventBus (!play, !sr, !songrequest, !queue, !np, !nowplaying),
 // user's imported Local Audio Library, official YouTube Data API v3 & Spotify Web API catalogs,
 // Android NativeMusicPlayer (MediaPlayer + MediaSession inside CompanionService), and HTML5 Audio fallback on Web.
 // All Now Playing / isPlaying / progress / error states reflect actual playback engine state.
@@ -162,13 +162,13 @@ export class SongRequestEngine {
     muted: false,
     policy: {
       enabled: true,
-      maxQueueSize: 20,
+      maxQueueSize: 5,
       userCooldownSec: 15,
       allowedRoles: 'all',
       blacklistedKeywords: ['hate', 'spam', 'nsfw', 'toxic', 'rasis'],
     },
     recentAnnouncements: [
-      'Song Request Mode A siap. Ketik !play <judul lagu> atau !next di chat.',
+      'Song Request Mode A siap. Ketik !play <judul lagu> di chat.',
     ],
     isLiveChatConnected: false,
     audioPlaybackMode: 'idle',
@@ -480,8 +480,6 @@ export class SongRequestEngine {
 
       if (command === '!play' || command === '!sr' || command === '!songrequest') {
         void this.handlePlayCommand(requester, query, isSim);
-      } else if (command === '!next' || command === '!skip') {
-        void this.handleSkipCommand(requester, isSim);
       } else if (command === '!queue') {
         this.handleQueueCommand(isSim);
       } else if (command === '!np' || command === '!nowplaying') {
@@ -1407,10 +1405,15 @@ export class SongRequestEngine {
   }
 
   public updatePolicy(partial: Partial<SongRequestPolicy>) {
+    let nextMaxQueueSize = this.state.policy.maxQueueSize;
+    if (typeof partial.maxQueueSize === 'number' && Number.isFinite(partial.maxQueueSize)) {
+      nextMaxQueueSize = Math.max(1, Math.min(20, Math.round(partial.maxQueueSize)));
+    }
     this.updateState({
       policy: {
         ...this.state.policy,
         ...partial,
+        maxQueueSize: nextMaxQueueSize,
       },
     });
   }
