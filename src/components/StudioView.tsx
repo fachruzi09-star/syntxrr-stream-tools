@@ -1540,6 +1540,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (!file || !targetElement || targetElement.type !== 'audio') return;
 
     const targetId = targetElement.id;
+    const requestPresetId = activePresetIdRef.current;
     const requestSeq = (manualAudioRequestSeqRef.current[targetId] ?? 0) + 1;
     manualAudioRequestSeqRef.current[targetId] = requestSeq;
 
@@ -1551,7 +1552,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
       saveStudioMediaAsset: (input) => StorageService.saveStudioMediaAsset(input),
     });
 
-    if (!isMountedRef.current || manualAudioRequestSeqRef.current[targetId] !== requestSeq) {
+    if (
+      !isMountedRef.current ||
+      manualAudioRequestSeqRef.current[targetId] !== requestSeq ||
+      activePresetIdRef.current !== requestPresetId
+    ) {
       return;
     }
 

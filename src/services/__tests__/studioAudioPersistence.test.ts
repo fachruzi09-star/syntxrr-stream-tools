@@ -7,11 +7,14 @@ import {
   DEFAULT_MANUAL_AUDIO_URL,
   MAX_LOCAL_AUDIO_FILE_BYTES,
   buildClearLocalAudioPatch,
+  buildLocalAudioSelectionPatch,
   persistLocalAudioFileForElement,
   playManualAudioElement,
   resolveManualAudioPlaybackSource,
   type AudioEnginePlaybackLike,
+  type LocalAudioSessionCacheEntry,
 } from '../studioElementRenderModel';
+import { isStudioElementReadOnly } from '../studioCanvasGesture';
 
 let assertionCount = 0;
 
@@ -640,6 +643,255 @@ async function runStudioAudioPersistenceTests(): Promise<void> {
       otherPresetSnapshotBefore,
       '8b: other Studio presets remain completely unmutated',
     );
+
+    // 9. A2.10.1.1 Async audio upload preset guard
+    {
+      globalRecord.indexedDB = fakeIdb.fakeFactory;
+
+      interface DeferredSave {
+        promise: Promise<Awaited<ReturnType<typeof StorageService.saveStudioMediaAsset>>>;
+        resolveNow: () => Promise<void>;
+      }
+
+      const createDeferredSave = (inputFile: File): DeferredSave => {
+        let resolveOuter!: (
+          val: Awaited<ReturnType<typeof StorageService.saveStudioMediaAsset>>,
+        ) => void;
+        const promise = new Promise<
+          Awaited<ReturnType<typeof StorageService.saveStudioMediaAsset>>
+        >((resolve) => {
+          resolveOuter = resolve;
+        });
+        return {
+          promise,
+          resolveNow: async () => {
+            const saved = await StorageService.saveStudioMediaAsset({
+              name: inputFile.name,
+              type: 'audio',
+              mimeType: inputFile.type || 'audio/mpeg',
+              blob: inputFile,
+            });
+            resolveOuter(saved);
+          },
+        };
+      };
+
+      let currentPresetId = 'preset_alpha';
+      let currentElements: StudioElement[] = [
+        makeAudioElement('elem_shared_audio', {
+          title: 'Preset Alpha Audio',
+          audioSourceType: 'url',
+          audioUrl: 'https://cdn.example.com/alpha.ogg',
+        }),
+      ];
+      const presetBElements: StudioElement[] = [
+        makeAudioElement('elem_shared_audio', {
+          title: 'Preset Beta Audio',
+          audioSourceType: 'url',
+          audioUrl: 'https://cdn.example.com/beta.ogg',
+        }),
+      ];
+      const sessionFilesRef = new Map<string, LocalAudioSessionCacheEntry>();
+      let sessionFilesState: Record<string, { name: string; size: number; type: string }> = {};
+      const requestSeqMap: Record<string, number> = {};
+      const isMounted = true;
+      let commitCalls = 0;
+
+      const runGuardedSelect = async (params: {
+        targetElem: StudioElement;
+        file: File;
+        saveFn: (input: {
+          name: string;
+          type: 'audio';
+          mimeType: string;
+          blob: Blob;
+        }) => Promise<Awaited<ReturnType<typeof StorageService.saveStudioMediaAsset>>>;
+        groupLocked?: boolean;
+        strictModeBLocked?: boolean;
+      }): Promise<'committed' | 'aborted_guard' | 'failed'> => {
+        const targetId = params.targetElem.id;
+        const requestPresetId = currentPresetId;
+        const requestSeq = (requestSeqMap[targetId] ?? 0) + 1;
+        requestSeqMap[targetId] = requestSeq;
+
+        const res = await persistLocalAudioFileForElement({
+          element: params.targetElem,
+          file: params.file,
+          isElementGroupLocked: Boolean(params.groupLocked),
+          isStrictModeBLocked: Boolean(params.strictModeBLocked),
+          saveStudioMediaAsset: params.saveFn,
+        });
+
+        if (
+          !isMounted ||
+          requestSeqMap[targetId] !== requestSeq ||
+          currentPresetId !== requestPresetId
+        ) {
+          return 'aborted_guard';
+        }
+
+        if (!res.saved) {
+          return 'failed';
+        }
+
+        const latestElement = currentElements.find(
+          (elem) => elem.id === targetId && elem.type === 'audio',
+        );
+        if (
+          !latestElement ||
+          isStudioElementReadOnly({
+            elementLocked: latestElement.locked,
+            isElementGroupLocked: Boolean(params.groupLocked),
+            isStrictModeBLocked: Boolean(params.strictModeBLocked),
+          })
+        ) {
+          return 'aborted_guard';
+        }
+
+        sessionFilesRef.set(targetId, { assetId: res.assetId, file: params.file });
+        sessionFilesState = {
+          ...sessionFilesState,
+          [targetId]: { name: params.file.name, size: params.file.size, type: res.mimeType },
+        };
+
+        const patch = buildLocalAudioSelectionPatch({
+          element: latestElement,
+          assetId: res.assetId,
+          fileName: params.file.name,
+          fileSize: params.file.size,
+        });
+        commitCalls += 1;
+        currentElements = currentElements.map((elem) =>
+          elem.id === targetId ? { ...elem, properties: { ...elem.properties, ...patch } } : elem,
+        );
+        return 'committed';
+      };
+
+      // 9a. Upload completes on the SAME preset -> commits cleanly
+      const samePresetFile = new File([new Uint8Array([1, 2, 3, 4])], 'same-preset.mp3', {
+        type: 'audio/mpeg',
+      });
+      const sameDeferred = createDeferredSave(samePresetFile);
+      const sameTask = runGuardedSelect({
+        targetElem: currentElements[0],
+        file: samePresetFile,
+        saveFn: () => sameDeferred.promise,
+      });
+      await sameDeferred.resolveNow();
+      const sameOutcome = await sameTask;
+      assertEqual(sameOutcome, 'committed', '9a: upload completing on same preset commits');
+      assertEqual(commitCalls, 1, '9b: commit runs once for valid same-preset upload');
+      assertEqual(
+        currentElements[0].properties.localFileName,
+        'same-preset.mp3',
+        '9c: active preset receives uploaded filename',
+      );
+      assert(
+        typeof currentElements[0].properties.audioAssetId === 'string' &&
+          currentElements[0].properties.audioAssetId.startsWith('aud_'),
+        '9d: active preset receives saved audioAssetId',
+      );
+
+      // 9b & 9c. Preset switches while upload is in progress, EVEN when target element ID matches!
+      const deleteCallsBeforeSwitch = fakeIdb.stats.deleteCalls.length;
+      const alphaBeforeSwitch = JSON.stringify(currentElements);
+      const stalePresetFile = new File([new Uint8Array([9, 8, 7, 6])], 'alpha-upload.mp3', {
+        type: 'audio/mpeg',
+      });
+      const switchDeferred = createDeferredSave(stalePresetFile);
+      const switchTask = runGuardedSelect({
+        targetElem: currentElements[0],
+        file: stalePresetFile,
+        saveFn: () => switchDeferred.promise,
+      });
+
+      // Switch active preset from preset_alpha -> preset_beta with identical elem_shared_audio ID
+      currentPresetId = 'preset_beta';
+      currentElements = presetBElements;
+      const betaSnapshotBefore = JSON.stringify(currentElements);
+      const refSnapshotBefore = sessionFilesRef.get('elem_shared_audio')?.assetId;
+      const stateSnapshotBefore = JSON.stringify(sessionFilesState);
+
+      await switchDeferred.resolveNow();
+      const switchOutcome = await switchTask;
+      assertEqual(
+        switchOutcome,
+        'aborted_guard',
+        '9e: switching preset mid-upload aborts before applying metadata/cache',
+      );
+      assertEqual(commitCalls, 1, '9f: preset switch prevents updateElementProperties commit');
+      assertEqual(
+        JSON.stringify(currentElements),
+        betaSnapshotBefore,
+        '9g: new preset element with same ID is NOT overwritten by stale upload',
+      );
+      assertEqual(
+        sessionFilesRef.get('elem_shared_audio')?.assetId,
+        refSnapshotBefore,
+        '9h: manualAudioFilesRef is NOT overwritten on preset switch',
+      );
+      assertEqual(
+        JSON.stringify(sessionFilesState),
+        stateSnapshotBefore,
+        '9i: manualAudioFilesState is NOT overwritten on preset switch',
+      );
+      assertEqual(
+        fakeIdb.stats.deleteCalls.length,
+        deleteCallsBeforeSwitch,
+        '9j: persisted Blob is NOT blindly deleted when upload aborts on preset switch',
+      );
+      assert(
+        alphaBeforeSwitch.includes('same-preset.mp3'),
+        '9k: previous preset keeps its prior valid metadata',
+      );
+
+      // 9d. Upload sequence guard on same preset still blocks superseded upload
+      const seqFile1 = new File([new Uint8Array([10, 11])], 'first-seq.mp3', { type: 'audio/mpeg' });
+      const seqFile2 = new File([new Uint8Array([12, 13])], 'second-seq.mp3', { type: 'audio/mpeg' });
+      const seqDef1 = createDeferredSave(seqFile1);
+      const seqDef2 = createDeferredSave(seqFile2);
+      const seqTask1 = runGuardedSelect({
+        targetElem: currentElements[0],
+        file: seqFile1,
+        saveFn: () => seqDef1.promise,
+      });
+      const seqTask2 = runGuardedSelect({
+        targetElem: currentElements[0],
+        file: seqFile2,
+        saveFn: () => seqDef2.promise,
+      });
+      await seqDef2.resolveNow();
+      await seqDef1.resolveNow();
+      const [seqOutcome1, seqOutcome2] = await Promise.all([seqTask1, seqTask2]);
+      assertEqual(seqOutcome1, 'aborted_guard', '9l: older requestSeq upload is aborted');
+      assertEqual(seqOutcome2, 'committed', '9m: latest requestSeq upload commits');
+      assertEqual(
+        currentElements[0].properties.localFileName,
+        'second-seq.mp3',
+        '9n: element retains latest upload metadata only',
+      );
+
+      // 9e. Locked element mid-upload or before upload remains protected
+      const lockFile = new File([new Uint8Array([14, 15])], 'locked-attempt.mp3', {
+        type: 'audio/mpeg',
+      });
+      const lockDeferred = createDeferredSave(lockFile);
+      const lockTask = runGuardedSelect({
+        targetElem: currentElements[0],
+        file: lockFile,
+        saveFn: () => lockDeferred.promise,
+      });
+      currentElements = currentElements.map((elem) => ({ ...elem, locked: true }));
+      const lockedSnapshot = JSON.stringify(currentElements);
+      await lockDeferred.resolveNow();
+      const lockOutcome = await lockTask;
+      assertEqual(lockOutcome, 'aborted_guard', '9o: locking element mid-upload aborts commit');
+      assertEqual(
+        JSON.stringify(currentElements),
+        lockedSnapshot,
+        '9p: locked element metadata remains untouched',
+      );
+    }
 
     console.log(`studioAudioPersistence.test.ts: PASS (${assertionCount} assertions)`);
   } finally {

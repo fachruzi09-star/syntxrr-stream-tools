@@ -1969,6 +1969,36 @@ async function runStudioInspectorControlsTests(): Promise<void> {
       'StudioView manual audio handlers persist via saveStudioMediaAsset, restore via getStudioMediaAssetsForPresetTransfer(ids), and never blindly delete shared assets',
     );
 
+    const fileSelectHandler = extractBetween(
+      audioHandlersSection,
+      'const handleManualAudioFileSelect =',
+      'const handlePlayManualAudio =',
+      'handleManualAudioFileSelect',
+    );
+    const capturePresetIdx = fileSelectHandler.indexOf('const requestPresetId = activePresetIdRef.current;');
+    const awaitPersistIdx = fileSelectHandler.indexOf('await persistLocalAudioFileForElement(');
+    const presetGuardIdx = fileSelectHandler.indexOf('activePresetIdRef.current !== requestPresetId');
+    const cacheUpdateIdx = fileSelectHandler.indexOf('manualAudioFilesRef.current.set(');
+    const stateUpdateIdx = fileSelectHandler.indexOf('setManualAudioFilesState(');
+    const propUpdateIdx = fileSelectHandler.indexOf('updateElementProperties(');
+    assert(
+      capturePresetIdx !== -1 &&
+        awaitPersistIdx !== -1 &&
+        presetGuardIdx !== -1 &&
+        cacheUpdateIdx !== -1 &&
+        stateUpdateIdx !== -1 &&
+        propUpdateIdx !== -1 &&
+        capturePresetIdx < awaitPersistIdx &&
+        awaitPersistIdx < presetGuardIdx &&
+        presetGuardIdx < cacheUpdateIdx &&
+        presetGuardIdx < stateUpdateIdx &&
+        presetGuardIdx < propUpdateIdx &&
+        fileSelectHandler.includes('!isMountedRef.current') &&
+        fileSelectHandler.includes('manualAudioRequestSeqRef.current[targetId] !== requestSeq') &&
+        fileSelectHandler.includes('isStudioElementReadOnly('),
+      'A2.10.1.1: handleManualAudioFileSelect captures requestPresetId before await and aborts on preset switch before touching ref, state, or element properties while preserving seq/mount/lock guards',
+    );
+
     const audioInspectorSection = extractBetween(
       studioSource,
       '{/* Dedicated Audio Manual Inspector */}',
