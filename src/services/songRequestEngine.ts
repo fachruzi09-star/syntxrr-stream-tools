@@ -1740,9 +1740,11 @@ export function persistSongRequestHistoryIfReady(params: {
   if (!params.syncReadyRef.current) return null;
   const serialized = JSON.stringify(params.history);
   if (serialized === params.lastPersistedJsonRef.current) return null;
-  params.lastPersistedJsonRef.current = serialized;
   return params.saveHistory(params.history)
-    .then(() => true)
+    .then(() => {
+      params.lastPersistedJsonRef.current = serialized;
+      return true;
+    })
     .catch((err) => {
       params.onError?.(err);
       return false;

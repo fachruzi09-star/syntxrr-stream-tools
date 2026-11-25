@@ -1018,6 +1018,184 @@ async function runSongRequestHistoryTests(): Promise<void> {
         appSource.includes('persistSongRequestHistoryIfReady'),
       '16m: App.tsx uses guarded startup hydration and guarded persistence sync'
     );
+
+    // 17. A2.10.3.4 Persistence Success Marker Semantics
+    fakeIdb.idbData.delete('song_request_history');
+    const markerEngine = new SongRequestEngine();
+    try {
+      const syncReadyRef = { current: false };
+      const lastPersistedJsonRef = { current: '' };
+
+      const hydrationRes = await hydrateSongRequestHistoryWithGuard({
+        readHistory: () => StorageService.getSongRequestHistory(),
+        hydrateHistory: (entries) => markerEngine.hydrateHistory(entries),
+        syncReadyRef,
+        lastPersistedJsonRef,
+      });
+      assertEqual(hydrationRes.hydrated, true, '17a: initial empty hydration succeeds');
+      assertEqual(syncReadyRef.current, true, '17b: syncReadyRef is true after hydration');
+      assertEqual(lastPersistedJsonRef.current, '[]', '17c: marker starts at []');
+
+      // Same snapshot returns null and performs no write
+      const beforeNoopStats = fakeIdb.getStats();
+      const noopRes = persistSongRequestHistoryIfReady({
+        history: markerEngine.getState().history,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assertEqual(noopRes, null, '17d: identical snapshot returns null without writing');
+      assertEqual(
+        fakeIdb.getStats().putRequestCount,
+        beforeNoopStats.putRequestCount,
+        '17e: identical snapshot triggers zero IDB put requests'
+      );
+
+      // Play track 1 and persist with delayed IDB open to verify marker is NOT updated before resolve
+      await markerEngine.playItem({
+        id: 'marker_track_1',
+        title: 'Marker Track One',
+        artist: 'Marker Artist',
+        requester: 'viewer_m1',
+        durationSec: 185,
+        requestedAt: 1700000010000,
+        sourceType: 'remote_url',
+        provider: 'authorized_stream',
+        playable: true,
+        audioUrl: 'https://cdn.example.com/audio/marker_one.mp3',
+        platform: 'Stream',
+      });
+      const historyAfterTrack1 = markerEngine.getState().history;
+      const expectedMarker1 = JSON.stringify(historyAfterTrack1);
+
+      fakeIdb.setOpenDbDelayMs(20);
+      const pendingSavePromise = persistSongRequestHistoryIfReady({
+        history: historyAfterTrack1,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assert(pendingSavePromise !== null, '17f: new snapshot initiates async save');
+      assertEqual(
+        lastPersistedJsonRef.current,
+        '[]',
+        '17g: marker is NOT updated before saveHistory() promise resolves'
+      );
+      const save1Ok = await pendingSavePromise;
+      fakeIdb.setOpenDbDelayMs(0);
+      assertEqual(save1Ok, true, '17h: first save resolves true');
+      assertEqual(
+        lastPersistedJsonRef.current,
+        expectedMarker1,
+        '17i: marker updated to Track 1 snapshot only after save succeeds'
+      );
+
+      // Duplicate call with same snapshot after success returns null and does not rewrite
+      const putCountAfterTrack1 = fakeIdb.getStats().putRequestCount;
+      const duplicateAfterSuccess = persistSongRequestHistoryIfReady({
+        history: historyAfterTrack1,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assertEqual(duplicateAfterSuccess, null, '17j: same snapshot after success returns null');
+      assertEqual(
+        fakeIdb.getStats().putRequestCount,
+        putCountAfterTrack1,
+        '17k: same snapshot after success does not rewrite IDB'
+      );
+
+      // Play track 2, then fail persistence (abort_after_request)
+      await markerEngine.playItem({
+        id: 'marker_track_2',
+        title: 'Marker Track Two',
+        artist: 'Marker Artist 2',
+        requester: 'viewer_m2',
+        durationSec: 205,
+        requestedAt: 1700000011000,
+        sourceType: 'remote_url',
+        provider: 'authorized_stream',
+        playable: true,
+        audioUrl: 'https://cdn.example.com/audio/marker_two.mp3',
+        platform: 'Stream',
+      });
+      const historyAfterTrack2 = markerEngine.getState().history;
+      const expectedMarker2 = JSON.stringify(historyAfterTrack2);
+      const track2HistorySnapshotBeforeFail = JSON.stringify(historyAfterTrack2);
+
+      fakeIdb.setTxMode('abort_after_request');
+      let capturedError: unknown = null;
+      const failedSaveResult = await persistSongRequestHistoryIfReady({
+        history: historyAfterTrack2,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+        onError: (err) => {
+          capturedError = err;
+        },
+      });
+      fakeIdb.setTxMode('commit');
+
+      assertEqual(failedSaveResult, false, '17l: failed save returns false');
+      assert(Boolean(capturedError), '17m: onError callback invoked on save failure');
+      assertEqual(
+        lastPersistedJsonRef.current,
+        expectedMarker1,
+        '17n: marker stays on last successfully persisted snapshot (Track 1) after Track 2 save fails'
+      );
+      assertEqual(syncReadyRef.current, true, '17o: hydration guard syncReadyRef stays intact');
+      assertEqual(
+        JSON.stringify(markerEngine.getState().history),
+        track2HistorySnapshotBeforeFail,
+        '17p: in-memory history unchanged on save failure'
+      );
+      assertEqual(markerEngine.getState().isPlaying, true, '17q: playback isPlaying unaffected by save failure');
+      assertEqual(
+        markerEngine.getState().playbackStatus,
+        'playing',
+        '17r: playbackStatus unaffected by save failure'
+      );
+
+      // Requeue FIFO still works normally after persistence failure
+      const firstHistoryId = markerEngine.getState().history[1].id;
+      const requeueAfterFail = markerEngine.requeueFromHistory(firstHistoryId, 'Streamer');
+      assertEqual(requeueAfterFail.success, true, '17s: FIFO requeue works after persistence failure');
+      assertEqual(
+        markerEngine.getState().queue[markerEngine.getState().queue.length - 1]?.id,
+        requeueAfterFail.item?.id,
+        '17t: requeued item appended to back of queue'
+      );
+
+      // Retry the SAME previously-failed Track 2 snapshot -> MUST NOT return null, MUST retry and succeed
+      const retryPromise = persistSongRequestHistoryIfReady({
+        history: historyAfterTrack2,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assert(retryPromise !== null, '17u: previously failed snapshot is retried instead of skipped');
+      const retryOk = await retryPromise;
+      assertEqual(retryOk, true, '17v: retry of failed snapshot succeeds');
+      assertEqual(
+        lastPersistedJsonRef.current,
+        expectedMarker2,
+        '17w: marker updates to Track 2 snapshot after successful retry'
+      );
+
+      const postRetryNoop = persistSongRequestHistoryIfReady({
+        history: historyAfterTrack2,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assertEqual(
+        postRetryNoop,
+        null,
+        '17x: subsequent call with same snapshot after successful retry returns null'
+      );
+    } finally {
+      markerEngine.destroy();
+    }
   } finally {
     fakeIdb.restore();
     (globalThis as { Audio?: unknown }).Audio = originalAudio;
