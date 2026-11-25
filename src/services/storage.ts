@@ -1355,7 +1355,6 @@ export const StorageService = {
             finishReject(
               tx.error || new Error('Transaksi penghapusan audio Soundboard dibatalkan.'),
             );
-          request.onsuccess = () => finishResolve();
           request.onerror = () =>
             finishReject(
               request.error || new Error('Gagal menghapus Blob audio Soundboard dari IndexedDB.'),

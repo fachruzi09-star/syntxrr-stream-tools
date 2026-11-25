@@ -346,15 +346,23 @@ async function runSoundboardReliabilityTests(): Promise<void> {
     assertEqual(typeof StorageService.saveSoundboardAudio, 'function', 'StorageService.saveSoundboardAudio preserved');
   }
 
-  // 10. A2.10.2.1 Soundboard delete consistency & StorageService.deleteSoundboardAudio reporting
+  // 10. A2.10.2.1 & A2.10.2.2 Soundboard delete consistency & IndexedDB transaction commit guard
   {
     const globalRecord = globalThis as unknown as { indexedDB?: unknown };
     const originalIndexedDB = globalRecord.indexedDB;
 
     try {
       const idbData = new Map<string, unknown>();
+      type TxMode = 'commit' | 'abort_after_request' | 'tx_error_after_request';
       let failDelete = false;
       let failOpen = false;
+      let txMode: TxMode = 'commit';
+      let dbOpenCount = 0;
+      let dbCloseCount = 0;
+      let requestSuccessCount = 0;
+      let txCompleteCount = 0;
+      let txAbortCount = 0;
+
       const fakeIdb = {
         open(_name: string, _version?: number) {
           const openReq: {
@@ -369,11 +377,31 @@ async function runSoundboardReliabilityTests(): Promise<void> {
               openReq.onerror?.();
               return;
             }
+            dbOpenCount += 1;
             openReq.result = {
               objectStoreNames: { contains: () => true },
-              close() {},
+              close() {
+                dbCloseCount += 1;
+              },
               transaction() {
-                return {
+                const stagedData = new Map(idbData);
+                const txObj: {
+                  error: Error | null;
+                  oncomplete: (() => void) | null;
+                  onerror: (() => void) | null;
+                  onabort: (() => void) | null;
+                  objectStore: () => {
+                    delete: (key: string) => {
+                      error: Error | null;
+                      onsuccess: (() => void) | null;
+                      onerror: (() => void) | null;
+                    };
+                  };
+                } = {
+                  error: null,
+                  oncomplete: null,
+                  onerror: null,
+                  onabort: null,
                   objectStore() {
                     return {
                       delete(key: string) {
@@ -386,16 +414,52 @@ async function runSoundboardReliabilityTests(): Promise<void> {
                           if (failDelete) {
                             req.error = new Error(`Simulated IDB delete failure for ${key}`);
                             req.onerror?.();
+                            // In IndexedDB, an unhandled request error aborts the transaction without committing
+                            queueMicrotask(() => {
+                              txObj.error = req.error;
+                              txAbortCount += 1;
+                              txObj.onabort?.();
+                            });
                             return;
                           }
-                          idbData.delete(key);
+
+                          stagedData.delete(key);
+                          requestSuccessCount += 1;
                           req.onsuccess?.();
+
+                          // Transaction commit / abort happens asynchronously AFTER request.onsuccess
+                          queueMicrotask(() => {
+                            if (txMode === 'abort_after_request') {
+                              // Rollback: do NOT apply stagedData back to idbData
+                              txObj.error = new Error(
+                                `Simulated transaction abort after request success for ${key}`,
+                              );
+                              txAbortCount += 1;
+                              txObj.onabort?.();
+                              return;
+                            }
+                            if (txMode === 'tx_error_after_request') {
+                              txObj.error = new Error(
+                                `Simulated transaction error after request success for ${key}`,
+                              );
+                              txObj.onerror?.();
+                              return;
+                            }
+
+                            idbData.clear();
+                            stagedData.forEach((value, stagedKey) => {
+                              idbData.set(stagedKey, value);
+                            });
+                            txCompleteCount += 1;
+                            txObj.oncomplete?.();
+                          });
                         });
                         return req;
                       },
                     };
                   },
                 };
+                return txObj;
               },
             };
             openReq.onsuccess?.();
@@ -407,10 +471,12 @@ async function runSoundboardReliabilityTests(): Promise<void> {
 
       const blobA = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mpeg' });
       const blobB = new Blob([new Uint8Array([4, 5, 6])], { type: 'audio/ogg' });
+      const blobC = new Blob([new Uint8Array([7, 8, 9])], { type: 'audio/wav' });
       idbData.set('soundboard_audio_sb_custom_a', blobA);
       idbData.set('soundboard_audio_sb_custom_b', blobB);
+      idbData.set('soundboard_audio_sb_custom_c', blobC);
 
-      // Verify StorageService.deleteSoundboardAudio rejects when IndexedDB delete fails
+      // Verify StorageService.deleteSoundboardAudio rejects when request.onerror fires + closes DB
       failDelete = true;
       let idbDeleteRejected = false;
       try {
@@ -418,12 +484,15 @@ async function runSoundboardReliabilityTests(): Promise<void> {
       } catch (err) {
         idbDeleteRejected = err instanceof Error && err.message.includes('Simulated IDB delete failure');
       }
-      assert(idbDeleteRejected, '10a: StorageService.deleteSoundboardAudio rejects on IndexedDB delete error');
+      assert(idbDeleteRejected, '10a: StorageService.deleteSoundboardAudio rejects on IndexedDB request error');
       assert(idbData.has('soundboard_audio_sb_custom_a'), '10b: failed delete leaves Blob in IndexedDB');
+      assertEqual(dbCloseCount, dbOpenCount, '10b2: db.close() called after request error');
 
-      // Verify StorageService.deleteSoundboardAudio rejects when openDB fails
+      // Verify StorageService.deleteSoundboardAudio rejects when openDB fails (no extra close on unopened DB)
       failDelete = false;
       failOpen = true;
+      const openBeforeFail = dbOpenCount;
+      const closeBeforeFail = dbCloseCount;
       let idbOpenRejected = false;
       try {
         await StorageService.deleteSoundboardAudio('sb_custom_a');
@@ -431,7 +500,89 @@ async function runSoundboardReliabilityTests(): Promise<void> {
         idbOpenRejected = true;
       }
       assert(idbOpenRejected, '10c: StorageService.deleteSoundboardAudio rejects on openDB error');
+      assertEqual(dbOpenCount, openBeforeFail, '10c2: failed openDB does not open connection');
+      assertEqual(dbCloseCount, closeBeforeFail, '10c3: failed openDB does not leak or call close');
       failOpen = false;
+
+      // Verify A2.10.2.2: request.onsuccess succeeds, then tx.onabort fires -> MUST reject and keep Blob intact!
+      txMode = 'abort_after_request';
+      const reqCountBeforeAbort = requestSuccessCount;
+      const txAbortBefore = txAbortCount;
+      const txCompleteBeforeAbort = txCompleteCount;
+      let txAbortCountWhenSettled = -1;
+      let abortRejected = false;
+      let abortMessage = '';
+      const deleteAbortPromise = StorageService.deleteSoundboardAudio('sb_custom_c');
+      const settleTracker = deleteAbortPromise.then(
+        () => {
+          txAbortCountWhenSettled = txAbortCount;
+        },
+        () => {
+          txAbortCountWhenSettled = txAbortCount;
+        },
+      );
+      try {
+        await deleteAbortPromise;
+      } catch (err) {
+        abortRejected = true;
+        abortMessage = err instanceof Error ? err.message : String(err);
+      }
+      await settleTracker;
+      assert(abortRejected, '10c4: deleteSoundboardAudio rejects when request succeeds but tx aborts');
+      assert(
+        abortMessage.includes('Simulated transaction abort after request success'),
+        '10c5: transaction abort error propagates to caller',
+      );
+      assert(
+        requestSuccessCount === reqCountBeforeAbort + 1 &&
+          txAbortCount === txAbortBefore + 1 &&
+          txCompleteCount === txCompleteBeforeAbort,
+        '10c6: request.onsuccess ran, tx.onabort ran, and tx.oncomplete never ran',
+      );
+      assert(
+        idbData.get('soundboard_audio_sb_custom_c') === blobC,
+        '10c7: old Blob remains intact in IndexedDB when transaction aborts after request success',
+      );
+      assertEqual(dbCloseCount, dbOpenCount, '10c8: db.close() always called even when transaction aborts');
+      assertEqual(
+        txAbortCountWhenSettled,
+        txAbortBefore + 1,
+        '10c9: Promise waited for tx.onabort instead of resolving prematurely at request.onsuccess',
+      );
+
+      // Also verify tx.onerror after request.onsuccess rejects cleanly and preserves Blob
+      txMode = 'tx_error_after_request';
+      let txErrorRejected = false;
+      try {
+        await StorageService.deleteSoundboardAudio('sb_custom_c');
+      } catch (err) {
+        txErrorRejected =
+          err instanceof Error && err.message.includes('Simulated transaction error after request success');
+      }
+      assert(txErrorRejected, '10c9b: deleteSoundboardAudio rejects when tx.onerror fires after request success');
+      assert(
+        idbData.get('soundboard_audio_sb_custom_c') === blobC,
+        '10c9c: old Blob stays intact when tx.onerror fires',
+      );
+      assertEqual(dbCloseCount, dbOpenCount, '10c9d: db.close() called after tx.onerror');
+
+      // Verify A2.10.2.2: delete request succeeds AND transaction completes -> resolves ONLY after tx.oncomplete
+      txMode = 'commit';
+      let resolvedBeforeTxComplete = false;
+      let completedCountDuringResolve = -1;
+      const deleteCommitPromise = StorageService.deleteSoundboardAudio('sb_custom_c').then(() => {
+        completedCountDuringResolve = txCompleteCount;
+        if (txCompleteCount === txCompleteBeforeAbort) {
+          resolvedBeforeTxComplete = true;
+        }
+      });
+      await deleteCommitPromise;
+      assert(
+        !resolvedBeforeTxComplete && completedCountDuringResolve === txCompleteBeforeAbort + 1,
+        '10c10: deleteSoundboardAudio resolves strictly after tx.oncomplete',
+      );
+      assert(!idbData.has('soundboard_audio_sb_custom_c'), '10c11: Blob deleted once transaction commits');
+      assertEqual(dbCloseCount, dbOpenCount, '10c12: db.close() called after transaction completes');
 
       const itemA: SoundboardItem = {
         id: 'sb_custom_a',
@@ -546,40 +697,56 @@ async function runSoundboardReliabilityTests(): Promise<void> {
         '10o: other custom Soundboard item and Blob stay completely intact',
       );
 
-      // 10.3 Blob cleanup failure after list save succeeds: item stays deleted and warning returned
-      failDelete = true;
+      // 10.3 Blob cleanup failure when transaction aborts after request success:
+      //     strict order preserved, item stays deleted, warning returned, old Blob rolled back, DB closed
+      orderTrace.length = 0;
+      txMode = 'abort_after_request';
       const cleanupWarnRes = await executeLiveCenterSoundboardDelete({
         item: itemB,
         existingItems: activeSoundboardList,
         onSoundboardItemsChange: async (next) => {
+          orderTrace.push('save_list');
           activeSoundboardList = next;
           syncAppUrlLifecycle(next);
         },
         removeCustomFile: (id) => {
+          orderTrace.push('stop_playback');
           stoppedIds.push(id);
         },
         deleteSoundboardAudio: async (id) => {
+          orderTrace.push('delete_blob');
           await StorageService.deleteSoundboardAudio(id);
         },
       });
+      txMode = 'commit';
       assertEqual(
         cleanupWarnRes.status,
         'deleted_with_cleanup_warning',
-        '10p: Blob cleanup failure reports deleted_with_cleanup_warning',
+        '10p: transaction abort after request success reports deleted_with_cleanup_warning',
+      );
+      assertEqual(
+        orderTrace.join('>'),
+        'save_list>stop_playback>delete_blob',
+        '10p2: cleanup order save_list -> stop_playback -> delete_blob preserved on tx abort',
       );
       assert(
         !activeSoundboardList.some((entry) => entry.id === 'sb_custom_b'),
-        '10q: deleted item is NOT restored to the list when Blob cleanup fails',
+        '10q: deleted item is NOT restored to the list when transaction aborts',
       );
       assert(
         stoppedIds.includes('sb_custom_b'),
-        '10r: playback is still stopped after list deletion even if Blob cleanup fails',
+        '10r: playback is still stopped after list deletion even if transaction aborts',
+      );
+      assert(
+        idbData.get('soundboard_audio_sb_custom_b') === blobB,
+        '10r2: old Blob remains rolled back on aborted delete transaction',
       );
       assertEqual(
         revokedUrlCounts.get('blob:sound/custom-b'),
         1,
         '10s: object URL revoked once cleanly',
       );
+      assertEqual(dbCloseCount, dbOpenCount, '10s2: db.close() count matches open count across full suite');
       assert(
         DEFAULT_SOUNDBOARD.every((def) => activeSoundboardList.some((entry) => entry.id === def.id)),
         '10t: built-in Soundboard items remain intact',
@@ -618,6 +785,21 @@ async function runSoundboardReliabilityTests(): Promise<void> {
         deleteFnSection.indexOf('onSoundboardItemsChange') < deleteFnSection.indexOf('removeCustomFile') &&
         deleteFnSection.indexOf('removeCustomFile') < deleteFnSection.indexOf('deleteSoundboardAudio'),
       'executeLiveCenterSoundboardDelete persists list before stopping playback and deleting Blob, and delegates object URL cleanup to App.tsx lifecycle',
+    );
+
+    const storageSource = readFileSync(join(process.cwd(), 'src', 'services', 'storage.ts'), 'utf8');
+    const storageDeleteStart = storageSource.indexOf('async deleteSoundboardAudio(id: string)');
+    const storageDeleteEnd = storageSource.indexOf('async deleteAllSoundboardAudio', storageDeleteStart);
+    const storageDeleteSection = storageSource.slice(storageDeleteStart, storageDeleteEnd);
+    assert(
+      !storageDeleteSection.includes('request.onsuccess') &&
+        storageDeleteSection.includes('tx.oncomplete = () => finishResolve()') &&
+        storageDeleteSection.includes('tx.onerror') &&
+        storageDeleteSection.includes('tx.onabort') &&
+        storageDeleteSection.includes('request.onerror') &&
+        storageDeleteSection.includes('finally') &&
+        storageDeleteSection.includes('db.close()'),
+      'StorageService.deleteSoundboardAudio resolves strictly on tx.oncomplete, handles errors/abort, and closes DB in finally',
     );
   }
 
