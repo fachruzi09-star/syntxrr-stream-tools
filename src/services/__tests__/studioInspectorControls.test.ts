@@ -1952,6 +1952,37 @@ async function runStudioInspectorControlsTests(): Promise<void> {
     );
   }
 
+  // A2.10.1: Audio local asset persistence & restoration wiring in StudioView.tsx
+  {
+    const audioHandlersSection = extractBetween(
+      studioSource,
+      '// MANUAL AUDIO FILE & PLAYBACK HANDLERS',
+      '// Add Element via unified catalog factory',
+      'manual audio handlers',
+    );
+    assert(
+      audioHandlersSection.includes('persistLocalAudioFileForElement(') &&
+        audioHandlersSection.includes('StorageService.saveStudioMediaAsset(input)') &&
+        audioHandlersSection.includes('playManualAudioElement(') &&
+        audioHandlersSection.includes('StorageService.getStudioMediaAssetsForPresetTransfer(ids)') &&
+        !audioHandlersSection.includes('deleteStudioMediaAsset'),
+      'StudioView manual audio handlers persist via saveStudioMediaAsset, restore via getStudioMediaAssetsForPresetTransfer(ids), and never blindly delete shared assets',
+    );
+
+    const audioInspectorSection = extractBetween(
+      studioSource,
+      '{/* Dedicated Audio Manual Inspector */}',
+      '{/* Running Text */}',
+      'audio inspector section',
+    );
+    assert(
+      audioInspectorSection.includes('buildClearLocalAudioPatch(') &&
+        audioInspectorSection.includes('DEFAULT_MANUAL_AUDIO_URL') &&
+        !audioInspectorSection.includes('deleteStudioMediaAsset'),
+      'StudioView audio inspector clears local element references safely via buildClearLocalAudioPatch without deleting shared IndexedDB assets',
+    );
+  }
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

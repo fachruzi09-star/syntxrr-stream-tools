@@ -682,8 +682,13 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
         reject(request.error);
       };
     });
-  } catch {
-    if (!isBlob && typeof localStorage !== 'undefined') {
+  } catch (error) {
+    if (isBlob) {
+      throw error instanceof Error
+        ? error
+        : new Error('Gagal mengakses IndexedDB untuk menyimpan berkas media.');
+    }
+    if (typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem(`syntxrr_${key}`, JSON.stringify(value));
       } catch {}

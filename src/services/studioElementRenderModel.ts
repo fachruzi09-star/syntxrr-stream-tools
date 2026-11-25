@@ -1472,4 +1472,458 @@ export function createScreenCapturePreviewController<TStream extends ScreenCaptu
   };
 }
 
+export const SUPPORTED_LOCAL_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'] as const;
+export const MAX_LOCAL_AUDIO_FILE_BYTES = 20 * 1024 * 1024;
+export const DEFAULT_MANUAL_AUDIO_URL =
+  'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg';
+
+export interface LocalAudioSessionCacheEntry {
+  assetId: string;
+  file: File;
+}
+
+export interface PersistedStudioAudioAssetLike {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'audio';
+  mimeType: string;
+  sizeBytes?: number;
+  addedAt?: number;
+  blob?: Blob;
+}
+
+export type LocalAudioFileValidationResult =
+  | { valid: true; mimeType: string }
+  | { valid: false; title: string; message: string };
+
+const AUDIO_EXTENSION_MIME_MAP: Record<string, string> = {
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+};
+
+export function inferLocalAudioMimeType(fileName: string, rawMimeType?: string): string {
+  const cleanMime = typeof rawMimeType === 'string' ? rawMimeType.trim().toLowerCase() : '';
+  if (cleanMime.startsWith('audio/')) {
+    return cleanMime;
+  }
+  const lowerName = typeof fileName === 'string' ? fileName.trim().toLowerCase() : '';
+  for (const [ext, mime] of Object.entries(AUDIO_EXTENSION_MIME_MAP)) {
+    if (lowerName.endsWith(ext)) {
+      return mime;
+    }
+  }
+  return 'audio/mpeg';
+}
+
+export function validateLocalAudioFile(
+  file: Pick<File, 'name' | 'size' | 'type'> | null | undefined,
+): LocalAudioFileValidationResult {
+  if (!file) {
+    return {
+      valid: false,
+      title: 'File Audio Tidak Valid',
+      message: 'Tidak ada file audio yang dipilih.',
+    };
+  }
+  const lowerName = typeof file.name === 'string' ? file.name.trim().toLowerCase() : '';
+  const cleanMime = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
+  const isAudioFormat =
+    cleanMime.startsWith('audio/') ||
+    SUPPORTED_LOCAL_AUDIO_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+
+  if (!isAudioFormat) {
+    return {
+      valid: false,
+      title: 'Format Audio Tidak Didukung',
+      message: 'Harap pilih file audio MP3, WAV, OGG, M4A, atau AAC.',
+    };
+  }
+
+  if (typeof file.size !== 'number' || !Number.isFinite(file.size) || file.size <= 0) {
+    return {
+      valid: false,
+      title: 'File Audio Kosong',
+      message: 'File audio kosong atau rusak. Harap pilih file audio yang valid.',
+    };
+  }
+
+  if (file.size > MAX_LOCAL_AUDIO_FILE_BYTES) {
+    return {
+      valid: false,
+      title: 'Ukuran Audio Terlalu Besar',
+      message: 'Ukuran maksimum file audio lokal adalah 20 MB.',
+    };
+  }
+
+  return {
+    valid: true,
+    mimeType: inferLocalAudioMimeType(file.name, file.type),
+  };
+}
+
+export function shouldApplyDefaultAudioTitle(currentTitle: unknown): boolean {
+  if (typeof currentTitle !== 'string') return true;
+  const trimmed = currentTitle.trim();
+  return (
+    !trimmed ||
+    trimmed === 'Audio Manual (BGM)' ||
+    trimmed === 'Audio Manual Track' ||
+    trimmed === 'Audio Latar Belakang'
+  );
+}
+
+export function buildLocalAudioSelectionPatch(params: {
+  element: Pick<StudioElement, 'properties'>;
+  assetId: string;
+  fileName: string;
+  fileSize: number;
+}): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    audioAssetId: params.assetId,
+    localFileName: params.fileName,
+    localFileSize: params.fileSize,
+    audioSourceType: 'local',
+  };
+  if (shouldApplyDefaultAudioTitle(params.element.properties?.title)) {
+    const cleanTitle = params.fileName.replace(/\.[^/.]+$/, '').trim();
+    if (cleanTitle) {
+      patch.title = cleanTitle;
+    }
+  }
+  return patch;
+}
+
+export function buildClearLocalAudioPatch(
+  extraPatch?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    audioAssetId: '',
+    localFileName: '',
+    localFileSize: undefined,
+    audioSourceType: 'url',
+    ...extraPatch,
+  };
+}
+
+export type PersistLocalAudioResult =
+  | {
+      saved: true;
+      assetId: string;
+      mimeType: string;
+      patch: Record<string, unknown>;
+    }
+  | {
+      saved: false;
+      reason: 'readonly' | 'invalid' | 'storage_error';
+      title: string;
+      message: string;
+    };
+
+export async function persistLocalAudioFileForElement(params: {
+  element: Pick<StudioElement, 'id' | 'type' | 'locked' | 'properties'>;
+  file: File;
+  isElementGroupLocked: boolean;
+  isStrictModeBLocked: boolean;
+  saveStudioMediaAsset: (input: {
+    name: string;
+    type: 'audio';
+    mimeType: string;
+    blob: Blob;
+  }) => Promise<PersistedStudioAudioAssetLike>;
+}): Promise<PersistLocalAudioResult> {
+  if (
+    params.element.type !== 'audio' ||
+    isStudioElementReadOnly({
+      elementLocked: params.element.locked,
+      isElementGroupLocked: params.isElementGroupLocked,
+      isStrictModeBLocked: params.isStrictModeBLocked,
+    })
+  ) {
+    return {
+      saved: false,
+      reason: 'readonly',
+      title: 'Elemen Terkunci',
+      message: 'Buka kunci elemen atau hentikan mode live ketat sebelum mengubah file audio.',
+    };
+  }
+
+  const validation = validateLocalAudioFile(params.file);
+  if (!validation.valid) {
+    return {
+      saved: false,
+      reason: 'invalid',
+      title: validation.title,
+      message: validation.message,
+    };
+  }
+
+  try {
+    const savedAsset = await params.saveStudioMediaAsset({
+      name: params.file.name,
+      type: 'audio',
+      mimeType: validation.mimeType,
+      blob: params.file,
+    });
+
+    if (!savedAsset || typeof savedAsset.id !== 'string' || !savedAsset.id.trim()) {
+      return {
+        saved: false,
+        reason: 'storage_error',
+        title: 'Gagal Menyimpan Audio Lokal',
+        message: 'Penyimpanan aset audio lokal tidak mengembalikan ID aset yang valid.',
+      };
+    }
+
+    const patch = buildLocalAudioSelectionPatch({
+      element: params.element,
+      assetId: savedAsset.id,
+      fileName: params.file.name,
+      fileSize: params.file.size,
+    });
+
+    return {
+      saved: true,
+      assetId: savedAsset.id,
+      mimeType: savedAsset.mimeType || validation.mimeType,
+      patch,
+    };
+  } catch (err) {
+    const detail =
+      err instanceof Error && err.message.trim()
+        ? err.message.trim()
+        : 'File audio gagal disimpan ke penyimpanan lokal perangkat.';
+    return {
+      saved: false,
+      reason: 'storage_error',
+      title: 'Gagal Menyimpan Audio Lokal',
+      message: detail,
+    };
+  }
+}
+
+export type ResolvedAudioPlaybackSource =
+  | {
+      kind: 'local_file';
+      assetId: string;
+      file: File;
+      restoredFromStorage: boolean;
+    }
+  | {
+      kind: 'missing_local_asset';
+      title: string;
+      message: string;
+    }
+  | {
+      kind: 'url';
+      audioUrl: string;
+    };
+
+export async function resolveManualAudioPlaybackSource(params: {
+  element: Pick<StudioElement, 'id' | 'properties'>;
+  getCachedFile?: (elemId: string, assetId: string) => File | undefined;
+  loadAudioAssetsByIds: (ids: string[]) => Promise<PersistedStudioAudioAssetLike[]>;
+}): Promise<ResolvedAudioPlaybackSource> {
+  const props = params.element.properties || {};
+  const sourceType = props.audioSourceType;
+
+  if (sourceType === 'local') {
+    const rawAssetId = typeof props.audioAssetId === 'string' ? props.audioAssetId.trim() : '';
+    if (!rawAssetId) {
+      return {
+        kind: 'missing_local_asset',
+        title: 'File Audio Lokal Tidak Ditemukan',
+        message:
+          'File audio lokal belum tersimpan atau referensinya hilang. Silakan pilih ulang file audio dari perangkat.',
+      };
+    }
+
+    const cachedFile = params.getCachedFile?.(params.element.id, rawAssetId);
+    if (cachedFile && cachedFile.size > 0) {
+      return {
+        kind: 'local_file',
+        assetId: rawAssetId,
+        file: cachedFile,
+        restoredFromStorage: false,
+      };
+    }
+
+    try {
+      const assets = await params.loadAudioAssetsByIds([rawAssetId]);
+      const matched = Array.isArray(assets)
+        ? assets.find(
+            (asset) =>
+              asset &&
+              asset.id === rawAssetId &&
+              asset.type === 'audio' &&
+              asset.blob &&
+              asset.blob.size > 0,
+          )
+        : undefined;
+
+      if (!matched || !matched.blob) {
+        return {
+          kind: 'missing_local_asset',
+          title: 'File Audio Lokal Hilang atau Rusak',
+          message:
+            'File audio lokal yang tersimpan tidak ditemukan atau sudah rusak. Silakan pilih ulang file audio dari perangkat.',
+        };
+      }
+
+      const restoredName =
+        (typeof props.localFileName === 'string' && props.localFileName.trim()) ||
+        (typeof matched.name === 'string' && matched.name.trim()) ||
+        `${rawAssetId}.mp3`;
+      const restoredMime = inferLocalAudioMimeType(
+        restoredName,
+        matched.mimeType || matched.blob.type,
+      );
+      const restoredFile = new File([matched.blob], restoredName, {
+        type: restoredMime,
+        lastModified:
+          typeof matched.addedAt === 'number' && Number.isFinite(matched.addedAt)
+            ? matched.addedAt
+            : Date.now(),
+      });
+
+      return {
+        kind: 'local_file',
+        assetId: rawAssetId,
+        file: restoredFile,
+        restoredFromStorage: true,
+      };
+    } catch {
+      return {
+        kind: 'missing_local_asset',
+        title: 'Gagal Memuat Audio Lokal',
+        message:
+          'File audio lokal gagal dipulihkan dari penyimpanan perangkat. Silakan pilih ulang file audio.',
+      };
+    }
+  }
+
+  const audioUrl =
+    typeof props.audioUrl === 'string' && props.audioUrl.trim()
+      ? props.audioUrl.trim()
+      : DEFAULT_MANUAL_AUDIO_URL;
+
+  return {
+    kind: 'url',
+    audioUrl,
+  };
+}
+
+export interface AudioEnginePlaybackLike {
+  getState: () => {
+    currentTrackId: string | null;
+    currentTime: number;
+    error?: string | null;
+  };
+  pause: () => void;
+  play: () => Promise<void>;
+  setVolume: (vol: number) => void;
+  setLoop: (loop: boolean) => void;
+  loadAndPlayFile: (id: string, title: string, artist: string, file: File) => Promise<boolean>;
+  loadAndPlayUrl: (id: string, title: string, artist: string, url: string) => Promise<boolean>;
+}
+
+export interface PlayManualAudioElementResult {
+  action: 'paused' | 'resumed' | 'played_local' | 'played_url' | 'missing_local_asset' | 'stale';
+  success?: boolean;
+}
+
+export async function playManualAudioElement(params: {
+  element: Pick<StudioElement, 'id' | 'name' | 'properties'>;
+  isTestingAudio: boolean;
+  audioEngine: AudioEnginePlaybackLike;
+  setIsTestingAudio: (playing: boolean) => void;
+  getCachedFile?: (elemId: string, assetId: string) => File | undefined;
+  loadAudioAssetsByIds: (ids: string[]) => Promise<PersistedStudioAudioAssetLike[]>;
+  onRestoredLocalFile?: (elemId: string, assetId: string, file: File) => void;
+  onMissingLocalAsset: (notice: { title: string; message: string }) => void;
+  isStillValidElement?: (elemId: string, assetId: string) => boolean;
+}): Promise<PlayManualAudioElementResult> {
+  const { element, audioEngine, setIsTestingAudio } = params;
+  const current = audioEngine.getState();
+  const isCurrentTrack = current.currentTrackId === element.id;
+
+  if (isCurrentTrack && params.isTestingAudio) {
+    audioEngine.pause();
+    setIsTestingAudio(false);
+    return { action: 'paused' };
+  }
+
+  if (isCurrentTrack && !params.isTestingAudio && current.currentTime > 0) {
+    await audioEngine.play();
+    setIsTestingAudio(true);
+    return { action: 'resumed' };
+  }
+
+  const vol = (element.properties?.volume ?? 85) / 100;
+  audioEngine.setVolume(vol);
+  audioEngine.setLoop(element.properties?.loop !== false);
+
+  const resolved = await resolveManualAudioPlaybackSource({
+    element,
+    getCachedFile: params.getCachedFile,
+    loadAudioAssetsByIds: params.loadAudioAssetsByIds,
+  });
+
+  if (resolved.kind === 'missing_local_asset') {
+    setIsTestingAudio(false);
+    params.onMissingLocalAsset({
+      title: resolved.title,
+      message: resolved.message,
+    });
+    return { action: 'missing_local_asset', success: false };
+  }
+
+  const channelLabel = String(element.properties?.channel || 'bgm').toUpperCase();
+
+  if (resolved.kind === 'local_file') {
+    if (
+      params.isStillValidElement &&
+      !params.isStillValidElement(element.id, resolved.assetId)
+    ) {
+      return { action: 'stale' };
+    }
+    if (resolved.restoredFromStorage) {
+      params.onRestoredLocalFile?.(element.id, resolved.assetId, resolved.file);
+    }
+    const trackTitle =
+      (typeof element.properties?.title === 'string' && element.properties.title.trim()) ||
+      resolved.file.name;
+    const success = await audioEngine.loadAndPlayFile(
+      element.id,
+      trackTitle,
+      `Manual Audio (${channelLabel})`,
+      resolved.file,
+    );
+    setIsTestingAudio(success);
+    if (!success) {
+      params.onMissingLocalAsset({
+        title: 'Gagal Memutar File Audio Lokal',
+        message:
+          'File audio lokal tidak dapat diputar atau berkasnya rusak. Silakan pilih ulang file audio dari perangkat.',
+      });
+    }
+    return { action: 'played_local', success };
+  }
+
+  const trackTitle =
+    (typeof element.properties?.title === 'string' && element.properties.title.trim()) ||
+    element.name;
+  const success = await audioEngine.loadAndPlayUrl(
+    element.id,
+    trackTitle,
+    `Manual Audio (${channelLabel})`,
+    resolved.audioUrl,
+  );
+  setIsTestingAudio(success);
+  return { action: 'played_url', success };
+}
+
+
 

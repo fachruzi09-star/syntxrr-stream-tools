@@ -68,15 +68,18 @@ import {
 } from '../services/studioElementCatalog';
 import { soundboardEngine } from '../services/soundboardEngine';
 import {
+  DEFAULT_MANUAL_AUDIO_URL,
   appendChatMessageFromEvent,
   appendUniqueStreamEvent,
   applyLikeEventToCount,
   applyMediaReplacementToElements,
   buildChatMessageBgOpacityPatch,
   buildChatMessagesFromHistory,
+  buildClearLocalAudioPatch,
   buildEventFeedItems,
   buildLeaderboardEntries,
   buildLiveTextRenderModel,
+  buildLocalAudioSelectionPatch,
   computeProgressBarModel,
   createCameraPreviewController,
   createScreenCapturePreviewController,
@@ -88,6 +91,8 @@ import {
   getLatestViewerCountFromHistory,
   getTopDonorNameFromHistory,
   normalizeScreenCaptureRotation,
+  persistLocalAudioFileForElement,
+  playManualAudioElement,
   resolveActiveUsernameModel,
   resolveChatMessageBackground,
   resolveDynamicAvatarModel,
@@ -99,6 +104,7 @@ import {
   shouldPlayEventAlertSound,
   shouldShowViewerLiveBadge,
   type CameraFacingMode,
+  type LocalAudioSessionCacheEntry,
   type ScreenCapturePreviewRequestState,
   type SupportedSoundboardSfx,
   type StudioChatItem,
@@ -515,7 +521,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Manual Audio File Picker State
   const audioFileInputRef = useRef<HTMLInputElement | null>(null);
-  const manualAudioFilesRef = useRef<Map<string, File>>(new Map());
+  const manualAudioFilesRef = useRef<Map<string, LocalAudioSessionCacheEntry>>(new Map());
+  const manualAudioRequestSeqRef = useRef<Record<string, number>>({});
   const [manualAudioFilesState, setManualAudioFilesState] = useState<Record<string, { name: string; size: number; type: string }>>({});
 
   // Media Library State
@@ -1296,6 +1303,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
         if (typeof patch.videoUrl === 'string' && !patch.videoUrl.startsWith('studio-media://')) {
           delete nextProperties.videoAssetId;
         }
+        if (
+          'audioAssetId' in patch &&
+          (typeof patch.audioAssetId !== 'string' || !patch.audioAssetId.trim())
+        ) {
+          delete nextProperties.audioAssetId;
+        }
+        if ('localFileSize' in patch && patch.localFileSize === undefined) {
+          delete nextProperties.localFileSize;
+        }
         return {
           ...elem,
           properties: nextProperties,
@@ -1517,96 +1533,124 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   // MANUAL AUDIO FILE & PLAYBACK HANDLERS
-  const handleManualAudioFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleManualAudioFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedElement) return;
+    e.target.value = '';
+    const targetElement = selectedElement;
+    if (!file || !targetElement || targetElement.type !== 'audio') return;
 
-    const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'];
-    const lowerName = file.name.toLowerCase();
-    const isAudio = file.type.startsWith('audio/') || validExts.some((ext) => lowerName.endsWith(ext));
+    const targetId = targetElement.id;
+    const requestSeq = (manualAudioRequestSeqRef.current[targetId] ?? 0) + 1;
+    manualAudioRequestSeqRef.current[targetId] = requestSeq;
 
-    if (!isAudio) {
-      showInAppNotice({
-        tone: 'warn',
-        title: 'Format Audio Tidak Didukung',
-        message: 'Harap pilih file audio MP3, WAV, OGG, M4A, atau AAC.',
-      });
-      e.target.value = '';
+    const result = await persistLocalAudioFileForElement({
+      element: targetElement,
+      file,
+      isElementGroupLocked: isElementLockedByGroup(targetId),
+      isStrictModeBLocked,
+      saveStudioMediaAsset: (input) => StorageService.saveStudioMediaAsset(input),
+    });
+
+    if (!isMountedRef.current || manualAudioRequestSeqRef.current[targetId] !== requestSeq) {
       return;
     }
 
-    manualAudioFilesRef.current.set(selectedElement.id, file);
+    if (!result.saved) {
+      showInAppNotice({
+        tone: result.reason === 'storage_error' ? 'error' : 'warn',
+        title: result.title,
+        message: result.message,
+      });
+      return;
+    }
+
+    const latestElement = elementsRef.current.find(
+      (elem) => elem.id === targetId && elem.type === 'audio',
+    );
+    if (
+      !latestElement ||
+      isStudioElementReadOnly({
+        elementLocked: latestElement.locked,
+        isElementGroupLocked: isElementLockedByGroup(targetId),
+        isStrictModeBLocked,
+      })
+    ) {
+      return;
+    }
+
+    manualAudioFilesRef.current.set(targetId, {
+      assetId: result.assetId,
+      file,
+    });
     setManualAudioFilesState((prev) => ({
       ...prev,
-      [selectedElement.id]: {
+      [targetId]: {
         name: file.name,
         size: file.size,
-        type: file.type || 'audio/mpeg',
+        type: result.mimeType,
       },
     }));
 
-    const cleanTitle = file.name.replace(/\.[^/.]+$/, '').trim();
-    updateElementProperty(selectedElement.id, 'localFileName', file.name);
-    updateElementProperty(selectedElement.id, 'localFileSize', file.size);
-    updateElementProperty(selectedElement.id, 'audioSourceType', 'local');
-
-    if (
-      !selectedElement.properties.title ||
-      selectedElement.properties.title === 'Audio Manual (BGM)' ||
-      selectedElement.properties.title === 'Audio Manual Track'
-    ) {
-      updateElementProperty(selectedElement.id, 'title', cleanTitle);
+    if (audioEngine.getState().currentTrackId === targetId) {
+      audioEngine.stop();
+      setIsTestingAudio(false);
     }
 
-    e.target.value = '';
+    const patch = buildLocalAudioSelectionPatch({
+      element: latestElement,
+      assetId: result.assetId,
+      fileName: file.name,
+      fileSize: file.size,
+    });
+    updateElementProperties(targetId, patch);
   };
 
   const handlePlayManualAudio = async () => {
-    if (!selectedElement) return;
-    const current = audioEngine.getState();
-    const isCurrentTrack = current.currentTrackId === selectedElement.id;
+    const targetElement = selectedElement;
+    if (!targetElement || targetElement.type !== 'audio') return;
 
-    if (isCurrentTrack && isTestingAudio) {
-      audioEngine.pause();
-      setIsTestingAudio(false);
-      return;
-    }
-
-    if (isCurrentTrack && !isTestingAudio && current.currentTime > 0) {
-      await audioEngine.play();
-      setIsTestingAudio(true);
-      return;
-    }
-
-    const vol = (selectedElement.properties.volume ?? 85) / 100;
-    audioEngine.setVolume(vol);
-    audioEngine.setLoop(selectedElement.properties.loop !== false);
-
-    const localFile = manualAudioFilesRef.current.get(selectedElement.id);
-    if (localFile) {
-      const trackTitle = selectedElement.properties.title || localFile.name;
-      const channelLabel = (selectedElement.properties.channel || 'bgm').toUpperCase();
-      const success = await audioEngine.loadAndPlayFile(
-        selectedElement.id,
-        trackTitle,
-        `Manual Audio (${channelLabel})`,
-        localFile
-      );
-      setIsTestingAudio(success);
-    } else {
-      const audioUrl =
-        selectedElement.properties.audioUrl ||
-        'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg';
-      const trackTitle = selectedElement.properties.title || selectedElement.name;
-      const channelLabel = (selectedElement.properties.channel || 'bgm').toUpperCase();
-      const success = await audioEngine.loadAndPlayUrl(
-        selectedElement.id,
-        trackTitle,
-        `Manual Audio (${channelLabel})`,
-        audioUrl
-      );
-      setIsTestingAudio(success);
-    }
+    await playManualAudioElement({
+      element: targetElement,
+      isTestingAudio,
+      audioEngine,
+      setIsTestingAudio,
+      getCachedFile: (elemId, assetId) => {
+        const entry = manualAudioFilesRef.current.get(elemId);
+        return entry && entry.assetId === assetId ? entry.file : undefined;
+      },
+      loadAudioAssetsByIds: (ids) => StorageService.getStudioMediaAssetsForPresetTransfer(ids),
+      onRestoredLocalFile: (elemId, assetId, restoredFile) => {
+        if (!isMountedRef.current) return;
+        manualAudioFilesRef.current.set(elemId, {
+          assetId,
+          file: restoredFile,
+        });
+        setManualAudioFilesState((prev) => ({
+          ...prev,
+          [elemId]: {
+            name: restoredFile.name,
+            size: restoredFile.size,
+            type: restoredFile.type || 'audio/mpeg',
+          },
+        }));
+      },
+      onMissingLocalAsset: ({ title, message }) => {
+        showInAppNotice({
+          tone: 'error',
+          title,
+          message,
+        });
+      },
+      isStillValidElement: (elemId, assetId) =>
+        isMountedRef.current &&
+        elementsRef.current.some(
+          (elem) =>
+            elem.id === elemId &&
+            elem.type === 'audio' &&
+            elem.properties?.audioSourceType === 'local' &&
+            elem.properties?.audioAssetId === assetId,
+        ),
+    });
   };
 
   const handleStopManualAudio = () => {
@@ -5779,7 +5823,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                                     {selectedElement.properties.localFileName}
                                   </div>
                                   <div className="text-[10px] text-cyan-400 flex items-center gap-1 mt-0.5 tabular-metrics">
-                                    <span className="font-semibold">File Lokal Sesi</span>
+                                    <span className="font-semibold">
+                                      {selectedElement.properties.audioAssetId
+                                        ? 'Tersimpan Lokal'
+                                        : 'File Lokal (Perlu Pilih Ulang)'}
+                                    </span>
                                     {selectedElement.properties.localFileSize && (
                                       <span className="text-[var(--app-text-secondary)]">
                                         · {(selectedElement.properties.localFileSize / (1024 * 1024)).toFixed(2)} MB
@@ -5791,14 +5839,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
+                                  if (!selectedElement || isSelectedElementReadOnly) return;
                                   manualAudioFilesRef.current.delete(selectedElement.id);
                                   setManualAudioFilesState((prev) => {
+                                    if (!(selectedElement.id in prev)) return prev;
                                     const next = { ...prev };
                                     delete next[selectedElement.id];
                                     return next;
                                   });
-                                  updateElementProperty(selectedElement.id, 'localFileName', '');
-                                  updateElementProperty(selectedElement.id, 'audioSourceType', 'url');
+                                  if (audioEngine.getState().currentTrackId === selectedElement.id) {
+                                    audioEngine.stop();
+                                    setIsTestingAudio(false);
+                                  }
+                                  updateElementProperties(
+                                    selectedElement.id,
+                                    buildClearLocalAudioPatch(),
+                                  );
                                 }}
                                 className="btn-press min-h-[44px] min-w-[44px] rounded-xl text-[var(--app-text-muted)] hover:text-[var(--app-error)] hover:bg-[var(--app-error-soft)] flex items-center justify-center transition"
                                 title="Hapus file dan beralih ke URL"
@@ -5834,13 +5890,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                updateElementProperty(
+                                if (!selectedElement || isSelectedElementReadOnly) return;
+                                manualAudioFilesRef.current.delete(selectedElement.id);
+                                setManualAudioFilesState((prev) => {
+                                  if (!(selectedElement.id in prev)) return prev;
+                                  const next = { ...prev };
+                                  delete next[selectedElement.id];
+                                  return next;
+                                });
+                                if (audioEngine.getState().currentTrackId === selectedElement.id) {
+                                  audioEngine.stop();
+                                  setIsTestingAudio(false);
+                                }
+                                updateElementProperties(
                                   selectedElement.id,
-                                  'audioUrl',
-                                  'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg'
+                                  buildClearLocalAudioPatch({
+                                    audioUrl: DEFAULT_MANUAL_AUDIO_URL,
+                                  }),
                                 );
-                                updateElementProperty(selectedElement.id, 'localFileName', '');
-                                updateElementProperty(selectedElement.id, 'audioSourceType', 'url');
                               }}
                               className="btn-press min-h-[44px] px-3 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-[11px] text-cyan-300 font-semibold rounded-xl shrink-0"
                               title="Muat sample audio bebas royalti"
