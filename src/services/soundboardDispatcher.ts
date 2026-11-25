@@ -123,3 +123,278 @@ export async function dispatchSoundboard(
     return { status: 'error', item, error };
   }
 }
+
+export function isBlobSchemeAudioUrl(url: unknown): boolean {
+  return typeof url === 'string' && url.trim().toLowerCase().startsWith('blob:');
+}
+
+export function isHttpOrHttpsAudioUrl(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export function isPlayableSoundboardAudioUrl(url: unknown): url is string {
+  return isBlobSchemeAudioUrl(url) || isHttpOrHttpsAudioUrl(url);
+}
+
+export function isValidSoundboardBlob(value: unknown): value is Blob {
+  return typeof Blob !== 'undefined' && value instanceof Blob && value.size > 0;
+}
+
+export async function hydrateSoundboardItem(
+  item: SoundboardItem,
+  deps: {
+    getSoundboardAudio: (id: string) => Promise<Blob | null>;
+    createObjectUrl: (blob: Blob) => string;
+  },
+): Promise<SoundboardItem> {
+  if (item.synthType && VALID_SYNTH_TYPES.has(item.synthType) && !item.audioUrl) {
+    return item;
+  }
+
+  let audioBlob: Blob | null = null;
+  try {
+    audioBlob = await deps.getSoundboardAudio(item.id);
+  } catch {
+    audioBlob = null;
+  }
+
+  if (isValidSoundboardBlob(audioBlob)) {
+    return {
+      ...item,
+      audioUrl: deps.createObjectUrl(audioBlob),
+    };
+  }
+
+  if (isHttpOrHttpsAudioUrl(item.audioUrl)) {
+    return item;
+  }
+
+  if (item.audioUrl !== undefined) {
+    const { audioUrl: _staleAudioUrl, ...withoutStaleUrl } = item;
+    return withoutStaleUrl;
+  }
+
+  return item;
+}
+
+export async function hydrateSoundboardItems(
+  items: readonly SoundboardItem[],
+  deps: {
+    getSoundboardAudio: (id: string) => Promise<Blob | null>;
+    createObjectUrl: (blob: Blob) => string;
+  },
+): Promise<SoundboardItem[]> {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  return Promise.all(items.map((item) => hydrateSoundboardItem(item, deps)));
+}
+
+export function hasMissingCustomSoundboardAudio(item: SoundboardItem): boolean {
+  return !isPlayableSoundboardAudioUrl(item.audioUrl) && !isValidSynthType(item.synthType);
+}
+
+export function formatSoundboardPlaybackError(
+  reason: SoundboardDispatchPlaybackReason | 'missing_local_audio',
+  itemName?: string,
+): { title: string; message: string } {
+  const label = itemName?.trim() ? `"${itemName.trim()}"` : 'efek suara ini';
+  switch (reason) {
+    case 'missing_local_audio':
+      return {
+        title: 'File Audio Perlu Diimpor Ulang',
+        message: `File audio lokal untuk ${label} tidak tersedia atau sudah kedaluwarsa. Hapus item ini lalu impor ulang file audionya.`,
+      };
+    case 'invalid_audio':
+      return {
+        title: 'Sumber Audio Tidak Valid',
+        message: `Sumber audio untuk ${label} tidak valid atau sudah kedaluwarsa. Silakan impor ulang file audio.`,
+      };
+    case 'audio_context_unavailable':
+      return {
+        title: 'Audio Tidak Tersedia',
+        message: 'Web Audio API tidak tersedia di perangkat atau browser ini.',
+      };
+    case 'audio_context_resume_failed':
+    case 'audio_context_suspended':
+      return {
+        title: 'Pemutaran Audio Terblokir',
+        message: 'Browser menahan pemutaran audio. Ketuk layar lalu coba putar ulang.',
+      };
+    case 'audio_context_playback_failed':
+      return {
+        title: 'Gagal Memutar Efek Suara',
+        message: `Efek suara synthesizer ${label} gagal diputar.`,
+      };
+    case 'audio_play_failed':
+    default:
+      return {
+        title: 'Gagal Memutar Audio Kustom',
+        message: `Audio ${label} gagal diputar. Pastikan file audio masih valid atau impor ulang.`,
+      };
+  }
+}
+
+export interface SoundboardPlaybackEngineLike {
+  playSynthesizedSFX: (
+    type: NonNullable<SoundboardItem['synthType']>,
+    volume?: number,
+  ) => Promise<SoundboardPlaybackResult>;
+  playCustomFile: (
+    id: string,
+    audioUrl: string,
+    volume?: number,
+  ) => Promise<SoundboardPlaybackResult>;
+}
+
+export async function executeLiveCenterSoundboardPlay(params: {
+  target: SoundboardItem | NonNullable<SoundboardItem['synthType']>;
+  volume?: number;
+  engine: SoundboardPlaybackEngineLike;
+  onPlaybackError: (notice: { title: string; message: string }) => void;
+}): Promise<
+  | { ok: true }
+  | { ok: false; reason: SoundboardDispatchPlaybackReason | 'missing_local_audio' }
+> {
+  const { target, volume, engine, onPlaybackError } = params;
+  const normalizedVolume =
+    typeof volume === 'number' && Number.isFinite(volume)
+      ? Math.max(0, Math.min(1, volume))
+      : undefined;
+
+  if (typeof target === 'string') {
+    try {
+      const res = await engine.playSynthesizedSFX(target, normalizedVolume);
+      if (!res.ok) {
+        onPlaybackError(formatSoundboardPlaybackError(res.reason, target));
+        return { ok: false, reason: res.reason };
+      }
+      return { ok: true };
+    } catch {
+      onPlaybackError(formatSoundboardPlaybackError('audio_context_playback_failed', target));
+      return { ok: false, reason: 'audio_context_playback_failed' };
+    }
+  }
+
+  if (isPlayableSoundboardAudioUrl(target.audioUrl)) {
+    try {
+      const res = await engine.playCustomFile(target.id, target.audioUrl, normalizedVolume);
+      if (!res.ok) {
+        onPlaybackError(formatSoundboardPlaybackError(res.reason, target.name));
+        return { ok: false, reason: res.reason };
+      }
+      return { ok: true };
+    } catch {
+      onPlaybackError(formatSoundboardPlaybackError('audio_play_failed', target.name));
+      return { ok: false, reason: 'audio_play_failed' };
+    }
+  }
+
+  if (isValidSynthType(target.synthType)) {
+    try {
+      const res = await engine.playSynthesizedSFX(target.synthType, normalizedVolume);
+      if (!res.ok) {
+        onPlaybackError(formatSoundboardPlaybackError(res.reason, target.name));
+        return { ok: false, reason: res.reason };
+      }
+      return { ok: true };
+    } catch {
+      onPlaybackError(formatSoundboardPlaybackError('audio_context_playback_failed', target.name));
+      return { ok: false, reason: 'audio_context_playback_failed' };
+    }
+  }
+
+  onPlaybackError(formatSoundboardPlaybackError('missing_local_audio', target.name));
+  return { ok: false, reason: 'missing_local_audio' };
+}
+
+const SUPPORTED_SOUNDBOARD_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.webm'];
+
+export function isSupportedSoundboardAudioFile(
+  file: Pick<File, 'name' | 'type' | 'size'> | null | undefined,
+): boolean {
+  if (!file || typeof file.size !== 'number' || file.size <= 0) return false;
+  const mime = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (mime.startsWith('audio/')) return true;
+  const lowerName = typeof file.name === 'string' ? file.name.trim().toLowerCase() : '';
+  return SUPPORTED_SOUNDBOARD_AUDIO_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+}
+
+export async function executeSoundboardAudioImport(params: {
+  file: File;
+  existingItems: readonly SoundboardItem[];
+  probeDurationSec: (file: File) => Promise<number>;
+  createObjectUrl: (blob: Blob) => string;
+  revokeObjectUrl: (url: string) => void;
+  saveSoundboardAudio: (id: string, file: Blob) => Promise<void>;
+  deleteSoundboardAudio: (id: string) => Promise<void>;
+  onSoundboardItemsChange: (items: SoundboardItem[]) => Promise<void>;
+  createId?: () => string;
+}): Promise<
+  | { ok: true; item: SoundboardItem }
+  | { ok: false; title: string; message: string; error?: unknown }
+> {
+  const { file, existingItems } = params;
+  if (!isSupportedSoundboardAudioFile(file)) {
+    return {
+      ok: false,
+      title: 'Format Audio Tidak Didukung',
+      message: 'Harap pilih file audio yang valid (MP3, WAV, OGG, M4A, atau AAC).',
+    };
+  }
+
+  const id = params.createId
+    ? params.createId()
+    : `sb_custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  let durationSec = 1;
+  try {
+    const probed = await params.probeDurationSec(file);
+    durationSec = Number.isFinite(probed) ? Math.max(1, Math.round(probed)) : 1;
+  } catch {
+    durationSec = 1;
+  }
+
+  let audioUrl = '';
+  try {
+    audioUrl = params.createObjectUrl(file);
+    await params.saveSoundboardAudio(id, file);
+    const savedItem: SoundboardItem = {
+      id,
+      name: file.name.replace(/\.[^/.]+$/, '').trim() || 'Imported sound',
+      category: 'SFX',
+      icon: 'Volume2',
+      durationSec,
+      isQuickSlot: false,
+      audioUrl,
+    };
+    await params.onSoundboardItemsChange([...existingItems, savedItem]);
+    return { ok: true, item: savedItem };
+  } catch (error) {
+    if (audioUrl) {
+      try {
+        params.revokeObjectUrl(audioUrl);
+      } catch {}
+    }
+    try {
+      await params.deleteSoundboardAudio(id);
+    } catch {}
+    const detail =
+      error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : 'Gagal menyimpan audio Soundboard ke penyimpanan perangkat.';
+    return {
+      ok: false,
+      title: 'Gagal Mengimpor Audio Soundboard',
+      message: detail,
+      error,
+    };
+  }
+}
+

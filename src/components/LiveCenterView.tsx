@@ -8,7 +8,13 @@ import {
 import { streamEventBus } from '../services/eventBus';
 import { ttsService } from '../services/ttsService';
 import { soundboardEngine } from '../services/soundboardEngine';
+import {
+  executeLiveCenterSoundboardPlay,
+  executeSoundboardAudioImport,
+  hasMissingCustomSoundboardAudio,
+} from '../services/soundboardDispatcher';
 import { StorageService } from '../services/storage';
+import { showInAppNotice } from '../services/uiNotice';
 import {
   Volume2,
   Play,
@@ -34,6 +40,7 @@ interface LiveCenterViewProps {
   onUpdateTTSConfig: (config: TTSConfig) => void;
   soundboardItems: SoundboardItem[];
   onSoundboardItemsChange: (items: SoundboardItem[]) => Promise<void>;
+  soundboardVolume?: number;
 }
 
 export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
@@ -41,6 +48,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   onUpdateTTSConfig,
   soundboardItems,
   onSoundboardItemsChange,
+  soundboardVolume,
 }) => {
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [customUsername, setCustomUsername] = useState('Sultan_Streaming');
@@ -51,6 +59,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
   );
   const [lastTriggered, setLastTriggered] = useState<string | null>(null);
   const [mobileFeedOpen, setMobileFeedOpen] = useState(false);
+  const [soundboardError, setSoundboardError] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     setEvents(streamEventBus.getHistory());
@@ -88,89 +97,126 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     ttsService.speak(testVoiceText, true);
   };
 
-  const handlePlaySoundboard = (
+  const reportSoundboardError = (notice: { title: string; message: string }) => {
+    setSoundboardError(notice);
+    showInAppNotice({
+      tone: 'error',
+      title: notice.title,
+      message: notice.message,
+    });
+  };
+
+  const handlePlaySoundboard = async (
     itemOrType: SoundboardItem | 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell'
   ) => {
-    if (typeof itemOrType === 'string') {
-      soundboardEngine.playSynthesizedSFX(itemOrType);
-      return;
-    }
-    if (itemOrType.audioUrl) {
-      soundboardEngine.playCustomFile(itemOrType.id, itemOrType.audioUrl);
-    } else if (itemOrType.synthType) {
-      soundboardEngine.playSynthesizedSFX(itemOrType.synthType);
+    const result = await executeLiveCenterSoundboardPlay({
+      target: itemOrType,
+      volume: soundboardVolume,
+      engine: soundboardEngine,
+      onPlaybackError: reportSoundboardError,
+    });
+    if (result.ok) {
+      setSoundboardError(null);
     }
   };
 
   const handleImportSound = async (file: File) => {
-    if (!file.type.startsWith('audio/')) return;
+    const result = await executeSoundboardAudioImport({
+      file,
+      existingItems: soundboardItems,
+      probeDurationSec: (audioFile) =>
+        new Promise<number>((resolve) => {
+          let metadataUrl = '';
+          let metadataUrlCleaned = false;
+          let audio: HTMLAudioElement | null = null;
+          let settled = false;
+          let timeoutId = 0;
 
-    const id = `sb_custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const metadataUrl = URL.createObjectURL(file);
-    const audio = new Audio(metadataUrl);
-    let metadataUrlCleaned = false;
-    const cleanupMetadataAudio = () => {
-      if (metadataUrlCleaned) return;
-      metadataUrlCleaned = true;
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-      URL.revokeObjectURL(metadataUrl);
-    };
-    const durationSec = await new Promise<number>((resolve) => {
-      let settled = false;
-      let timeoutId = 0;
-      const settle = (duration: number) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeoutId);
-        cleanupMetadataAudio();
-        resolve(duration);
-      };
+          const cleanupMetadataAudio = () => {
+            if (metadataUrlCleaned) return;
+            metadataUrlCleaned = true;
+            if (audio) {
+              audio.pause();
+              audio.removeAttribute('src');
+              audio.load();
+            }
+            if (metadataUrl) {
+              URL.revokeObjectURL(metadataUrl);
+            }
+          };
 
-      audio.onloadedmetadata = () => {
-        settle(Math.max(1, Math.round(audio.duration || 1)));
-      };
-      audio.onerror = () => {
-        settle(1);
-      };
-      timeoutId = window.setTimeout(() => {
-        settle(1);
-      }, 10_000);
+          const settle = (duration: number) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timeoutId);
+            cleanupMetadataAudio();
+            resolve(duration);
+          };
+
+          try {
+            metadataUrl = URL.createObjectURL(audioFile);
+            audio = new Audio(metadataUrl);
+            audio.onloadedmetadata = () => {
+              settle(Math.max(1, Math.round(audio?.duration || 1)));
+            };
+            audio.onerror = () => {
+              settle(1);
+            };
+            timeoutId = window.setTimeout(() => {
+              settle(1);
+            }, 10_000);
+          } catch {
+            settle(1);
+          }
+        }),
+      createObjectUrl: (blob) => URL.createObjectURL(blob),
+      revokeObjectUrl: (url) => URL.revokeObjectURL(url),
+      saveSoundboardAudio: (id, blob) => StorageService.saveSoundboardAudio(id, blob),
+      deleteSoundboardAudio: (id) => StorageService.deleteSoundboardAudio(id),
+      onSoundboardItemsChange,
     });
 
-    const item: SoundboardItem = {
-      id,
-      name: file.name.replace(/\.[^/.]+$/, '') || 'Imported sound',
-      category: 'SFX',
-      icon: 'Volume2',
-      durationSec,
-      isQuickSlot: false,
-    };
-    const nextItems = [...soundboardItems, item];
-    const audioUrl = URL.createObjectURL(file);
-    try {
-      await StorageService.saveSoundboardAudio(id, file);
-      await onSoundboardItemsChange([...nextItems.slice(0, -1), { ...item, audioUrl }]);
-    } catch (error) {
-      URL.revokeObjectURL(audioUrl);
-      await StorageService.deleteSoundboardAudio(id);
-      throw error;
+    if (!result.ok) {
+      reportSoundboardError({ title: result.title, message: result.message });
+      return;
     }
+    setSoundboardError(null);
   };
 
   const handleDeleteSound = async (item: SoundboardItem) => {
     if (!item.id.startsWith('sb_custom_')) return;
-    soundboardEngine.removeCustomFile(item.id);
-    await StorageService.deleteSoundboardAudio(item.id);
-    await onSoundboardItemsChange(soundboardItems.filter((candidate) => candidate.id !== item.id));
+    try {
+      soundboardEngine.removeCustomFile(item.id);
+      await StorageService.deleteSoundboardAudio(item.id);
+      await onSoundboardItemsChange(soundboardItems.filter((candidate) => candidate.id !== item.id));
+      setSoundboardError(null);
+    } catch (error) {
+      reportSoundboardError({
+        title: 'Gagal Menghapus Audio',
+        message:
+          error instanceof Error && error.message.trim()
+            ? error.message.trim()
+            : 'Gagal menghapus item audio kustom.',
+      });
+    }
   };
 
   const updateImportedSound = async (item: SoundboardItem, updates: Partial<SoundboardItem>) => {
     const nextItems = soundboardItems.map((candidate) =>
       candidate.id === item.id ? { ...candidate, ...updates } : candidate
     );
-    await onSoundboardItemsChange(nextItems);
+    try {
+      await onSoundboardItemsChange(nextItems);
+      setSoundboardError(null);
+    } catch (error) {
+      reportSoundboardError({
+        title: 'Gagal Memperbarui Soundboard',
+        message:
+          error instanceof Error && error.message.trim()
+            ? error.message.trim()
+            : 'Gagal menyimpan perubahan pengaturan Soundboard.',
+      });
+    }
   };
 
   const handleClearHistory = () => {
@@ -753,6 +799,26 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                 </label>
               </div>
 
+              {soundboardError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-rose-300">{soundboardError.title}</div>
+                    <div className="text-[11px] text-rose-200/90 mt-0.5">{soundboardError.message}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSoundboardError(null)}
+                    className="btn-press min-w-[36px] min-h-[36px] rounded-lg text-rose-300 hover:bg-rose-500/20 flex items-center justify-center shrink-0"
+                    aria-label="Tutup pesan error soundboard"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 {(
                   [
@@ -767,7 +833,9 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                   <button
                     key={sfx.id}
                     type="button"
-                    onClick={() => handlePlaySoundboard(sfx.type)}
+                    onClick={() => {
+                      void handlePlaySoundboard(sfx.type);
+                    }}
                     className="btn-press min-h-[78px] p-3 rounded-xl bg-[var(--app-surface-muted)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] hover:border-[var(--app-accent-border)] flex flex-col items-start justify-between text-left group"
                   >
                     <div className="w-8 h-8 rounded-full bg-[var(--app-surface-elevated)] border border-[var(--app-border)] group-hover:bg-[var(--app-accent)] group-hover:border-[var(--app-accent)] group-hover:text-[var(--app-accent-ink)] text-[var(--app-text)] flex items-center justify-center transition-colors">
@@ -787,19 +855,34 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                     Audio Kustom Tersimpan ({customSounds.length})
                   </h3>
                   <div className="divide-y divide-[var(--app-border)] rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)]">
-                    {customSounds.map((item) => (
+                    {customSounds.map((item) => {
+                      const isMissingAudio = hasMissingCustomSoundboardAudio(item);
+                      return (
                       <div
                         key={item.id}
                         className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2"
                       >
                         <button
                           type="button"
-                          onClick={() => handlePlaySoundboard(item)}
+                          onClick={() => {
+                            void handlePlaySoundboard(item);
+                          }}
                           className="btn-press flex-1 min-w-0 min-h-[44px] px-2 flex items-center gap-2 text-left text-[var(--app-text)] hover:text-[var(--app-accent-text)] rounded-lg"
                           aria-label={`Putar ${item.name}`}
                         >
-                          <Play className="w-3.5 h-3.5 shrink-0 text-[var(--app-accent-text)]" />
-                          <span className="text-xs font-semibold truncate">{item.name}</span>
+                          <Play
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isMissingAudio ? 'text-amber-400' : 'text-[var(--app-accent-text)]'
+                            }`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-semibold truncate block">{item.name}</span>
+                            {isMissingAudio && (
+                              <span className="text-[10px] font-semibold text-amber-400 block truncate">
+                                File audio hilang — perlu diimpor ulang
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] font-mono-num text-[var(--app-text-muted)] shrink-0">
                             {item.durationSec}s
                           </span>
@@ -856,7 +939,8 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

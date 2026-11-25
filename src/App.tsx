@@ -48,7 +48,11 @@ import { normalizeStudioPreset } from './services/presetModel';
 import { triggerHaptic } from './services/haptics';
 import { audioEngine, type AudioEngineState } from './services/localAudioEngine';
 import { soundboardEngine } from './services/soundboardEngine';
-import { dispatchSoundboard } from './services/soundboardDispatcher';
+import {
+  dispatchSoundboard,
+  hydrateSoundboardItems,
+  isBlobSchemeAudioUrl,
+} from './services/soundboardDispatcher';
 import { ttsService, DEFAULT_TTS_CONFIG } from './services/ttsService';
 import { streamEventBus } from './services/eventBus';
 import {
@@ -391,12 +395,10 @@ export default function App() {
         if (JSON.stringify(savedPresets) !== JSON.stringify(hydratedPresets)) {
           await StorageService.savePresets(hydratedPresets);
         }
-        const hydratedSoundboard = await Promise.all(
-          savedSoundboard.map(async (item) => {
-            const audioBlob = await StorageService.getSoundboardAudio(item.id);
-            return audioBlob ? { ...item, audioUrl: URL.createObjectURL(audioBlob) } : item;
-          }),
-        );
+        const hydratedSoundboard = await hydrateSoundboardItems(savedSoundboard, {
+          getSoundboardAudio: (id) => StorageService.getSoundboardAudio(id),
+          createObjectUrl: (blob) => URL.createObjectURL(blob),
+        });
         setSoundboardItems(hydratedSoundboard);
         setMarketplaceItems(savedMarketplace);
         setTiktokAccount(savedTikTokAccount);
@@ -471,7 +473,7 @@ export default function App() {
     previousSoundboardUrls.current.forEach((url, id) => {
       if (activeUrls.get(id) !== url) {
         soundboardEngine.removeCustomFile(id);
-        URL.revokeObjectURL(url);
+        if (isBlobSchemeAudioUrl(url)) URL.revokeObjectURL(url);
       }
     });
     previousSoundboardUrls.current = activeUrls;
@@ -480,7 +482,7 @@ export default function App() {
   useEffect(() => () => {
     previousSoundboardUrls.current.forEach((url, id) => {
       soundboardEngine.removeCustomFile(id);
-      URL.revokeObjectURL(url);
+      if (isBlobSchemeAudioUrl(url)) URL.revokeObjectURL(url);
     });
     previousSoundboardUrls.current.clear();
   }, []);
@@ -2348,7 +2350,9 @@ export default function App() {
         await flushStudioPersistence();
         soundboardItems.forEach((item) => {
           soundboardEngine.removeCustomFile(item.id);
-          if (item.audioUrl) URL.revokeObjectURL(item.audioUrl);
+          if (item.audioUrl && isBlobSchemeAudioUrl(item.audioUrl)) {
+            URL.revokeObjectURL(item.audioUrl);
+          }
         });
         previousSoundboardUrls.current.clear();
         await tiktokLiveConnector.disconnect();
@@ -3049,9 +3053,10 @@ export default function App() {
               ttsConfig={ttsConfig}
               onUpdateTTSConfig={handleUpdateTTSConfig}
               soundboardItems={soundboardItems}
+              soundboardVolume={soundboardVolumeUnit}
               onSoundboardItemsChange={async (items) => {
-                setSoundboardItems(items);
                 await StorageService.saveSoundboard(items);
+                setSoundboardItems(items);
               }}
             />
           )}
