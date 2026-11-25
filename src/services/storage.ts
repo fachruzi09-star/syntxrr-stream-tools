@@ -631,7 +631,7 @@ function openDB(): Promise<IDBDatabase> {
     };
 
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error || new Error('Gagal membuka IndexedDB.'));
   });
 }
 
@@ -1566,13 +1566,7 @@ export const StorageService = {
   },
 
   async getSongRequestHistory(): Promise<SongRequestHistoryEntry[]> {
-    let db: IDBDatabase;
-    try {
-      db = await openDB();
-    } catch {
-      return [];
-    }
-
+    const db = await openDB();
     try {
       const stored = await new Promise<unknown>((resolve, reject) => {
         let settled = false;
@@ -1584,7 +1578,11 @@ export const StorageService = {
         const finishReject = (err: unknown) => {
           if (settled) return;
           settled = true;
-          reject(err);
+          reject(
+            err instanceof Error
+              ? err
+              : new Error(String(err || 'Gagal membaca riwayat Song Request dari IndexedDB.')),
+          );
         };
 
         const tx = db.transaction('store', 'readonly');
@@ -1609,8 +1607,6 @@ export const StorageService = {
           );
       });
       return sanitizeSongRequestHistoryEntries(stored);
-    } catch {
-      return [];
     } finally {
       try {
         db.close();

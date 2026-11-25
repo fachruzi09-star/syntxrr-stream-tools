@@ -6,6 +6,11 @@ import { join } from 'node:path';
 import {
   MAX_SONG_REQUEST_HISTORY,
   SongRequestEngine,
+  hydrateSongRequestHistoryWithGuard,
+  persistSongRequestHistoryIfReady,
+  sanitizeHistoryTrackSnapshot,
+  sanitizeReferenceUrl,
+  sanitizeSongRequestHistoryEntries,
   songRequestEngine,
   type SongRequestHistoryEntry,
   type SongRequestItem,
@@ -94,6 +99,8 @@ function flushMicrotasks(): Promise<void> {
 interface StagedIdbControls {
   idbData: Map<string, unknown>;
   setTxMode: (mode: 'commit' | 'abort_after_request' | 'tx_error') => void;
+  setReadMode: (mode: 'ok' | 'request_error' | 'tx_error' | 'tx_abort') => void;
+  setFailOpen: (fail: boolean) => void;
   setFailPut: (fail: boolean) => void;
   setOpenDbDelayMs: (ms: number) => void;
   getStats: () => {
@@ -113,6 +120,8 @@ function createStagedFakeIndexedDB(): StagedIdbControls {
   const originalIndexedDB = globalRecord.indexedDB;
   const idbData = new Map<string, unknown>();
   let txMode: 'commit' | 'abort_after_request' | 'tx_error' = 'commit';
+  let readMode: 'ok' | 'request_error' | 'tx_error' | 'tx_abort' = 'ok';
+  let failOpen = false;
   let failPut = false;
   let openDbDelayMs = 0;
   let openCount = 0;
@@ -132,6 +141,11 @@ function createStagedFakeIndexedDB(): StagedIdbControls {
       } = { onsuccess: null, onerror: null };
 
       const finishOpen = () => {
+        if (failOpen) {
+          openReq.error = new Error('Simulated openDB failure');
+          openReq.onerror?.();
+          return;
+        }
         openCount += 1;
         openReq.result = {
           objectStoreNames: { contains: () => true },
@@ -173,9 +187,30 @@ function createStagedFakeIndexedDB(): StagedIdbControls {
                       onerror: (() => void) | null;
                     } = { result: undefined, error: null, onsuccess: null, onerror: null };
                     queueMicrotask(() => {
+                      if (readMode === 'request_error') {
+                        req.error = new Error(`Simulated get request error for ${key}`);
+                        req.onerror?.();
+                        queueMicrotask(() => {
+                          txObj.error = req.error;
+                          txAbortCount += 1;
+                          txObj.onabort?.();
+                        });
+                        return;
+                      }
                       req.result = idbData.get(key) ?? null;
                       req.onsuccess?.();
                       queueMicrotask(() => {
+                        if (readMode === 'tx_abort') {
+                          txObj.error = new Error(`Simulated read tx abort for ${key}`);
+                          txAbortCount += 1;
+                          txObj.onabort?.();
+                          return;
+                        }
+                        if (readMode === 'tx_error') {
+                          txObj.error = new Error(`Simulated read tx error for ${key}`);
+                          txObj.onerror?.();
+                          return;
+                        }
                         txObj.oncomplete?.();
                       });
                     });
@@ -245,6 +280,12 @@ function createStagedFakeIndexedDB(): StagedIdbControls {
     idbData,
     setTxMode(mode) {
       txMode = mode;
+    },
+    setReadMode(mode) {
+      readMode = mode;
+    },
+    setFailOpen(fail) {
+      failOpen = fail;
     },
     setFailPut(fail) {
       failPut = fail;
@@ -687,6 +728,295 @@ async function runSongRequestHistoryTests(): Promise<void> {
         storageSource.includes('async getSongRequestHistory()') &&
         storageSource.includes('async saveSongRequestHistory('),
       '13e: storage.ts keeps DB_VERSION=3 and provides getSongRequestHistory / saveSongRequestHistory'
+    );
+
+    // 14. A2.10.3.3 URL Reference Sanitization (externalUrl & thumbnailUrl)
+    assertEqual(
+      sanitizeReferenceUrl('https://cdn.example.com/ref?token=secret123'),
+      undefined,
+      '14a: reference URL with token query param is rejected'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('https://cdn.example.com/thumb.jpg?signature=abc&expires=999'),
+      undefined,
+      '14b: reference URL with signature/expires query param is rejected'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('https://cdn.example.com/track?auth=bearer_x&X-Amz-Credential=abc'),
+      undefined,
+      '14c: reference URL with auth/x-amz query param is rejected'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('https://cdn.example.com/track?api_key=k123'),
+      undefined,
+      '14d: reference URL with api_key query param is rejected'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('https://user:pass@www.youtube.com/watch?v=yt_123'),
+      undefined,
+      '14e: reference URL with username/password is rejected'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('javascript:alert(1)'),
+      undefined,
+      '14f: non-HTTP/HTTPS reference URL is rejected'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('https://www.youtube.com/watch?v=yt_abc_123'),
+      'https://www.youtube.com/watch?v=yt_abc_123',
+      '14g: normal YouTube URL with v query param is preserved'
+    );
+    assertEqual(
+      sanitizeReferenceUrl('https://i.ytimg.com/vi/yt_abc_123/mqdefault.jpg'),
+      'https://i.ytimg.com/vi/yt_abc_123/mqdefault.jpg',
+      '14h: normal thumbnail URL is preserved'
+    );
+
+    const sanitizedSnapshotWithSensitiveRef = sanitizeHistoryTrackSnapshot({
+      id: 'yt_ref_test',
+      title: 'Ref Filter Song',
+      artist: 'YT Creator',
+      album: 'Session Vol 1',
+      requester: 'viewer_1',
+      durationSec: 190,
+      requestedAt: 1700000005000,
+      sourceType: 'youtube_metadata',
+      provider: 'youtube',
+      providerTrackId: 'yt_vid_777',
+      playable: false,
+      externalUrl: 'https://www.youtube.com/watch?v=yt_vid_777&token=leak',
+      thumbnailUrl: 'https://i.ytimg.com/vi/yt_vid_777/hqdefault.jpg?sig=leak_sig',
+    });
+    assertEqual(
+      sanitizedSnapshotWithSensitiveRef.externalUrl,
+      undefined,
+      '14i: sensitive externalUrl stripped from trackSnapshot'
+    );
+    assertEqual(
+      sanitizedSnapshotWithSensitiveRef.thumbnailUrl,
+      undefined,
+      '14j: sensitive thumbnailUrl stripped from trackSnapshot'
+    );
+    assertEqual(sanitizedSnapshotWithSensitiveRef.provider, 'youtube', '14k: provider preserved');
+    assertEqual(
+      sanitizedSnapshotWithSensitiveRef.providerTrackId,
+      'yt_vid_777',
+      '14l: providerTrackId preserved'
+    );
+    assertEqual(sanitizedSnapshotWithSensitiveRef.album, 'Session Vol 1', '14m: album preserved');
+
+    const [sanitizedHistoryEntry] = sanitizeSongRequestHistoryEntries([
+      {
+        id: 'sess_ref_clean',
+        sessionId: 'sess_ref_clean',
+        trackId: 'yt_clean_888',
+        title: 'Clean Ref Song',
+        artist: 'YT Channel',
+        provider: 'youtube',
+        providerTrackId: 'yt_clean_888',
+        sourceType: 'youtube_metadata',
+        durationSec: 210,
+        externalUrl: 'https://www.youtube.com/watch?v=yt_clean_888',
+        thumbnailUrl: 'https://i.ytimg.com/vi/yt_clean_888/mqdefault.jpg',
+        requester: 'viewer_2',
+        startedAt: 1700000006000,
+        updatedAt: 1700000006000,
+        timestamp: 1700000006000,
+        status: 'completed',
+        trackSnapshot: {
+          id: 'yt_clean_888',
+          title: 'Clean Ref Song',
+          artist: 'YT Channel',
+          requester: 'viewer_2',
+          durationSec: 210,
+          requestedAt: 1700000006000,
+          sourceType: 'youtube_metadata',
+          provider: 'youtube',
+          providerTrackId: 'yt_clean_888',
+          playable: false,
+          externalUrl: 'https://www.youtube.com/watch?v=yt_clean_888',
+          thumbnailUrl: 'https://i.ytimg.com/vi/yt_clean_888/mqdefault.jpg',
+        },
+      },
+    ]);
+    assertEqual(
+      sanitizedHistoryEntry.externalUrl,
+      'https://www.youtube.com/watch?v=yt_clean_888',
+      '14n: clean YouTube externalUrl preserved on history entry'
+    );
+    assertEqual(
+      sanitizedHistoryEntry.thumbnailUrl,
+      'https://i.ytimg.com/vi/yt_clean_888/mqdefault.jpg',
+      '14o: clean thumbnailUrl preserved on history entry'
+    );
+
+    // 15. A2.10.3.3 IndexedDB Read Failure Handling (vs valid empty read)
+    fakeIdb.idbData.delete('song_request_history');
+    fakeIdb.setFailOpen(false);
+    fakeIdb.setReadMode('ok');
+    const emptyReadResult = await StorageService.getSongRequestHistory();
+    assert(
+      Array.isArray(emptyReadResult) && emptyReadResult.length === 0,
+      '15a: valid empty IndexedDB read returns empty array'
+    );
+
+    fakeIdb.setFailOpen(true);
+    let openFailureRejected = false;
+    try {
+      await StorageService.getSongRequestHistory();
+    } catch {
+      openFailureRejected = true;
+    } finally {
+      fakeIdb.setFailOpen(false);
+    }
+    assert(openFailureRejected, '15b: openDB failure rejects instead of returning empty array');
+
+    fakeIdb.setReadMode('request_error');
+    let readRequestErrorRejected = false;
+    try {
+      await StorageService.getSongRequestHistory();
+    } catch {
+      readRequestErrorRejected = true;
+    } finally {
+      fakeIdb.setReadMode('ok');
+    }
+    assert(readRequestErrorRejected, '15c: read request error rejects instead of returning empty array');
+
+    fakeIdb.setReadMode('tx_abort');
+    let readAbortRejected = false;
+    try {
+      await StorageService.getSongRequestHistory();
+    } catch {
+      readAbortRejected = true;
+    } finally {
+      fakeIdb.setReadMode('ok');
+    }
+    assert(readAbortRejected, '15d: read transaction abort rejects instead of returning empty array');
+
+    fakeIdb.setReadMode('tx_error');
+    let readTxErrorRejected = false;
+    try {
+      await StorageService.getSongRequestHistory();
+    } catch {
+      readTxErrorRejected = true;
+    } finally {
+      fakeIdb.setReadMode('ok');
+    }
+    assert(readTxErrorRejected, '15e: read transaction error rejects instead of returning empty array');
+
+    const statsAfterReadFailures = fakeIdb.getStats();
+    assertEqual(
+      statsAfterReadFailures.closeCount,
+      statsAfterReadFailures.openCount,
+      '15f: IndexedDB connection always closed across read successes and failures'
+    );
+
+    // 16. A2.10.3.3 Startup Hydration Guard & Non-Overwrite Guarantee
+    const existingStoredEntry: SongRequestHistoryEntry = {
+      ...sanitizedHistoryEntry,
+      id: 'sess_existing_persisted',
+      sessionId: 'sess_existing_persisted',
+      title: 'Existing Persisted Song',
+    };
+    await StorageService.saveSongRequestHistory([existingStoredEntry]);
+    const persistedBeforeFailedHydration = JSON.stringify(fakeIdb.idbData.get('song_request_history'));
+
+    const failedEngine = new SongRequestEngine();
+    try {
+      const syncReadyRef = { current: false };
+      const lastPersistedJsonRef = { current: '' };
+      fakeIdb.setReadMode('tx_abort');
+      const failedHydration = await hydrateSongRequestHistoryWithGuard({
+        readHistory: () => StorageService.getSongRequestHistory(),
+        hydrateHistory: (entries) => failedEngine.hydrateHistory(entries),
+        syncReadyRef,
+        lastPersistedJsonRef,
+      });
+      fakeIdb.setReadMode('ok');
+
+      assertEqual(failedHydration.hydrated, false, '16a: failed hydration reports hydrated=false');
+      assertEqual(syncReadyRef.current, false, '16b: syncReadyRef remains false on read failure');
+      assertEqual(
+        lastPersistedJsonRef.current,
+        '',
+        '16c: lastPersistedJsonRef is not updated on read failure'
+      );
+
+      // Attempted sync with empty history while syncReadyRef is false MUST NOT overwrite old IDB history
+      const blockedWriteResult = await persistSongRequestHistoryIfReady({
+        history: failedEngine.getState().history,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assertEqual(blockedWriteResult, null, '16d: persistence sync blocked while hydration failed');
+      assertEqual(
+        JSON.stringify(fakeIdb.idbData.get('song_request_history')),
+        persistedBeforeFailedHydration,
+        '16e: existing IndexedDB history is NOT overwritten by empty snapshot after read failure'
+      );
+    } finally {
+      failedEngine.destroy();
+    }
+
+    // Successful hydration with empty array MUST enable persistence sync normally
+    fakeIdb.idbData.delete('song_request_history');
+    const emptyEngine = new SongRequestEngine();
+    try {
+      const syncReadyRef = { current: false };
+      const lastPersistedJsonRef = { current: '' };
+      const emptyHydration = await hydrateSongRequestHistoryWithGuard({
+        readHistory: () => StorageService.getSongRequestHistory(),
+        hydrateHistory: (entries) => emptyEngine.hydrateHistory(entries),
+        syncReadyRef,
+        lastPersistedJsonRef,
+      });
+      assertEqual(emptyHydration.hydrated, true, '16f: empty IDB read hydrates successfully');
+      assertEqual(syncReadyRef.current, true, '16g: syncReadyRef enabled after valid empty read');
+      assertEqual(lastPersistedJsonRef.current, '[]', '16h: lastPersistedJsonRef initialized to []');
+
+      // Playing a track afterward persists normally through write-chain
+      await emptyEngine.playItem({
+        id: 'post_empty_hydrate_track',
+        title: 'After Empty Hydration',
+        artist: 'Stream DJ',
+        requester: 'viewer_live',
+        durationSec: 180,
+        requestedAt: Date.now(),
+        sourceType: 'remote_url',
+        provider: 'authorized_stream',
+        playable: true,
+        audioUrl: 'https://cdn.example.com/audio/after_empty.mp3',
+        platform: 'Stream',
+      });
+      const persistedAfterPlay = await persistSongRequestHistoryIfReady({
+        history: emptyEngine.getState().history,
+        syncReadyRef,
+        lastPersistedJsonRef,
+        saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      });
+      assertEqual(persistedAfterPlay, true, '16i: persistence succeeds after valid empty hydration');
+      const storedAfterEmptyHydration = await StorageService.getSongRequestHistory();
+      assertEqual(storedAfterEmptyHydration.length, 1, '16j: new session persisted after empty hydration');
+      assertEqual(
+        storedAfterEmptyHydration[0].title,
+        'After Empty Hydration',
+        '16k: persisted session title matches'
+      );
+    } finally {
+      emptyEngine.destroy();
+    }
+
+    // Structural verification: getSongRequestHistory is separated from startup Promise.all in App.tsx
+    const promiseAllBlockMatch = appSource.match(/Promise\.all\(\[[\s\S]*?\]\);/);
+    assert(
+      Boolean(promiseAllBlockMatch) && !promiseAllBlockMatch![0].includes('getSongRequestHistory'),
+      '16l: App.tsx separates StorageService.getSongRequestHistory() from main startup Promise.all'
+    );
+    assert(
+      appSource.includes('hydrateSongRequestHistoryWithGuard') &&
+        appSource.includes('persistSongRequestHistoryIfReady'),
+      '16m: App.tsx uses guarded startup hydration and guarded persistence sync'
     );
   } finally {
     fakeIdb.restore();

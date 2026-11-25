@@ -243,7 +243,7 @@ export function isAuthorizedPlaybackAudioUrl(url: unknown): url is string {
   }
 }
 
-function sanitizeReferenceUrl(url: unknown): string | undefined {
+export function sanitizeReferenceUrl(url: unknown): string | undefined {
   if (typeof url !== 'string') return undefined;
   const trimmed = url.trim();
   if (!trimmed || /^(blob|data):/i.test(trimmed)) return undefined;
@@ -251,6 +251,11 @@ function sanitizeReferenceUrl(url: unknown): string | undefined {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined;
     if (parsed.username || parsed.password) return undefined;
+    for (const [paramKey] of parsed.searchParams.entries()) {
+      if (SENSITIVE_URL_PARAM_PATTERN.test(paramKey)) {
+        return undefined;
+      }
+    }
     return parsed.toString();
   } catch {
     return undefined;
@@ -271,6 +276,8 @@ export function sanitizeHistoryTrackSnapshot(
     sourceType === 'remote_url' && item.playable === true && isPersistentAuthorizedAudioUrl(item.audioUrl)
       ? item.audioUrl.trim()
       : undefined;
+  const safeExternalUrl = sanitizeReferenceUrl(item.externalUrl);
+  const safeThumbnailUrl = sanitizeReferenceUrl(item.thumbnailUrl);
 
   return {
     id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `sr_hist_item_${Date.now()}`,
@@ -293,8 +300,8 @@ export function sanitizeHistoryTrackSnapshot(
       : {}),
     playable: sourceType === 'remote_url' && Boolean(safeAudioUrl) && item.playable === true,
     ...(safeAudioUrl ? { audioUrl: safeAudioUrl } : {}),
-    ...(sanitizeReferenceUrl(item.externalUrl) ? { externalUrl: sanitizeReferenceUrl(item.externalUrl) } : {}),
-    ...(sanitizeReferenceUrl(item.thumbnailUrl) ? { thumbnailUrl: sanitizeReferenceUrl(item.thumbnailUrl) } : {}),
+    ...(safeExternalUrl ? { externalUrl: safeExternalUrl } : {}),
+    ...(safeThumbnailUrl ? { thumbnailUrl: safeThumbnailUrl } : {}),
     ...(typeof item.mimeType === 'string' && item.mimeType.trim() ? { mimeType: item.mimeType.trim() } : {}),
     ...(item.platform ? { platform: item.platform } : {}),
     ...(typeof item.notes === 'string' && item.notes.trim() ? { notes: item.notes.trim() } : {}),
@@ -1704,6 +1711,42 @@ export class SongRequestEngine {
       }
     });
   }
+}
+
+export async function hydrateSongRequestHistoryWithGuard(params: {
+  readHistory: () => Promise<SongRequestHistoryEntry[]>;
+  hydrateHistory: (entries: SongRequestHistoryEntry[]) => SongRequestHistoryEntry[];
+  syncReadyRef: { current: boolean };
+  lastPersistedJsonRef: { current: string };
+}): Promise<{ hydrated: boolean; entries: SongRequestHistoryEntry[]; error?: unknown }> {
+  try {
+    const savedHistory = await params.readHistory();
+    const hydratedEntries = params.hydrateHistory(savedHistory);
+    params.lastPersistedJsonRef.current = JSON.stringify(hydratedEntries);
+    params.syncReadyRef.current = true;
+    return { hydrated: true, entries: hydratedEntries };
+  } catch (error) {
+    return { hydrated: false, entries: [], error };
+  }
+}
+
+export function persistSongRequestHistoryIfReady(params: {
+  history: SongRequestHistoryEntry[];
+  syncReadyRef: { current: boolean };
+  lastPersistedJsonRef: { current: string };
+  saveHistory: (history: SongRequestHistoryEntry[]) => Promise<void>;
+  onError?: (err: unknown) => void;
+}): Promise<boolean> | null {
+  if (!params.syncReadyRef.current) return null;
+  const serialized = JSON.stringify(params.history);
+  if (serialized === params.lastPersistedJsonRef.current) return null;
+  params.lastPersistedJsonRef.current = serialized;
+  return params.saveHistory(params.history)
+    .then(() => true)
+    .catch((err) => {
+      params.onError?.(err);
+      return false;
+    });
 }
 
 export const songRequestEngine = new SongRequestEngine();

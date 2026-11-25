@@ -57,6 +57,8 @@ import { ttsService, DEFAULT_TTS_CONFIG } from './services/ttsService';
 import { streamEventBus } from './services/eventBus';
 import {
   songRequestEngine,
+  hydrateSongRequestHistoryWithGuard,
+  persistSongRequestHistoryIfReady,
   type SongRequestItem,
   type SongRequestState,
 } from './services/songRequestEngine';
@@ -343,7 +345,6 @@ export default function App() {
           savedAlertSettings,
           savedAlertHistory,
           savedTikTokAccount,
-          savedSongRequestHistory,
         ] = await Promise.all([
           StorageService.getSettings(),
           StorageService.getPresets(),
@@ -361,7 +362,6 @@ export default function App() {
           StorageService.getAlertSettings(),
           StorageService.getAlertHistory(),
           StorageService.getTikTokAccount(),
-          StorageService.getSongRequestHistory(),
         ]);
 
         // The dedicated canvas record is the same source previously used by Studio on load.
@@ -443,9 +443,15 @@ export default function App() {
           spotifyAccessToken: savedSettings.spotifyAccessToken || '',
           volumeUnit: initialVolumeUnit,
         });
-        const hydratedSrHistory = songRequestEngine.hydrateHistory(savedSongRequestHistory);
-        lastPersistedSrHistoryJsonRef.current = JSON.stringify(hydratedSrHistory);
-        srHistorySyncReadyRef.current = true;
+        const srHydration = await hydrateSongRequestHistoryWithGuard({
+          readHistory: () => StorageService.getSongRequestHistory(),
+          hydrateHistory: (entries) => songRequestEngine.hydrateHistory(entries),
+          syncReadyRef: srHistorySyncReadyRef,
+          lastPersistedJsonRef: lastPersistedSrHistoryJsonRef,
+        });
+        if (!srHydration.hydrated) {
+          console.error('Error loading Song Request history from IndexedDB:', srHydration.error);
+        }
         soundboardEngine.setVolume(normalizeUnitVolume(savedSettings.soundboardVolume, 0.85));
 
         // Apply saved theme immediately on startup
@@ -499,14 +505,17 @@ export default function App() {
     return songRequestEngine.subscribe(setSrState);
   }, []);
 
-  // Persist Song Request history sequentially only AFTER startup hydration completes
+  // Persist Song Request history sequentially only AFTER startup hydration succeeds
   useEffect(() => {
     if (!srHistorySyncReadyRef.current) return;
-    const serialized = JSON.stringify(srState.history);
-    if (serialized === lastPersistedSrHistoryJsonRef.current) return;
-    lastPersistedSrHistoryJsonRef.current = serialized;
-    void StorageService.saveSongRequestHistory(srState.history).catch((err) => {
-      console.error('Failed to persist Song Request history:', err);
+    void persistSongRequestHistoryIfReady({
+      history: srState.history,
+      syncReadyRef: srHistorySyncReadyRef,
+      lastPersistedJsonRef: lastPersistedSrHistoryJsonRef,
+      saveHistory: (history) => StorageService.saveSongRequestHistory(history),
+      onError: (err) => {
+        console.error('Failed to persist Song Request history:', err);
+      },
     });
   }, [srState.history]);
 
