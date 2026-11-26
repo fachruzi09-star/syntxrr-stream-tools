@@ -12,6 +12,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,11 +49,23 @@ public final class TikTokRoomResolver {
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
+    private static final String CLIENT_BROWSER_NAME = "Mozilla";
+    private static final String CLIENT_BROWSER_PLATFORM = "Linux aarch64";
+    private static final String CLIENT_BROWSER_VERSION =
+            "5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+    private static final String CLIENT_DEVICE_PLATFORM = "web_mobile";
+    private static final String CLIENT_OS = "android";
+    private static final String CLIENT_REFERER = "https://www.tiktok.com/";
+
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     private static final int READ_TIMEOUT_MS = 12_000;
+    private static final int MAX_REDIRECTS = 4;
     private static final int MAX_BODY_BYTES = 2 * 1024 * 1024;
     private static final int MAX_HTML_BYTES = 3 * 1024 * 1024;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9._]{1,64}$");
+    private static final Pattern DEVICE_ID_PATTERN = Pattern.compile("^[1-9][0-9]{18}$");
     private static final Pattern SIGI_STATE_PATTERN = Pattern.compile(
             "<script[^>]*id=[\"']SIGI_STATE[\"'][^>]*>(.*?)</script>",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE
@@ -142,6 +155,11 @@ public final class TikTokRoomResolver {
         }
     }
 
+    interface LiveHtmlFallback {
+        @Nullable
+        Result resolve(@NonNull String normalizedUsername, @NonNull Map<String, String> cookies);
+    }
+
     private TikTokRoomResolver() {}
 
     /**
@@ -159,6 +177,121 @@ public final class TikTokRoomResolver {
             return "";
         }
         return cleaned;
+    }
+
+    /**
+     * Menghasilkan device_id numerik acak (19 digit desimal) per percobaan sesi
+     * menggunakan SecureRandom tanpa nilai tetap.
+     */
+    @NonNull
+    public static String generateRandomDeviceId() {
+        StringBuilder sb = new StringBuilder(19);
+        sb.append((char) ('1' + SECURE_RANDOM.nextInt(9)));
+        for (int i = 1; i < 19; i++) {
+            sb.append((char) ('0' + SECURE_RANDOM.nextInt(10)));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Membangun map parameter web client TikTok yang konsisten dengan MOBILE_USER_AGENT
+     * untuk digunakan oleh request API room lookup maupun halaman LIVE HTML fallback.
+     */
+    @NonNull
+    public static Map<String, String> buildWebClientParameters(
+            @Nullable String deviceId,
+            @Nullable String normalizedUsernameForApi
+    ) {
+        String effectiveDeviceId = (deviceId != null && DEVICE_ID_PATTERN.matcher(deviceId.trim()).matches())
+                ? deviceId.trim()
+                : generateRandomDeviceId();
+
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("aid", "1988");
+        params.put("app_language", "en");
+        params.put("app_name", "tiktok_web");
+        params.put("browser_language", "en-US");
+        params.put("browser_name", CLIENT_BROWSER_NAME);
+        params.put("browser_online", "true");
+        params.put("browser_platform", CLIENT_BROWSER_PLATFORM);
+        params.put("browser_version", CLIENT_BROWSER_VERSION);
+        params.put("cookie_enabled", "true");
+        params.put("device_id", effectiveDeviceId);
+        params.put("device_platform", CLIENT_DEVICE_PLATFORM);
+        params.put("focus_state", "true");
+        params.put("from_page", "user");
+        params.put("history_len", "2");
+        params.put("is_fullscreen", "false");
+        params.put("is_page_visible", "true");
+        params.put("os", CLIENT_OS);
+        params.put("priority_region", "US");
+        params.put("referer", CLIENT_REFERER);
+        params.put("region", "US");
+        params.put("root_referer", CLIENT_REFERER);
+        params.put("screen_height", "800");
+        params.put("screen_width", "360");
+        if (normalizedUsernameForApi != null && !normalizedUsernameForApi.isEmpty()) {
+            params.put("sourceType", "54");
+        }
+        params.put("tz_name", "UTC");
+        if (normalizedUsernameForApi != null && !normalizedUsernameForApi.isEmpty()) {
+            params.put("uniqueId", normalizedUsernameForApi);
+        }
+        params.put("webcast_language", "en");
+        return Collections.unmodifiableMap(params);
+    }
+
+    @NonNull
+    public static String buildRoomLookupUrl(@NonNull String rawUsername) {
+        return buildRoomLookupUrl(rawUsername, null);
+    }
+
+    @NonNull
+    public static String buildRoomLookupUrl(@NonNull String rawUsername, @Nullable String deviceId) {
+        String normalized = normalizeUsername(rawUsername);
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("Username TikTok tidak valid atau kosong.");
+        }
+        Map<String, String> params = buildWebClientParameters(deviceId, normalized);
+        return ROOM_LOOKUP_ENDPOINT + "?" + encodeQueryParameters(params);
+    }
+
+    @NonNull
+    public static String buildLivePageUrl(@NonNull String rawUsername) {
+        return buildLivePageUrl(rawUsername, null);
+    }
+
+    @NonNull
+    public static String buildLivePageUrl(@NonNull String rawUsername, @Nullable String deviceId) {
+        String normalized = normalizeUsername(rawUsername);
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("Username TikTok tidak valid atau kosong.");
+        }
+        String encodedUser = urlEncodeRfc3986(normalized);
+        Map<String, String> params = buildWebClientParameters(deviceId, null);
+        return LIVE_PAGE_BASE_URL + encodedUser + "/live?" + encodeQueryParameters(params);
+    }
+
+    @NonNull
+    private static String encodeQueryParameters(@NonNull Map<String, String> params) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) continue;
+            if (sb.length() > 0) sb.append('&');
+            sb.append(urlEncodeRfc3986(entry.getKey()))
+                    .append('=')
+                    .append(urlEncodeRfc3986(entry.getValue()));
+        }
+        return sb.toString();
+    }
+
+    @NonNull
+    private static String urlEncodeRfc3986(@NonNull String value) {
+        try {
+            return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20");
+        } catch (Exception e) {
+            return value;
+        }
     }
 
     /**
@@ -216,10 +349,86 @@ public final class TikTokRoomResolver {
         conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9,id;q=0.8");
         conn.setRequestProperty("User-Agent", MOBILE_USER_AGENT);
         conn.setRequestProperty("Origin", "https://www.tiktok.com");
-        conn.setRequestProperty("Referer", "https://www.tiktok.com/");
+        conn.setRequestProperty("Referer", CLIENT_REFERER);
         String cookieHeader = formatCookieHeader(cookies);
         if (!cookieHeader.isEmpty()) {
             conn.setRequestProperty("Cookie", cookieHeader);
+        }
+    }
+
+    private static final class HttpTextResponse {
+        final int httpStatus;
+        @NonNull
+        final String body;
+
+        HttpTextResponse(int httpStatus, @NonNull String body) {
+            this.httpStatus = httpStatus;
+            this.body = body;
+        }
+    }
+
+    @NonNull
+    private static HttpTextResponse executeGetWithCookieCapture(
+            @NonNull String initialUrl,
+            @NonNull String acceptHeader,
+            @NonNull Map<String, String> cookies,
+            int maxBytes
+    ) throws IOException {
+        String currentUrl = initialUrl;
+        for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(currentUrl);
+                if (!"https".equalsIgnoreCase(url.getProtocol())) {
+                    throw new IOException("Protokol HTTP tidak didukung; hanya HTTPS yang diizinkan.");
+                }
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setInstanceFollowRedirects(false);
+                applyBrowserHeaders(conn, acceptHeader, cookies);
+
+                int httpCode = conn.getResponseCode();
+                cookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
+
+                if (isRedirectStatus(httpCode) && redirect < MAX_REDIRECTS) {
+                    String location = conn.getHeaderField("Location");
+                    drainStreamQuietly(httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream());
+                    if (location == null || location.trim().isEmpty()) {
+                        return new HttpTextResponse(httpCode, "");
+                    }
+                    URL nextUrl = new URL(url, location.trim());
+                    if (!"https".equalsIgnoreCase(nextUrl.getProtocol())) {
+                        return new HttpTextResponse(httpCode, "");
+                    }
+                    currentUrl = nextUrl.toString();
+                    continue;
+                }
+
+                InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                String body = stream != null ? readBoundedUtf8(stream, maxBytes) : "";
+                return new HttpTextResponse(httpCode, body);
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }
+        throw new IOException("Terlalu banyak pengalihan HTTP.");
+    }
+
+    private static boolean isRedirectStatus(int httpCode) {
+        return httpCode == 301 || httpCode == 302 || httpCode == 303 || httpCode == 307 || httpCode == 308;
+    }
+
+    private static void drainStreamQuietly(@Nullable InputStream stream) {
+        if (stream == null) return;
+        try {
+            readBoundedUtf8(stream, 16 * 1024);
+            stream.close();
+        } catch (Exception ignored) {
+            // Ignore drain failure on redirect responses.
         }
     }
 
@@ -231,25 +440,15 @@ public final class TikTokRoomResolver {
     @NonNull
     private static Map<String, String> fetchAnonymousDeviceCookies() {
         Map<String, String> cookies = new LinkedHashMap<>();
-        HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL("https://www.tiktok.com/").openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setInstanceFollowRedirects(true);
-            applyBrowserHeaders(conn, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", null);
-            int httpCode = conn.getResponseCode();
-            cookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
-            InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            if (stream != null) {
-                readBoundedUtf8(stream, 64 * 1024);
-                stream.close();
-            }
+            executeGetWithCookieCapture(
+                    "https://www.tiktok.com/",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    cookies,
+                    64 * 1024
+            );
         } catch (Exception ignored) {
             // Cookie warm-up is opportunistic; room resolution still proceeds without it.
-        } finally {
-            if (conn != null) conn.disconnect();
         }
         return cookies;
     }
@@ -270,28 +469,26 @@ public final class TikTokRoomResolver {
             );
         }
 
+        String sessionDeviceId = generateRandomDeviceId();
         Map<String, String> cookies = new LinkedHashMap<>(fetchAnonymousDeviceCookies());
-        HttpURLConnection conn = null;
-        try {
-            String encodedUser = URLEncoder.encode(normalized, StandardCharsets.UTF_8.name());
-            String urlStr = ROOM_LOOKUP_ENDPOINT + "?uniqueId=" + encodedUser + "&sourceType=54";
-            URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setInstanceFollowRedirects(true);
-            applyBrowserHeaders(conn, "application/json, text/plain, */*", cookies);
+        LiveHtmlFallback htmlFallbackRunner = (user, cookieJar) ->
+                resolveViaLiveHtmlPage(user, cookieJar, sessionDeviceId);
 
-            int httpCode = conn.getResponseCode();
-            cookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
-            InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String body = stream != null ? readBoundedUtf8(stream, MAX_BODY_BYTES) : "";
+        try {
+            String urlStr = buildRoomLookupUrl(normalized, sessionDeviceId);
+            HttpTextResponse response = executeGetWithCookieCapture(
+                    urlStr,
+                    "application/json, text/plain, */*",
+                    cookies,
+                    MAX_BODY_BYTES
+            );
+            int httpCode = response.httpStatus;
+            String body = response.body;
 
             if (httpCode == 404) {
                 // Do not classify from the API route alone: TikTok edge routes can be
                 // unavailable independently of the public profile/LIVE page.
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
                 if (htmlFallback != null) return htmlFallback;
                 return new Result(
                         Status.ROOM_UNREADABLE,
@@ -306,7 +503,7 @@ public final class TikTokRoomResolver {
             }
 
             if (httpCode == 401 || httpCode == 403 || httpCode == 429) {
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
                 if (htmlFallback != null) {
                     return htmlFallback;
                 }
@@ -338,9 +535,9 @@ public final class TikTokRoomResolver {
                 );
             }
 
-            String trimmed = body != null ? body.trim() : "";
+            String trimmed = body.trim();
             if (trimmed.isEmpty() || !trimmed.startsWith("{")) {
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
                 if (htmlFallback != null) {
                     return htmlFallback;
                 }
@@ -356,15 +553,60 @@ public final class TikTokRoomResolver {
                 );
             }
 
-            JSONObject root = new JSONObject(trimmed);
-            int apiStatus = root.has("statusCode")
-                    ? root.optInt("statusCode", 0)
-                    : root.optInt("status_code", 0);
+            return evaluateApiJsonResponse(normalized, trimmed, httpCode, cookies, htmlFallbackRunner);
+        } catch (IOException e) {
+            return new Result(
+                    Status.NETWORK_ERROR,
+                    normalized,
+                    "",
+                    "",
+                    null,
+                    0,
+                    "Gangguan jaringan saat resolve room TikTok: " + safeErrorMessage(e),
+                    cookies
+            );
+        } catch (Exception e) {
+            return new Result(
+                    Status.ROOM_UNREADABLE,
+                    normalized,
+                    "",
+                    "",
+                    null,
+                    0,
+                    "Gagal membaca respons room TikTok: " + safeErrorMessage(e),
+                    cookies
+            );
+        }
+    }
+
+    @Nullable
+    static Integer extractApiStatusCode(@NonNull JSONObject root) {
+        if (root.has("statusCode") && !root.isNull("statusCode")) {
+            return root.optInt("statusCode");
+        }
+        if (root.has("status_code") && !root.isNull("status_code")) {
+            return root.optInt("status_code");
+        }
+        return null;
+    }
+
+    @NonNull
+    static Result evaluateApiJsonResponse(
+            @NonNull String normalized,
+            @NonNull String jsonBody,
+            int httpCode,
+            @NonNull Map<String, String> cookies,
+            @NonNull LiveHtmlFallback htmlFallbackRunner
+    ) {
+        try {
+            JSONObject root = new JSONObject(jsonBody);
+            Integer apiStatus = extractApiStatusCode(root);
             JSONObject data = root.optJSONObject("data");
             JSONObject user = data != null ? data.optJSONObject("user") : null;
             JSONObject liveRoom = data != null ? data.optJSONObject("liveRoom") : null;
 
-            if (data == null || (user == null && liveRoom == null)) {
+            // HTTP 200 tidak berarti sukses jika body API membawa statusCode non-nol.
+            if (apiStatus != null && apiStatus != 0) {
                 String msgLower = root.optString("message", "").toLowerCase(Locale.US);
                 if (apiStatus == 10202 || msgLower.contains("not found") || msgLower.contains("doesn't exist")) {
                     return new Result(
@@ -378,8 +620,8 @@ public final class TikTokRoomResolver {
                             cookies
                     );
                 }
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
-                if (htmlFallback != null) {
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
+                if (htmlFallback != null && htmlFallback.status != Status.ROOM_UNREADABLE) {
                     return htmlFallback;
                 }
                 return new Result(
@@ -389,7 +631,39 @@ public final class TikTokRoomResolver {
                         "",
                         null,
                         httpCode,
-                        "Data room untuk @" + normalized + " tidak dapat dibaca (statusCode=" + apiStatus + ").",
+                        "API room TikTok mengembalikan statusCode=" + apiStatus
+                                + " untuk @" + normalized + "; halaman LIVE publik belum dapat memastikan room aktif.",
+                        cookies
+                );
+            }
+
+            if (data == null || (user == null && liveRoom == null)) {
+                String msgLower = root.optString("message", "").toLowerCase(Locale.US);
+                if (msgLower.contains("not found") || msgLower.contains("doesn't exist")) {
+                    return new Result(
+                            Status.ACCOUNT_NOT_FOUND,
+                            normalized,
+                            "",
+                            "",
+                            null,
+                            httpCode,
+                            "Akun @" + normalized + " tidak ditemukan.",
+                            cookies
+                    );
+                }
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
+                if (htmlFallback != null && htmlFallback.status != Status.ROOM_UNREADABLE) {
+                    return htmlFallback;
+                }
+                return new Result(
+                        Status.ROOM_UNREADABLE,
+                        normalized,
+                        "",
+                        "",
+                        null,
+                        httpCode,
+                        "Data room untuk @" + normalized + " tidak dapat dibaca (statusCode="
+                                + (apiStatus != null ? apiStatus : 0) + ").",
                         cookies
                 );
             }
@@ -409,7 +683,7 @@ public final class TikTokRoomResolver {
             if (roomId.isEmpty() || "0".equals(roomId)) {
                 // api-live can return a valid user object while its liveRoom payload is stale or
                 // incomplete. Check the public LIVE page before deciding the room state.
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
                 if (htmlFallback != null && htmlFallback.status == Status.RESOLVED_LIVE) {
                     return htmlFallback;
                 }
@@ -438,7 +712,7 @@ public final class TikTokRoomResolver {
             }
 
             if (liveRoomStatus != null && liveRoomStatus == 4) {
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
                 if (htmlFallback != null && htmlFallback.status == Status.RESOLVED_LIVE) {
                     return htmlFallback;
                 }
@@ -457,7 +731,7 @@ public final class TikTokRoomResolver {
             // Status yang tidak dikenal tidak boleh disamakan dengan OFFLINE. Coba bukti
             // independen dari halaman LIVE publik; jika tetap tidak jelas, laporkan unreadable.
             if (liveRoomStatus != null && liveRoomStatus != 2) {
-                Result htmlFallback = resolveViaLiveHtmlPage(normalized, cookies);
+                Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
                 if (htmlFallback != null && htmlFallback.status == Status.RESOLVED_LIVE) {
                     return htmlFallback;
                 }
@@ -483,57 +757,44 @@ public final class TikTokRoomResolver {
                     "Room LIVE ditemukan untuk @" + normalized + " (room_id=" + roomId + ").",
                     cookies
             );
-        } catch (IOException e) {
-            return new Result(
-                    Status.NETWORK_ERROR,
-                    normalized,
-                    "",
-                    "",
-                    null,
-                    0,
-                    "Gangguan jaringan saat resolve room TikTok: " + safeErrorMessage(e),
-                    cookies
-            );
         } catch (Exception e) {
+            Result htmlFallback = htmlFallbackRunner.resolve(normalized, cookies);
+            if (htmlFallback != null && htmlFallback.status != Status.ROOM_UNREADABLE) {
+                return htmlFallback;
+            }
             return new Result(
                     Status.ROOM_UNREADABLE,
                     normalized,
                     "",
                     "",
                     null,
-                    0,
-                    "Gagal membaca respons room TikTok: " + safeErrorMessage(e),
+                    httpCode,
+                    "Gagal mem-parsing respons JSON room TikTok.",
                     cookies
             );
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
         }
     }
 
     /**
      * Cadangan resolusi halaman publik https://www.tiktok.com/@<username>/live apabila
-     * endpoint JSON api-live/user/room/ dibatasi (401/403/429) atau mengembalikan respons non-JSON.
+     * endpoint JSON api-live/user/room/ dibatasi (401/403/429), mengembalikan statusCode error,
+     * atau mengembalikan respons non-JSON.
      */
     @Nullable
     private static Result resolveViaLiveHtmlPage(
             @NonNull String normalized,
-            @NonNull Map<String, String> cookies
+            @NonNull Map<String, String> cookies,
+            @NonNull String sessionDeviceId
     ) {
-        HttpURLConnection conn = null;
         try {
-            String encodedUser = URLEncoder.encode(normalized, StandardCharsets.UTF_8.name());
-            URL url = new URL(LIVE_PAGE_BASE_URL + encodedUser + "/live");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setInstanceFollowRedirects(true);
-            applyBrowserHeaders(conn, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", cookies);
-
-            int httpCode = conn.getResponseCode();
-            cookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
+            String urlStr = buildLivePageUrl(normalized, sessionDeviceId);
+            HttpTextResponse response = executeGetWithCookieCapture(
+                    urlStr,
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    cookies,
+                    MAX_HTML_BYTES
+            );
+            int httpCode = response.httpStatus;
             if (httpCode == 404) {
                 return new Result(
                         Status.ACCOUNT_NOT_FOUND,
@@ -546,76 +807,80 @@ public final class TikTokRoomResolver {
                         cookies
                 );
             }
-            if (httpCode < 200 || httpCode >= 300) {
+            if (httpCode < 200 || httpCode >= 300 || response.body.isEmpty()) {
                 return null;
             }
 
-            InputStream stream = conn.getInputStream();
-            String html = stream != null ? readBoundedUtf8(stream, MAX_HTML_BYTES) : "";
-            if (html.isEmpty()) {
-                return null;
-            }
-
-            // 1. Coba parse SIGI_STATE JSON
-            Matcher sigiMatcher = SIGI_STATE_PATTERN.matcher(html);
-            if (sigiMatcher.find()) {
-                String jsonRaw = sigiMatcher.group(1);
-                if (jsonRaw != null && !jsonRaw.trim().isEmpty()) {
-                    Result parsed = parseSigiOrUniversalJson(normalized, jsonRaw.trim(), httpCode, cookies);
-                    if (parsed != null && parsed.status != Status.ROOM_UNREADABLE) {
-                        return parsed;
-                    }
-                }
-            }
-
-            // 2. Coba parse __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON
-            Matcher univMatcher = UNIVERSAL_DATA_PATTERN.matcher(html);
-            if (univMatcher.find()) {
-                String jsonRaw = univMatcher.group(1);
-                if (jsonRaw != null && !jsonRaw.trim().isEmpty()) {
-                    Result parsed = parseSigiOrUniversalJson(normalized, jsonRaw.trim(), httpCode, cookies);
-                    if (parsed != null && parsed.status != Status.ROOM_UNREADABLE) {
-                        return parsed;
-                    }
-                }
-            }
-
-            // 3. Cari roomId di dalam blok liveRoomUserInfo / liveRoom
-            int liveAnchor = html.indexOf("liveRoomUserInfo");
-            if (liveAnchor < 0) liveAnchor = html.indexOf("liveRoom");
-            if (liveAnchor >= 0) {
-                int end = Math.min(html.length(), liveAnchor + 4096);
-                String slice = html.substring(liveAnchor, end);
-                Matcher rm = ROOM_ID_PATTERN.matcher(slice);
-                if (rm.find()) {
-                    String foundRoomId = firstNonEmptyRoomId(rm.group(1));
-                    if (!foundRoomId.isEmpty()) {
-                        return new Result(
-                                Status.RESOLVED_LIVE,
-                                normalized,
-                                foundRoomId,
-                                "",
-                                null,
-                                httpCode,
-                                "Room LIVE ditemukan via halaman publik @" + normalized + " (room_id=" + foundRoomId + ").",
-                                cookies
-                        );
-                    }
-                }
-            }
-
-            return null;
+            return parseLiveHtmlResponse(normalized, response.body, httpCode, cookies);
         } catch (Exception ignored) {
             return null;
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
         }
     }
 
     @Nullable
-    private static Result parseSigiOrUniversalJson(
+    static Result parseLiveHtmlResponse(
+            @NonNull String normalized,
+            @NonNull String html,
+            int httpCode,
+            @NonNull Map<String, String> cookies
+    ) {
+        if (html.isEmpty()) {
+            return null;
+        }
+
+        // 1. Coba parse SIGI_STATE JSON
+        Matcher sigiMatcher = SIGI_STATE_PATTERN.matcher(html);
+        if (sigiMatcher.find()) {
+            String jsonRaw = sigiMatcher.group(1);
+            if (jsonRaw != null && !jsonRaw.trim().isEmpty()) {
+                Result parsed = parseSigiOrUniversalJson(normalized, jsonRaw.trim(), httpCode, cookies);
+                if (parsed != null && parsed.status != Status.ROOM_UNREADABLE) {
+                    return parsed;
+                }
+            }
+        }
+
+        // 2. Coba parse __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON
+        Matcher univMatcher = UNIVERSAL_DATA_PATTERN.matcher(html);
+        if (univMatcher.find()) {
+            String jsonRaw = univMatcher.group(1);
+            if (jsonRaw != null && !jsonRaw.trim().isEmpty()) {
+                Result parsed = parseSigiOrUniversalJson(normalized, jsonRaw.trim(), httpCode, cookies);
+                if (parsed != null && parsed.status != Status.ROOM_UNREADABLE) {
+                    return parsed;
+                }
+            }
+        }
+
+        // 3. Cari roomId di dalam blok liveRoomUserInfo / liveRoom
+        int liveAnchor = html.indexOf("liveRoomUserInfo");
+        if (liveAnchor < 0) liveAnchor = html.indexOf("liveRoom");
+        if (liveAnchor >= 0) {
+            int end = Math.min(html.length(), liveAnchor + 4096);
+            String slice = html.substring(liveAnchor, end);
+            Matcher rm = ROOM_ID_PATTERN.matcher(slice);
+            if (rm.find()) {
+                String foundRoomId = firstNonEmptyRoomId(rm.group(1));
+                if (!foundRoomId.isEmpty()) {
+                    return new Result(
+                            Status.RESOLVED_LIVE,
+                            normalized,
+                            foundRoomId,
+                            "",
+                            null,
+                            httpCode,
+                            "Room LIVE ditemukan via halaman publik @" + normalized + " (room_id=" + foundRoomId + ").",
+                            cookies
+                    );
+                }
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    static Result parseSigiOrUniversalJson(
             @NonNull String normalized,
             @NonNull String jsonStr,
             int httpCode,
@@ -630,8 +895,10 @@ public final class TikTokRoomResolver {
             if (liveRoomSection != null) {
                 JSONObject info = liveRoomSection.optJSONObject("liveRoomUserInfo");
                 if (info != null) {
-                    userObj = info.optJSONObject("user");
-                    liveRoomObj = info.optJSONObject("liveRoom");
+                    JSONObject candidateUser = info.optJSONObject("user");
+                    JSONObject candidateLiveRoom = info.optJSONObject("liveRoom");
+                    if (candidateUser != null) userObj = candidateUser;
+                    if (candidateLiveRoom != null) liveRoomObj = candidateLiveRoom;
                 }
             }
 
@@ -643,14 +910,33 @@ public final class TikTokRoomResolver {
                         JSONObject roomInfo = liveDetail.optJSONObject("roomInfo");
                         if (roomInfo != null) {
                             liveRoomObj = roomInfo;
-                            userObj = roomInfo.optJSONObject("anchor");
+                            JSONObject anchor = roomInfo.optJSONObject("anchor");
+                            if (anchor != null) {
+                                userObj = anchor;
+                            }
+                        } else {
+                            JSONObject candidateLiveRoom = liveDetail.optJSONObject("liveRoom");
+                            if (candidateLiveRoom != null) {
+                                liveRoomObj = candidateLiveRoom;
+                            }
                         }
                     }
-                    if (liveRoomObj == null) {
+                    if (firstNonEmptyRoomId(
+                            liveRoomObj != null ? liveRoomObj.optString("roomId", "") : "",
+                            liveRoomObj != null ? liveRoomObj.optString("id", "") : "",
+                            userObj != null ? userObj.optString("roomId", "") : ""
+                    ).isEmpty()) {
                         JSONObject userDetail = defaultScope.optJSONObject("webapp.user-detail");
                         JSONObject userInfo = userDetail != null ? userDetail.optJSONObject("userInfo") : null;
                         if (userInfo != null) {
-                            userObj = userInfo.optJSONObject("user");
+                            JSONObject candidateUser = userInfo.optJSONObject("user");
+                            JSONObject candidateLiveRoom = userInfo.optJSONObject("liveRoom");
+                            if (candidateUser != null) {
+                                userObj = candidateUser;
+                            }
+                            if (candidateLiveRoom != null) {
+                                liveRoomObj = candidateLiveRoom;
+                            }
                         }
                     }
                 }
