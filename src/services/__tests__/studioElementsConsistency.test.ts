@@ -268,6 +268,13 @@ function runStudioElementsConsistencyTests(): void {
   assertEqual(normCombo.properties.comboLabel, 'x10 COMBO PAUS EMAS!', 'bridges combo_counter.giftName -> comboLabel');
   assertEqual(normCombo.properties.giftName, 'Paus Emas', 'preserves combo_counter.giftName');
 
+  const lyricsCatalog = getStudioSourceCatalogEntry('lyrics');
+  assertEqual(lyricsCatalog.status, 'ACTIVE', 'lyrics catalog status promoted to ACTIVE');
+  assertEqual(lyricsCatalog.defaultProperties.lyricsText, '', 'lyrics default lyricsText is empty');
+  assertEqual(lyricsCatalog.defaultProperties.currentLine, '', 'lyrics default currentLine is empty');
+  assertEqual(lyricsCatalog.defaultProperties.align, 'center', 'lyrics default align remains center');
+  assertEqual(lyricsCatalog.defaultProperties.autoFetchLyrics, true, 'lyrics default autoFetchLyrics is true');
+
   const normLyrics = normalizeStudioElementProperties({
     ...rawImage,
     id: 'lyr_legacy',
@@ -275,6 +282,7 @@ function runStudioElementsConsistencyTests(): void {
     properties: { currentLine: 'Bait pertama lagu' },
   });
   assertEqual(normLyrics.properties.lyricsText, 'Bait pertama lagu', 'bridges lyrics.currentLine -> lyricsText');
+  assertEqual(normLyrics.properties.autoFetchLyrics, true, 'defaults lyrics autoFetchLyrics to true on legacy preset');
 
   const normSongRequest = normalizeStudioElementProperties({
     ...rawImage,

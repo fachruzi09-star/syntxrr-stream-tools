@@ -2015,6 +2015,39 @@ async function runStudioInspectorControlsTests(): Promise<void> {
     );
   }
 
+  // 24. A2.10.6.1 Lyrics Inspector toggle, renderer wiring, and online-fetch gating
+  const lyricsInspectorSection = extractBetween(
+    inspectorSection,
+    "selectedElement.type === 'lyrics'",
+    "selectedElement.type === 'audio'",
+    'lyrics inspector',
+  );
+  assert(
+    lyricsInspectorSection.includes('Pencarian lirik online') &&
+      updatesProp(lyricsInspectorSection, 'autoFetchLyrics') &&
+      lyricsInspectorSection.includes('!(selectedElement.properties.autoFetchLyrics !== false)') &&
+      updatesProp(lyricsInspectorSection, 'lyricsText') &&
+      lyricsInspectorSection.includes('selectedElement.properties.currentLine'),
+    'lyrics inspector exposes autoFetchLyrics toggle defaulting active and manual lyricsText textarea with currentLine fallback',
+  );
+
+  const lyricsRendererSection = extractBetween(
+    studioSource,
+    "case 'lyrics': {",
+    "case 'audio':",
+    'lyrics canvas renderer',
+  );
+  assert(
+    lyricsRendererSection.includes('buildLyricsRenderModel({') &&
+      lyricsRendererSection.includes('props.autoFetchLyrics !== false') &&
+      lyricsRendererSection.includes('props.align') &&
+      lyricsRendererSection.includes('Sumber: LRCLIB') &&
+      studioSource.includes('needsAutoLyricsFetch') &&
+      studioSource.includes('if (!needsAutoLyricsFetch || !lyricsLookupKey || !activeLyricsTrackName)') &&
+      studioSource.includes('controller.abort()'),
+    'lyrics canvas renderer binds to buildLyricsRenderModel, respects align and autoFetchLyrics, shows LRCLIB attribution, and skips/cancels network fetches when disabled or hidden',
+  );
+
   console.log(`studioInspectorControls.test.ts: PASS (${assertionCount} assertions)`);
 }
 

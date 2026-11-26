@@ -17,7 +17,15 @@ import {
 import { streamEventBus } from '../services/eventBus';
 import { soundSynth } from '../services/audioSimulator';
 import { showInAppNotice } from '../services/uiNotice';
-import { audioEngine } from '../services/localAudioEngine';
+import { audioEngine, type AudioEngineState } from '../services/localAudioEngine';
+import {
+  buildLyricsLookupKey,
+  buildLyricsRenderModel,
+  fetchLyricsFromLrclib,
+  getCachedLyricsLookup,
+  resolveActiveLyricsPlaybackSource,
+  type LyricsLookupResult,
+} from '../services/lyricsService';
 import {
   songRequestEngine,
   SongRequestState,
@@ -464,17 +472,31 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, []);
 
   // Manual Audio Test State
+  const [localAudioState, setLocalAudioState] = useState<AudioEngineState>(() =>
+    audioEngine.getState(),
+  );
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [manualAudioTitle, setManualAudioTitle] = useState('');
   const [manualAudioArtist, setManualAudioArtist] = useState('');
 
   useEffect(() => {
     return audioEngine.subscribe((state) => {
+      setLocalAudioState(state);
       setIsTestingAudio(state.isPlaying);
       setManualAudioTitle(state.currentTrackId ? state.title : '');
       setManualAudioArtist(state.currentTrackId ? state.artist : '');
     });
   }, []);
+
+  const [autoLyricsState, setAutoLyricsState] = useState<{
+    lookupKey: string;
+    result: LyricsLookupResult | null;
+    loading: boolean;
+  }>({
+    lookupKey: '',
+    result: null,
+    loading: false,
+  });
 
   // History for Undo/Redo
   const [history, setHistory] = useState<StudioElement[][]>([]);
@@ -944,6 +966,76 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const effectiveStateByElementId = new Map(
     effectiveElements.map((element) => [element.id, element]),
   );
+
+  const activeLyricsPlayback = resolveActiveLyricsPlaybackSource(srState, localAudioState);
+  const activeLyricsTrackName = activeLyricsPlayback?.title ?? '';
+  const activeLyricsArtistName = activeLyricsPlayback?.artist ?? '';
+  const activeLyricsAlbumName = activeLyricsPlayback?.album ?? '';
+  const activeLyricsDurationSec = activeLyricsPlayback?.durationSec;
+  const lyricsLookupKey = activeLyricsPlayback
+    ? buildLyricsLookupKey({
+        trackName: activeLyricsTrackName,
+        artistName: activeLyricsArtistName,
+        albumName: activeLyricsAlbumName,
+        durationSec: activeLyricsDurationSec,
+      })
+    : '';
+  const needsAutoLyricsFetch = effectiveElements.some((element) => {
+    if (element.type !== 'lyrics' || element.visible === false) return false;
+    const normalizedLyricsElem = normalizeStudioElementProperties(element);
+    if (normalizedLyricsElem.properties.autoFetchLyrics === false) return false;
+    const manualRaw =
+      typeof normalizedLyricsElem.properties.lyricsText === 'string'
+        ? normalizedLyricsElem.properties.lyricsText.trim()
+        : '';
+    return manualRaw.length === 0;
+  });
+
+  useEffect(() => {
+    if (!needsAutoLyricsFetch || !lyricsLookupKey || !activeLyricsTrackName) {
+      setAutoLyricsState((prev) =>
+        prev.lookupKey === '' && prev.result === null && !prev.loading
+          ? prev
+          : { lookupKey: '', result: null, loading: false },
+      );
+      return;
+    }
+
+    const cached = getCachedLyricsLookup(lyricsLookupKey);
+    if (cached) {
+      setAutoLyricsState({ lookupKey: lyricsLookupKey, result: cached, loading: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    setAutoLyricsState({ lookupKey: lyricsLookupKey, result: null, loading: true });
+
+    void fetchLyricsFromLrclib(
+      {
+        trackName: activeLyricsTrackName,
+        artistName: activeLyricsArtistName,
+        albumName: activeLyricsAlbumName || undefined,
+        durationSec: activeLyricsDurationSec,
+      },
+      { signal: controller.signal },
+    ).then((result) => {
+      if (cancelled || result.status === 'aborted') return;
+      setAutoLyricsState({ lookupKey: lyricsLookupKey, result, loading: false });
+    });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    needsAutoLyricsFetch,
+    lyricsLookupKey,
+    activeLyricsTrackName,
+    activeLyricsArtistName,
+    activeLyricsAlbumName,
+    activeLyricsDurationSec,
+  ]);
   const isElementHiddenByGroup = (elementId: string): boolean => {
     const element = elements.find((item) => item.id === elementId);
     return Boolean(
@@ -3041,34 +3133,71 @@ export const StudioView: React.FC<StudioViewProps> = ({
         );
 
       case 'lyrics': {
-        const activeTitle = srState.currentTrack?.title || manualAudioTitle;
-        const activeArtist = srState.currentTrack?.artist || manualAudioArtist;
-        const customLyrics =
+        const manualLyricsInput =
           typeof props.lyricsText === 'string'
-            ? props.lyricsText.trim()
-            : '';
+            ? props.lyricsText
+            : typeof props.currentLine === 'string'
+              ? props.currentLine
+              : '';
+        const autoFetchEnabled = props.autoFetchLyrics !== false;
+        const matchingLookup =
+          autoLyricsState.lookupKey === lyricsLookupKey ? autoLyricsState.result : null;
+        const matchingLoading =
+          autoLyricsState.lookupKey === lyricsLookupKey && autoLyricsState.loading;
+        const lyricsModel = buildLyricsRenderModel({
+          manualInput: manualLyricsInput,
+          autoFetchEnabled,
+          playback: activeLyricsPlayback,
+          lookupResult: matchingLookup,
+          isLoading: matchingLoading,
+        });
         const textAlignClass =
           props.align === 'left'
-            ? 'text-left'
+            ? 'text-left items-start'
             : props.align === 'right'
-              ? 'text-right'
-              : 'text-center';
+              ? 'text-right items-end'
+              : 'text-center items-center';
+        const statusToneClass =
+          lyricsModel.synced
+            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+            : lyricsModel.status === 'rate_limited' || lyricsModel.status === 'error'
+              ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+              : lyricsModel.status === 'searching'
+                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                : 'bg-violet-500/15 text-violet-300 border-violet-500/30';
         return (
           <div
-            className={`w-full h-full p-2.5 rounded-xl bg-zinc-950/90 border border-violet-500/40 flex flex-col justify-center ${textAlignClass} transition-all ${animClass}`}
+            className={`w-full h-full p-2.5 rounded-xl bg-zinc-950/90 border border-violet-500/40 flex flex-col justify-between gap-1 overflow-hidden transition-all ${textAlignClass} ${animClass}`}
           >
-            <div className="text-[9px] font-bold text-violet-300 truncate">
-              {activeTitle
-                ? `${activeTitle}${activeArtist ? ` — ${activeArtist}` : ''}`
-                : 'Lyrics Widget (Menunggu lagu aktif)'}
+            <div className="w-full flex items-center justify-between gap-1.5 min-w-0">
+              <span className="text-[9px] font-bold text-violet-300 truncate">
+                {lyricsModel.trackLabel}
+              </span>
+              <span
+                className={`px-1.5 py-0.5 rounded border text-[7px] font-semibold shrink-0 ${statusToneClass}`}
+              >
+                {lyricsModel.statusLabel}
+              </span>
             </div>
-            <div className="text-[10px] text-zinc-300 mt-1 line-clamp-2">
-              {customLyrics
-                ? customLyrics
-                : activeTitle
-                ? 'Integrasi sumber lirik belum aktif — mengikuti metadata lagu aktif.'
-                : 'Belum ada lagu aktif dari Song Request / Audio.'}
+            <div className="w-full min-w-0 flex-1 flex flex-col justify-center">
+              <div
+                className={`text-[11px] font-semibold text-white leading-snug ${
+                  lyricsModel.synced ? 'line-clamp-2' : 'line-clamp-3 whitespace-pre-line'
+                }`}
+              >
+                {lyricsModel.primaryText}
+              </div>
+              {lyricsModel.secondaryText && (
+                <div className="text-[9px] text-zinc-400 truncate mt-0.5">
+                  {lyricsModel.secondaryText}
+                </div>
+              )}
             </div>
+            {lyricsModel.usesLrclibAttribution && (
+              <div className="w-full text-[7px] text-zinc-500 truncate">
+                Sumber: LRCLIB
+              </div>
+            )}
           </div>
         );
       }
@@ -5900,31 +6029,64 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     )}
 
                     {/* Lyrics Widget Inspector */}
-                    {selectedElement.type === 'lyrics' && (
-                      <div className="py-4 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
-                            <Music className="w-4 h-4" /> Lyrics Display (Integrasi Terpisah)
-                          </span>
-                          <span className="text-[10px] text-[var(--app-accent-text)] font-bold">Follows Track</span>
+                    {selectedElement.type === 'lyrics' && (() => {
+                      const autoFetchEnabled = selectedElement.properties.autoFetchLyrics !== false;
+                      const manualLyricsValue =
+                        typeof selectedElement.properties.lyricsText === 'string'
+                          ? selectedElement.properties.lyricsText
+                          : typeof selectedElement.properties.currentLine === 'string'
+                            ? selectedElement.properties.currentLine
+                            : '';
+                      return (
+                        <div className="py-4 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-[var(--app-accent-text)] flex items-center gap-1.5">
+                              <Music className="w-4 h-4" /> Lyrics Display (LRCLIB + LRC)
+                            </span>
+                            <span className="text-[10px] text-[var(--app-accent-text)] font-bold">
+                              {activeLyricsPlayback ? 'Sinkron Playback' : 'Standby'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--app-text-secondary)]">
+                            Mengikuti track dan posisi playback aktif ({activeLyricsPlayback ? `${activeLyricsPlayback.title}${activeLyricsPlayback.artist ? ` — ${activeLyricsPlayback.artist}` : ''}` : 'Belum ada lagu aktif'}).
+                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-semibold text-[var(--app-text-secondary)]">
+                              Pencarian lirik online
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateElementProperty(
+                                  selectedElement.id,
+                                  'autoFetchLyrics',
+                                  !(selectedElement.properties.autoFetchLyrics !== false),
+                                )
+                              }
+                              className={`min-h-[36px] px-3 rounded-lg text-[11px] font-bold border transition-all ${
+                                autoFetchEnabled
+                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                                  : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                              }`}
+                            >
+                              {autoFetchEnabled ? 'Aktif' : 'Nonaktif'}
+                            </button>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--app-text-secondary)]">
+                              Teks / LRC Manual (Override Opsional)
+                            </label>
+                            <textarea
+                              rows={4}
+                              value={manualLyricsValue}
+                              onChange={(e) => updateElementProperty(selectedElement.id, 'lyricsText', e.target.value)}
+                              placeholder="Kosongkan untuk pencarian otomatis LRCLIB, atau isi format LRC [mm:ss.xx] / teks biasa..."
+                              className="w-full mt-1 px-3 py-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] font-mono focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          </div>
                         </div>
-                        <p className="text-[11px] text-[var(--app-text-secondary)]">
-                          Mengikuti lagu aktif dari Song Request / Local Audio ({srState.currentTrack?.title || manualAudioTitle || 'Belum ada lagu aktif'}) tanpa membuat lirik palsu.
-                        </p>
-                        <div>
-                          <label className="text-[11px] font-semibold text-[var(--app-text-secondary)]">
-                            Teks Lirik Manual (Opsional)
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={selectedElement.properties.lyricsText || ''}
-                            onChange={(e) => updateElementProperty(selectedElement.id, 'lyricsText', e.target.value)}
-                            placeholder="Kosongkan jika menggunakan integrasi sumber lirik terpisah..."
-                            className="w-full mt-1 px-3 py-2 bg-[var(--app-surface-muted)] border border-[var(--app-border)] rounded-xl text-xs text-[var(--app-text)] focus:outline-none focus:border-[var(--app-accent)]"
-                          />
-                        </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Dedicated Audio Manual Inspector */}
                     {selectedElement.type === 'audio' && (

@@ -537,13 +537,14 @@ export const STUDIO_ELEMENT_CATALOG: readonly StudioSourceCatalogEntry[] = [
     name: 'Tampilan Lirik Berjalan',
     category: 'dynamic',
     categoryLabel: 'Sumber Dinamis',
-    status: 'SIMULATION',
-    description: 'Lirik lagu otomatis selaras dengan playback musik lokal atau streaming.',
+    status: 'ACTIVE',
+    description: 'Pengambilan lirik online LRCLIB dan sinkronisasi berbasis timestamp LRC atau input manual.',
     defaultDimensions: { width: 70, height: 14 },
     defaultProperties: {
-      currentLine: 'Menatap layar malam tak berujung...',
-      lyricsText: 'Menatap layar malam tak berujung...',
+      currentLine: '',
+      lyricsText: '',
       align: 'center',
+      autoFetchLyrics: true,
     },
   },
   {
@@ -731,6 +732,9 @@ export function normalizeStudioElementProperties(element: StudioElement): Studio
       }
       if (props.currentLine === undefined && typeof props.lyricsText === 'string') {
         props.currentLine = props.lyricsText;
+      }
+      if (typeof props.autoFetchLyrics !== 'boolean') {
+        props.autoFetchLyrics = true;
       }
       break;
     }
