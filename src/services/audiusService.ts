@@ -378,22 +378,159 @@ function isValidHttpStreamUrl(url: unknown): url is string {
   }
 }
 
+const CONTENT_NODE_REGISTRY_TTL_MS = 10 * 60 * 1000;
+
+interface CachedContentNodeRegistry {
+  hosts: Set<string>;
+  expiresAt: number;
+}
+
+const contentNodeRegistryCache = new Map<string, CachedContentNodeRegistry>();
+const inFlightRegistryFetches = new Map<string, Promise<ReadonlySet<string>>>();
+
+export function clearAudiusContentNodeRegistryCache(): void {
+  contentNodeRegistryCache.clear();
+  inFlightRegistryFetches.clear();
+}
+
+function normalizeRedirectHostname(hostname: string): string {
+  return hostname.trim().toLowerCase();
+}
+
+function isIpv4Literal(host: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+}
+
 function isPrivateOrLocalHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase();
+  const host = normalizeRedirectHostname(hostname);
+  if (!host || host.endsWith('.')) return true;
   if (
     host === 'localhost' ||
-    host === '127.0.0.1' ||
+    host.endsWith('.localhost') ||
     host === '0.0.0.0' ||
-    host === '::1' ||
-    host === '[::1]' ||
-    host.endsWith('.local')
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    !host.includes('.')
   ) {
+    return true;
+  }
+  // Reject IPv6 literals ([::1], [fe80::...], [fc00::...], [::ffff:127.0.0.1], etc.)
+  if (host.startsWith('[') || host.includes(':')) {
+    return true;
+  }
+  // Reject all raw IPv4 literals (loopback, RFC1918, link-local, CGNAT, etc.)
+  if (isIpv4Literal(host)) {
+    return true;
+  }
+  // Reject numeric/hex single-label IP representations
+  if (/^(0x[0-9a-f]+|\d+)$/i.test(host)) {
     return true;
   }
   return false;
 }
 
-export function isValidAudiusRedirectUrl(candidateUrl: unknown, originalEndpointUrl: string): candidateUrl is string {
+function extractValidatedRegistryHostname(rawEndpoint: unknown, expectedOriginProtocol: string): string | null {
+  if (typeof rawEndpoint !== 'string') return null;
+  const trimmed = rawEndpoint.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.username || parsed.password) return null;
+    if (expectedOriginProtocol === 'https:' && parsed.protocol !== 'https:') return null;
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    const host = normalizeRedirectHostname(parsed.hostname);
+    if (isPrivateOrLocalHostname(host)) return null;
+    return host;
+  } catch {
+    return null;
+  }
+}
+
+export async function getRegisteredAudiusContentNodeHosts(
+  baseUrl: string = AUDIUS_API_BASE,
+): Promise<ReadonlySet<string>> {
+  let apiOrigin = '';
+  let expectedProtocol = 'https:';
+  try {
+    const parsedBase = new URL(baseUrl);
+    if (parsedBase.protocol !== 'https:' && parsedBase.protocol !== 'http:') {
+      return new Set();
+    }
+    apiOrigin = parsedBase.origin;
+    expectedProtocol = parsedBase.protocol;
+  } catch {
+    return new Set();
+  }
+
+  const cached = contentNodeRegistryCache.get(apiOrigin);
+  if (cached && cached.expiresAt > Date.now() && cached.hosts.size > 0) {
+    return cached.hosts;
+  }
+
+  const existingInFlight = inFlightRegistryFetches.get(apiOrigin);
+  if (existingInFlight) {
+    return existingInFlight;
+  }
+
+  const fetchPromise = (async (): Promise<ReadonlySet<string>> => {
+    const hosts = new Set<string>();
+
+    // Primary official registry: {apiOrigin}/validators (lists registered content-node + validator storage endpoints)
+    try {
+      const validatorsRes = await fetchWithTimeout(`${apiOrigin}/validators`);
+      if (validatorsRes.ok) {
+        const payload = await validatorsRes.json().catch(() => null);
+        const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
+        for (const node of nodes) {
+          const serviceType = typeof node?.ServiceType === 'string' ? node.ServiceType.toLowerCase() : '';
+          if (serviceType !== 'content-node' && serviceType !== 'validator') continue;
+          const host = extractValidatedRegistryHostname(node?.Endpoint, expectedProtocol);
+          if (host) hosts.add(host);
+        }
+      }
+    } catch {
+      // Fallback below
+    }
+
+    // Fallback official registry: {apiOrigin}/content-nodes
+    if (hosts.size === 0) {
+      try {
+        const contentNodesRes = await fetchWithTimeout(`${apiOrigin}/content-nodes`);
+        if (contentNodesRes.ok) {
+          const payload = await contentNodesRes.json().catch(() => null);
+          const endpoints = Array.isArray(payload?.data) ? payload.data : [];
+          for (const endpoint of endpoints) {
+            const host = extractValidatedRegistryHostname(endpoint, expectedProtocol);
+            if (host) hosts.add(host);
+          }
+        }
+      } catch {
+        // Fail closed with empty Set
+      }
+    }
+
+    if (hosts.size > 0) {
+      contentNodeRegistryCache.set(apiOrigin, {
+        hosts,
+        expiresAt: Date.now() + CONTENT_NODE_REGISTRY_TTL_MS,
+      });
+    }
+    return hosts;
+  })();
+
+  inFlightRegistryFetches.set(apiOrigin, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightRegistryFetches.delete(apiOrigin);
+  }
+}
+
+export function isValidAudiusRedirectUrl(
+  candidateUrl: unknown,
+  originalEndpointUrl: string,
+  allowedContentNodeHosts?: ReadonlySet<string> | ReadonlyArray<string>,
+): candidateUrl is string {
   if (!isValidHttpStreamUrl(candidateUrl)) return false;
   try {
     const target = new URL(candidateUrl);
@@ -403,20 +540,51 @@ export function isValidAudiusRedirectUrl(candidateUrl: unknown, originalEndpoint
     if (origin.protocol === 'https:' && target.protocol !== 'https:') {
       return false;
     }
-    if (target.hostname !== origin.hostname) {
-      if (isPrivateOrLocalHostname(target.hostname) && !isPrivateOrLocalHostname(origin.hostname)) {
-        return false;
-      }
-      // Redirected content node URLs on Audius resolve to /tracks/cidstream/<cid> or /tracks/<id>/stream
-      const path = target.pathname;
-      const matchesAudiusStreamPath =
-        /^\/tracks\/cidstream\/[^/]+/i.test(path) ||
-        /^\/(v1\/)?tracks\/[^/]+\/stream$/i.test(path);
-      if (!matchesAudiusStreamPath) {
-        return false;
-      }
+
+    const originHost = normalizeRedirectHostname(origin.hostname);
+    const targetHost = normalizeRedirectHostname(target.hostname);
+    if (!targetHost || targetHost.endsWith('.')) {
+      return false;
     }
-    return true;
+
+    // Enforce verified Audius stream path pattern on all stream URLs
+    const path = target.pathname;
+    const matchesAudiusStreamPath =
+      /^\/tracks\/cidstream\/[^/]+/i.test(path) ||
+      /^\/(v1\/)?tracks\/[^/]+\/stream$/i.test(path);
+    if (!matchesAudiusStreamPath) {
+      return false;
+    }
+
+    if (targetHost === originHost) {
+      if (isPrivateOrLocalHostname(targetHost) && !isPrivateOrLocalHostname(originHost)) {
+        return false;
+      }
+      return true;
+    }
+
+    // Cross-host redirect: require HTTPS (when origin is HTTPS), block localhost/private/IP literals,
+    // and enforce exact hostname match against verified official Audius Content Node / Validator allowlist.
+    if (isPrivateOrLocalHostname(targetHost)) {
+      return false;
+    }
+
+    let allowlist: Set<string>;
+    if (allowedContentNodeHosts) {
+      allowlist = new Set(
+        Array.from(allowedContentNodeHosts, (h) => normalizeRedirectHostname(h)).filter(Boolean),
+      );
+    } else {
+      const cached = contentNodeRegistryCache.get(origin.origin);
+      allowlist =
+        cached && cached.expiresAt > Date.now() ? new Set(cached.hosts) : new Set<string>();
+    }
+
+    if (allowlist.size === 0) {
+      return false;
+    }
+
+    return allowlist.has(targetHost);
   } catch {
     return false;
   }
@@ -746,7 +914,18 @@ export const AudiusService = {
       }
 
       const candidateUrl = res.url && res.url.trim() ? res.url.trim() : streamEndpoint;
-      if (!isValidAudiusRedirectUrl(candidateUrl, streamEndpoint)) {
+      let allowedHosts: ReadonlySet<string> | undefined;
+      try {
+        const candidateHost = normalizeRedirectHostname(new URL(candidateUrl).hostname);
+        const originHost = normalizeRedirectHostname(new URL(streamEndpoint).hostname);
+        if (candidateHost !== originHost) {
+          allowedHosts = await getRegisteredAudiusContentNodeHosts(baseUrl);
+        }
+      } catch {
+        // Handled by isValidAudiusRedirectUrl below
+      }
+
+      if (!isValidAudiusRedirectUrl(candidateUrl, streamEndpoint, allowedHosts)) {
         try {
           await res.body?.cancel();
         } catch {
@@ -754,7 +933,7 @@ export const AudiusService = {
         }
         return {
           ok: false,
-          error: 'URL tujuan redirect stream Audius tidak valid atau tidak aman.',
+          error: 'URL tujuan redirect stream Audius tidak valid atau bukan Content Node resmi.',
         };
       }
 
@@ -847,7 +1026,17 @@ export const AudiusService = {
       }
 
       const finalUrl = inspectRes.url && inspectRes.url.trim() ? inspectRes.url.trim() : candidateUrl;
-      if (!isValidAudiusRedirectUrl(finalUrl, streamEndpoint)) {
+      try {
+        const finalHost = normalizeRedirectHostname(new URL(finalUrl).hostname);
+        const originHost = normalizeRedirectHostname(new URL(streamEndpoint).hostname);
+        if (finalHost !== originHost && (!allowedHosts || allowedHosts.size === 0)) {
+          allowedHosts = await getRegisteredAudiusContentNodeHosts(baseUrl);
+        }
+      } catch {
+        // Handled by isValidAudiusRedirectUrl below
+      }
+
+      if (!isValidAudiusRedirectUrl(finalUrl, streamEndpoint, allowedHosts)) {
         try {
           await inspectRes.body?.cancel();
         } catch {
@@ -855,7 +1044,7 @@ export const AudiusService = {
         }
         return {
           ok: false,
-          error: 'URL tujuan redirect stream Audius tidak valid atau tidak aman.',
+          error: 'URL tujuan redirect stream Audius tidak valid atau bukan Content Node resmi.',
         };
       }
 

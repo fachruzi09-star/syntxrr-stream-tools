@@ -4,6 +4,7 @@
 import {
   AUDIUS_API_BASE,
   AudiusService,
+  clearAudiusContentNodeRegistryCache,
   evaluateAudiusTrackAuthorization,
   hasAudioMagicBytes,
   isPermittedAudiusLicenseLabel,
@@ -108,6 +109,8 @@ async function runAudiusSongRequestTests(): Promise<void> {
       mockAudioRef.current = this;
     }
   };
+
+  clearAudiusContentNodeRegistryCache();
 
   try {
     // Compile-time check: 'Audius' is supported on UnifiedQueueItem['platform'] & SongRequest['platform']
@@ -276,7 +279,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
       '1v: standalone license check rejects raw "All Rights Reserved" without verified API track state',
     );
 
-    // Audio magic bytes & redirect validator sanity checks
+    // Audio magic bytes & redirect validator sanity checks (A2.10.4.3 allowlist)
     assertEqual(
       hasAudioMagicBytes(new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00])),
       true,
@@ -287,41 +290,217 @@ async function runAudiusSongRequestTests(): Promise<void> {
       false,
       '1x: rejects fake non-audio binary payload',
     );
+
+    const officialRegisteredHosts = new Set([
+      'creatornode.audius.co',
+      'cn0.mainnet.audiusindex.org',
+      'cn1.mainnet.audiusindex.org',
+      'audius-content-7.figment.io',
+      'v.monophonic.digital',
+    ]);
+
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://creatornode.audius.co/tracks/cidstream/QmAbc?signature=xyz&expires=999999',
+        'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
+      ),
+      true,
+      '1y: accepts registered Audius creatornode host with signature & expires query',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://cn0.mainnet.audiusindex.org/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
+      ),
+      true,
+      '1z: accepts registered Audius content-node cn0.mainnet.audiusindex.org',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://creatornode.audius.co/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+      ),
+      false,
+      '1za: cross-host redirect fails closed when official registry is not loaded',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://attacker.example/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
+      ),
+      false,
+      '1zb: rejects attacker.example even with /tracks/cidstream/ path',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://foreign-host.example/tracks/123/stream',
+        'https://api.audius.co/v1/tracks/123/stream',
+        officialRegisteredHosts,
+      ),
+      false,
+      '1zc: rejects foreign host even with /tracks/{id}/stream path',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://audius.co.attacker.example/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
+      ),
+      false,
+      '1zd: rejects fake domain boundary audius.co.attacker.example',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://evil-creatornode.audius.co/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
+      ),
+      false,
+      '1ze: rejects unregistered *.audius.co subdomain',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://localhost/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        ['localhost', ...officialRegisteredHosts],
+      ),
+      false,
+      '1zf: rejects localhost even if listed',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://127.0.0.1/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        ['127.0.0.1', ...officialRegisteredHosts],
+      ),
+      false,
+      '1zg: rejects loopback 127.0.0.1',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://[::1]/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        ['[::1]', ...officialRegisteredHosts],
+      ),
+      false,
+      '1zh: rejects IPv6 loopback [::1]',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://192.168.1.10/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        ['192.168.1.10', ...officialRegisteredHosts],
+      ),
+      false,
+      '1zi: rejects private IPv4 192.168.1.10',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://10.0.0.5/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+        ['10.0.0.5', ...officialRegisteredHosts],
+      ),
+      false,
+      '1zj: rejects private IPv4 10.0.0.5',
+    );
     assertEqual(
       isValidAudiusRedirectUrl(
         'http://creatornode.audius.co/tracks/cidstream/QmAbc',
         'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
       ),
       false,
-      '1y: rejects HTTPS->HTTP redirect downgrade',
+      '1zk: rejects HTTPS->HTTP redirect downgrade',
     );
     assertEqual(
       isValidAudiusRedirectUrl(
-        'https://evil.example/login.html',
+        'https://user:pass@creatornode.audius.co/tracks/cidstream/QmAbc',
         'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
       ),
       false,
-      '1z: rejects redirect to arbitrary non-Audius path',
+      '1zl: rejects username:password credentials in redirect URL',
     );
     assertEqual(
       isValidAudiusRedirectUrl(
-        'https://creatornode.audius.co/tracks/cidstream/QmAbc?signature=xyz',
+        'https://creatornode.audius.co/login.html',
         'https://api.audius.co/v1/tracks/1/stream',
+        officialRegisteredHosts,
       ),
-      true,
-      '1za: accepts valid HTTPS Audius cidstream redirect',
+      false,
+      '1zm: rejects registered host when path is not a valid Audius stream path',
     );
 
-    // 2. Mock Audius API fetch scenarios (search, octet-stream byte verification, MIME rejections, redirects, refresh)
+    // 2. Mock Audius API fetch scenarios (official /validators + /content-nodes registry, search, octet-stream, redirects, refresh)
     const searchUrlsSeen: string[] = [];
     const streamUrlsSeen: string[] = [];
     let auroraRevokedOnRefresh = false;
+    let registryMode: 'validators' | 'content_nodes_fallback' | 'fail_closed' = 'validators';
 
     const id3SampleBytes = new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x03]);
 
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const urlStr = typeof input === 'string' ? input : input.toString();
       const method = (init?.method || 'GET').toUpperCase();
+
+      if (urlStr === 'https://api.audius.co/validators') {
+        if (registryMode === 'validators') {
+          return new Response(
+            JSON.stringify({
+              nodes: [
+                {
+                  Id: '3',
+                  Endpoint: 'https://creatornode.audius.co',
+                  ServiceType: 'validator',
+                },
+                {
+                  Id: '67',
+                  Endpoint: 'https://cn0.mainnet.audiusindex.org',
+                  ServiceType: 'content-node',
+                },
+                {
+                  Id: '68',
+                  Endpoint: 'https://cn1.mainnet.audiusindex.org',
+                  ServiceType: 'content-node',
+                },
+                {
+                  Id: '19',
+                  Endpoint: 'https://audius-content-7.figment.io',
+                  ServiceType: 'validator',
+                },
+                {
+                  Id: '99',
+                  Endpoint: 'https://v.monophonic.digital',
+                  ServiceType: 'validator',
+                },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify({ error: 'Unavailable' }), {
+          status: registryMode === 'content_nodes_fallback' ? 404 : 500,
+        });
+      }
+
+      if (urlStr === 'https://api.audius.co/content-nodes') {
+        if (registryMode === 'content_nodes_fallback' || registryMode === 'validators') {
+          return new Response(
+            JSON.stringify({
+              data: [
+                'https://cn0.mainnet.audiusindex.org',
+                'https://cn1.mainnet.audiusindex.org',
+                'https://cn2.mainnet.audiusindex.org',
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify({ error: 'Unavailable' }), { status: 500 });
+      }
 
       if (urlStr.startsWith(`${AUDIUS_API_BASE}/tracks/search`)) {
         searchUrlsSeen.push(urlStr);
@@ -414,6 +593,30 @@ async function runAudiusSongRequestTests(): Promise<void> {
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
         }
+        if (q.includes('spoofed_subdomain_redir')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_spoof_sub', title: 'Spoofed Subdomain' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('foreign_stream_redir')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_foreign_stream', title: 'Foreign Stream Host' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('cn0_fallback_track')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_cn0_node', title: 'CN0 Content Node Track' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
         if (q.includes('tokenized_cdn_track')) {
           return new Response(
             JSON.stringify({
@@ -495,28 +698,49 @@ async function runAudiusSongRequestTests(): Promise<void> {
         if (urlStr.includes('aud_fake_octet')) {
           const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
           Object.defineProperty(r, 'url', {
-            value: 'https://creatornode.audius.test/tracks/cidstream/QmFakeBinary',
+            value: 'https://creatornode.audius.co/tracks/cidstream/QmFakeBinary',
           });
           return r;
         }
         if (urlStr.includes('aud_empty_octet')) {
           const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
           Object.defineProperty(r, 'url', {
-            value: 'https://creatornode.audius.test/tracks/cidstream/QmEmptyBinary',
+            value: 'https://creatornode.audius.co/tracks/cidstream/QmEmptyBinary',
           });
           return r;
         }
         if (urlStr.includes('aud_real_octet')) {
           const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
           Object.defineProperty(r, 'url', {
-            value: 'https://creatornode.audius.test/tracks/cidstream/QmRealId3?signature=sig_real_octet',
+            value: 'https://creatornode.audius.co/tracks/cidstream/QmRealId3?signature=sig_real_octet',
+          });
+          return r;
+        }
+        if (urlStr.includes('aud_cn0_node')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://cn0.mainnet.audiusindex.org/tracks/cidstream/QmRealId3?signature=sig_cn0&expires=999999',
           });
           return r;
         }
         if (urlStr.includes('aud_bad_redir')) {
           const r = new Response(null, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } });
           Object.defineProperty(r, 'url', {
-            value: 'https://attacker.example/phish.html',
+            value: 'https://attacker.example/tracks/cidstream/QmAbc',
+          });
+          return r;
+        }
+        if (urlStr.includes('aud_spoof_sub')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://audius.co.attacker.example/tracks/cidstream/QmAbc',
+          });
+          return r;
+        }
+        if (urlStr.includes('aud_foreign_stream')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://foreign.example/tracks/aud_foreign_stream/stream',
           });
           return r;
         }
@@ -530,7 +754,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
           });
           Object.defineProperty(resp, 'url', {
             value:
-              'https://creatornode.audius.test/tracks/cidstream/QmTok1?signature=ephemeral_sig_abc&expires=999999',
+              'https://creatornode.audius.co/tracks/cidstream/QmTok1?signature=ephemeral_sig_abc&expires=999999',
           });
           return resp;
         }
@@ -571,17 +795,46 @@ async function runAudiusSongRequestTests(): Promise<void> {
     assertEqual(emptyOctetRes.success, false, '3j: empty application/octet-stream rejected');
 
     const badRedirRes = await AudiusService.resolvePlayableTrack('bad_redirect_track');
-    assertEqual(badRedirRes.success, false, '3k: arbitrary non-Audius redirect rejected');
+    assertEqual(badRedirRes.success, false, '3k: attacker.example/tracks/cidstream/QmAbc rejected');
 
+    const spoofSubRes = await AudiusService.resolvePlayableTrack('spoofed_subdomain_redir');
+    assertEqual(spoofSubRes.success, false, '3l: audius.co.attacker.example spoofed subdomain rejected');
+
+    const foreignStreamRes = await AudiusService.resolvePlayableTrack('foreign_stream_redir');
+    assertEqual(foreignStreamRes.success, false, '3m: foreign host with /tracks/{id}/stream rejected');
+
+    // Registry unavailable -> fail closed on cross-host redirect
+    clearAudiusContentNodeRegistryCache();
+    registryMode = 'fail_closed';
+    const failClosedRes = await AudiusService.resolvePlayableTrack('real_octet_track');
+    assertEqual(
+      failClosedRes.success,
+      false,
+      '3n: cross-host redirect fails closed when official Content Node registry is unavailable',
+    );
+
+    // /validators unavailable -> /content-nodes fallback works for cn0.mainnet.audiusindex.org
+    clearAudiusContentNodeRegistryCache();
+    registryMode = 'content_nodes_fallback';
+    const fallbackCn0Res = await AudiusService.resolvePlayableTrack('cn0_fallback_track');
+    assertEqual(
+      fallbackCn0Res.success,
+      true,
+      '3o: fallback to /content-nodes accepts registered cn0.mainnet.audiusindex.org',
+    );
+
+    // Restore primary /validators registry
+    clearAudiusContentNodeRegistryCache();
+    registryMode = 'validators';
     const realOctetRes = await AudiusService.resolvePlayableTrack('real_octet_track');
     assertEqual(
       realOctetRes.success,
       true,
-      '3l: real creatornode application/octet-stream with ID3 audio header accepted via Range inspection',
+      '3p: registered creatornode.audius.co application/octet-stream with ID3 header accepted',
     );
     assert(
-      Boolean(realOctetRes.streamUrl?.includes('/tracks/cidstream/QmRealId3')),
-      '3m: verified cidstream URL returned',
+      Boolean(realOctetRes.streamUrl?.includes('https://creatornode.audius.co/tracks/cidstream/QmRealId3')),
+      '3q: verified registered cidstream URL returned',
     );
 
     // 4. SongRequestEngine integration
@@ -739,8 +992,8 @@ async function runAudiusSongRequestTests(): Promise<void> {
       assertEqual(playRequeuedOk, true, '5e: requeued Audius track refreshes stream URL and plays');
       assertEqual(engine.getState().isPlaying, true, '5f: requeued Audius track is playing');
       assert(
-        Boolean(mockAudioRef.current?.src.includes('creatornode.audius.test/tracks/cidstream/QmTok1')),
-        '5g: HTML5 Audio received refreshed cidstream Audius URL',
+        Boolean(mockAudioRef.current?.src.includes('creatornode.audius.co/tracks/cidstream/QmTok1')),
+        '5g: HTML5 Audio received refreshed registered creatornode.audius.co cidstream URL',
       );
 
       // Revoking streamability before requeued track plays MUST reject honestly
@@ -755,6 +1008,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
       engine.destroy();
     }
   } finally {
+    clearAudiusContentNodeRegistryCache();
     (globalThis as { Audio?: unknown }).Audio = originalAudio;
     globalThis.fetch = originalFetch;
   }
