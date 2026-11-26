@@ -47,6 +47,12 @@ import {
   toStudioScreensaverSettings,
 } from '../services/modeBScreensaverPolicy';
 import {
+  validateModeBScreenCaptureAddition,
+  validateModeBScreenCaptureBatch,
+  validateModeBScreenCapturePresetActivation,
+  validateModeBScreenCaptureSceneTransition,
+} from '../services/modeBScreenCapturePolicy';
+import {
   buildBlankPresetDraft,
   clonePresetWithRemappedIds,
   submitAsyncPresetCreation,
@@ -861,10 +867,30 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleSetGroupVisibility = (groupId: string, visible: boolean) => {
-    updatePresetStructure(
-      activeGroups.map((group) => (group.id === groupId ? { ...group, visible } : group)),
-      activeSuperGroups,
+    const nextGroups = activeGroups.map((group) =>
+      group.id === groupId ? { ...group, visible } : group,
     );
+    if (isModeBSelected && visible) {
+      const nextEffective = applyPresetGroupStateToElements({
+        elements: elementsRef.current,
+        groups: nextGroups,
+        superGroups: activeSuperGroups,
+      });
+      const check = validateModeBScreenCaptureSceneTransition(
+        effectiveElements,
+        nextEffective,
+        isModeBSelected,
+      );
+      if (!check.allowed) {
+        showInAppNotice({
+          tone: 'error',
+          title: 'Batas Tangkapan Layar Mode B',
+          message: check.message,
+        });
+        return;
+      }
+    }
+    updatePresetStructure(nextGroups, activeSuperGroups);
   };
 
   const handleSetGroupLocked = (groupId: string, locked: boolean) => {
@@ -875,12 +901,30 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleSetSuperGroupVisibility = (superGroupId: string, visible: boolean) => {
-    updatePresetStructure(
-      activeGroups,
-      activeSuperGroups.map((group) =>
-        group.id === superGroupId ? { ...group, visible } : group,
-      ),
+    const nextSuperGroups = activeSuperGroups.map((group) =>
+      group.id === superGroupId ? { ...group, visible } : group,
     );
+    if (isModeBSelected && visible) {
+      const nextEffective = applyPresetGroupStateToElements({
+        elements: elementsRef.current,
+        groups: activeGroups,
+        superGroups: nextSuperGroups,
+      });
+      const check = validateModeBScreenCaptureSceneTransition(
+        effectiveElements,
+        nextEffective,
+        isModeBSelected,
+      );
+      if (!check.allowed) {
+        showInAppNotice({
+          tone: 'error',
+          title: 'Batas Tangkapan Layar Mode B',
+          message: check.message,
+        });
+        return;
+      }
+    }
+    updatePresetStructure(activeGroups, nextSuperGroups);
   };
 
   const handleSetSuperGroupLocked = (superGroupId: string, locked: boolean) => {
@@ -1278,6 +1322,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       return elem;
     });
+    if (isModeBSelected && targetElem.type === 'screen_capture') {
+      const nextEffective = applyPresetGroupStateToElements({
+        elements: updated,
+        groups: activeGroups,
+        superGroups: activeSuperGroups,
+      });
+      const check = validateModeBScreenCaptureSceneTransition(
+        effectiveElements,
+        nextEffective,
+        isModeBSelected,
+      );
+      if (!check.allowed) {
+        showInAppNotice({
+          tone: 'error',
+          title: 'Batas Tangkapan Layar Mode B',
+          message: check.message,
+        });
+        return;
+      }
+    }
     commitElements(updated);
   };
 
@@ -1669,6 +1733,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const handleAddQuickElement = (type: SourceType, _defaultName?: string) => {
     if (isStrictModeBLocked) return;
     const newElem = createStudioElementFromSource(type, elements);
+    const check = validateModeBScreenCaptureAddition(effectiveElements, newElem, isModeBSelected);
+    if (!check.allowed) {
+      showInAppNotice({
+        tone: 'error',
+        title: 'Batas Tangkapan Layar Mode B',
+        message: check.message,
+      });
+      return;
+    }
 
     commitElements([...elements, newElem]);
     setSelectedGroupId(null);
@@ -1697,6 +1770,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
       y: target.y + 3,
       layer: elements.length + 1,
     };
+    const check = validateModeBScreenCaptureAddition(effectiveElements, clone, isModeBSelected);
+    if (!check.allowed) {
+      showInAppNotice({
+        tone: 'error',
+        title: 'Batas Tangkapan Layar Mode B',
+        message: check.message,
+      });
+      return;
+    }
     commitElements([...elements, clone]);
     setSelectedGroupId(null);
     setSelectedId(clone.id);
@@ -2372,6 +2454,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Preset Application
   const handleApplyPresetToScene = (preset: StudioPreset) => {
+    const check = validateModeBScreenCapturePresetActivation(preset, isModeBSelected);
+    if (!check.allowed) {
+      setSaveFeedback({ tone: 'error', text: check.message });
+      showInAppNotice({
+        tone: 'error',
+        title: 'Preset melebihi batas Mode B',
+        message: check.message,
+      });
+      return;
+    }
     if (onSelectPreset) {
       onSelectPreset(preset.id);
     } else {
@@ -2406,6 +2498,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const handleInstallMarketplacePack = (item: MarketplaceItem) => {
     if (isStrictModeBLocked) return;
+    const check = validateModeBScreenCaptureBatch(
+      effectiveElements,
+      item.elementsPayload,
+      isModeBSelected,
+    );
+    if (!check.allowed) {
+      showInAppNotice({
+        tone: 'error',
+        title: 'Batas Tangkapan Layar Mode B',
+        message: check.message,
+      });
+      return;
+    }
     if (onInstallMarketplaceElements) {
       onInstallMarketplaceElements(item.elementsPayload);
     } else {
@@ -3445,6 +3550,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleSelectorSelectPreset = (presetId: string) => {
+    const targetPreset =
+      presets.find((preset) => preset.id === presetId) ??
+      (activePresetProp?.id === presetId ? activePresetProp : undefined);
+    const check = validateModeBScreenCapturePresetActivation(targetPreset, isModeBSelected);
+    if (!check.allowed) {
+      setSelectorActionError(check.message);
+      showInAppNotice({
+        tone: 'error',
+        title: 'Preset melebihi batas Mode B',
+        message: check.message,
+      });
+      return;
+    }
     setSelectorActionError(null);
     setPresetTransferNotice(null);
     if (onSelectPreset) onSelectPreset(presetId);

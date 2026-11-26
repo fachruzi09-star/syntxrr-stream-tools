@@ -56,6 +56,39 @@ const NATIVE_OVERLAY_PROPERTY_KEYS = [
   'videoAssetId', 'videoFit', 'loop', 'facingMode', 'cameraFit', 'mirror', 'borderGlow',
 ] as const;
 
+export const MODE_B_SINGLE_SCREEN_CAPTURE_MESSAGE =
+  'Mode B hanya mendukung satu elemen Tangkapan Layar aktif. Nonaktifkan atau hapus Screen Capture yang sudah ada sebelum menambahkan yang lain.';
+
+/**
+ * Canonical visibility predicate shared between Mode B composition runtime validation
+ * and Studio scene authoring guards.
+ */
+export function isVisibleModeBScreenCaptureElement(
+  element: ModeBOverlaySourceElement | null | undefined,
+): boolean {
+  return Boolean(
+    element &&
+      element.type === 'screen_capture' &&
+      element.visible !== false &&
+      (typeof element.width !== 'number' || element.width > 0) &&
+      (typeof element.height !== 'number' || element.height > 0) &&
+      (typeof element.opacity !== 'number' || element.opacity > 0),
+  );
+}
+
+export function countVisibleModeBScreenCaptures(
+  elements: readonly ModeBOverlaySourceElement[] | undefined | null,
+): number {
+  if (!Array.isArray(elements)) return 0;
+  let count = 0;
+  for (const element of elements) {
+    if (isVisibleModeBScreenCaptureElement(element)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 /**
  * Resolve the single Mode B MediaProjection layer. It is intentionally separate from the
  * ViewFilterRender overlay snapshot so the captured display cannot be hidden by a later
@@ -68,13 +101,7 @@ export function createModeBScreenCaptureLayer(
 ): NativeModeBScreenCaptureLayer {
   const source = Array.isArray(elements) ? elements : [];
   const captures = source.filter((element) => element?.type === 'screen_capture');
-  const visible = captures.filter(
-    (element) =>
-      element.visible !== false &&
-      (typeof element.width !== 'number' || element.width > 0) &&
-      (typeof element.height !== 'number' || element.height > 0) &&
-      (typeof element.opacity !== 'number' || element.opacity > 0),
-  );
+  const visible = captures.filter((element) => isVisibleModeBScreenCaptureElement(element));
 
   if (visible.length > 1) {
     throw new Error('Mode B hanya mendukung satu elemen Tangkapan Layar aktif per sesi MediaProjection.');
