@@ -1699,8 +1699,9 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
         }
         String nextBackgroundId = backgroundAssetId == null ? "" : backgroundAssetId.trim();
         String nextBackgroundNamespace = nextBackgroundAssetNamespace == null ? "" : nextBackgroundAssetNamespace.trim();
-        if (stopRequested.get() || cleanedUp.get() || stream == null || !lastStreaming
-                || !"live".equals(lastStatus)) {
+        ModeBStreamStatusSnapshot statusSnapshot = SNAPSHOT_HOLDER.get();
+        if (stopRequested.get() || cleanedUp.get() || stream == null || !statusSnapshot.streaming
+                || !"live".equals(statusSnapshot.status)) {
             rejectSceneReplacementNamespaces(nextAssetNamespace, nextBackgroundNamespace, resultCallback,
                     "Pergantian scene hanya tersedia saat Mode B sudah LIVE dan compositor aktif.");
             return;
