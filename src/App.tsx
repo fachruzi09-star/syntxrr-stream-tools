@@ -1640,6 +1640,8 @@ export default function App() {
     platform:
       item.platform === 'YouTube Music' || item.platform === 'Stream'
         ? 'YouTube'
+        : item.platform === 'Audius'
+        ? 'Manual'
         : item.platform || 'TikTok',
     addedAt: item.requestedAt,
     status,
@@ -1669,6 +1671,8 @@ export default function App() {
         platform:
           srState.currentTrack.platform === 'YouTube Music' || srState.currentTrack.platform === 'Stream'
             ? 'YouTube'
+            : srState.currentTrack.platform === 'Audius'
+            ? 'Manual'
             : srState.currentTrack.platform || 'TikTok',
         status: srState.isPlaying ? 'playing' : 'queued',
         requestedAt: srState.currentTrack.requestedAt,

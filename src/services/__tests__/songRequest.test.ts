@@ -169,6 +169,13 @@ async function runSongRequestTests(): Promise<void> {
       );
     }
 
+    if (urlStr.startsWith('https://api.audius.co/v1/tracks/search')) {
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     if (urlStr.startsWith('https://api.spotify.com/v1/search')) {
       return new Response(JSON.stringify({ tracks: { items: [] } }), {
         status: 200,

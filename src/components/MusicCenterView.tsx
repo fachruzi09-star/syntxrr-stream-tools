@@ -68,6 +68,8 @@ type ActiveTab = 'local_audio' | 'youtube' | 'spotify' | 'queue' | 'history' | '
 
 function formatHistoryProviderLabel(provider: SongRequestProvider): string {
   switch (provider) {
+    case 'audius':
+      return 'Audius';
     case 'youtube_music':
       return 'YouTube Music';
     case 'youtube':
@@ -720,11 +722,23 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
                           )}
                           <span className="text-[var(--app-border-strong)]">·</span>
                           <span>@{entry.requester}</span>
+                          {entry.licenseType && (
+                            <>
+                              <span className="text-[var(--app-border-strong)]">·</span>
+                              <span className="truncate">{entry.licenseType}</span>
+                            </>
+                          )}
                           <span className="text-[var(--app-border-strong)]">·</span>
                           <span className="font-mono-num text-[11px]">
                             {formatPlaybackTimestamp(entry.startedAt || entry.timestamp)}
                           </span>
                         </div>
+
+                        {entry.copyrightNotice && (
+                          <p className="text-[11px] text-[var(--app-text-muted)] truncate">
+                            {entry.copyrightNotice}
+                          </p>
+                        )}
 
                         {entry.errorMessage && (
                           <p className="text-[11px] text-rose-300">{entry.errorMessage}</p>
