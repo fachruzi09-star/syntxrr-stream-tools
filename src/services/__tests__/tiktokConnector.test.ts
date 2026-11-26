@@ -1,6 +1,8 @@
 // Unit test terarah untuk TikTokEventNormalizer, BoundedEventDeduplicator, dan TikTokLiveConnector
 // Dijalankan via: bun run src/services/__tests__/tiktokConnector.test.ts
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { StreamEvent } from '../../types';
 import type {
   NativeTikTokRawEventPayload,
@@ -16,6 +18,7 @@ import {
   isValidTikTokTargetUsername,
   normalizeTikTokTargetUsername,
   resolveTikTokTargetUsername,
+  sanitizeDiagnosticErrorMessage,
   type TikTokTransportAdapter,
 } from '../tiktokLiveConnector';
 import {
@@ -734,6 +737,362 @@ function runTargetUsernameResolutionTests(): void {
   assertEqual(resolvedFallback, 'oauth_owner', 'Falls back to linked OAuth username when manual target empty');
 }
 
+async function runConnectionDiagnosticsTests(): Promise<void> {
+  const hooks: {
+    stateCb: ((p: NativeTikTokStatePayload) => void) | null;
+    eventCb: ((p: NativeTikTokRawEventPayload) => void) | null;
+  } = {
+    stateCb: null,
+    eventCb: null,
+  };
+
+  let nextConnectPayload: NativeTikTokStatePayload | null = null;
+
+  const diagAdapter: TikTokTransportAdapter = {
+    isSupported: () => true,
+    connect: async (opts) => ({
+      accepted: true,
+      status: nextConnectPayload ?? {
+        state: 'resolving_room',
+        transport: 'none',
+        connectionMethod: opts.connectionMethod,
+        username: opts.username,
+        roomId: '',
+        viewerCount: 0,
+        totalLikeCount: 0,
+        message: `Resolving @${opts.username}`,
+      },
+    }),
+    disconnect: async () => ({
+      success: true,
+      status: {
+        state: 'disconnected',
+        transport: 'none',
+        username: 'diag_streamer',
+        roomId: '',
+        viewerCount: 0,
+        totalLikeCount: 0,
+        message: 'Disconnected',
+        diagnosticStage: 'disconnected',
+      },
+    }),
+    getStatus: async () => null,
+    onState: async (cb) => {
+      hooks.stateCb = cb;
+      return { remove: async () => { hooks.stateCb = null; } };
+    },
+    onEvent: async (cb) => {
+      hooks.eventCb = cb;
+      return { remove: async () => { hooks.eventCb = null; } };
+    },
+  };
+
+  const connector = new TikTokLiveConnector(diagAdapter);
+  await connector.ensureListenersAttached();
+
+  // 1. Legacy payload without diagnostics remains compatible
+  await connector.connect({ username: 'legacy_user' });
+  assertEqual(connector.getStatus().diagnostics, undefined, 'Legacy payload keeps diagnostics undefined');
+
+  hooks.stateCb?.({
+    state: 'connected_direct',
+    transport: 'direct_ws',
+    username: 'legacy_user',
+    roomId: '10001',
+    viewerCount: 12,
+    totalLikeCount: 40,
+    message: 'Connected legacy',
+  });
+  assertEqual(connector.getStatus().state, 'connected_direct', 'Legacy connected_direct works without diagnostics');
+  assertEqual(connector.getStatus().diagnostics, undefined, 'Legacy connected payload still has no diagnostics');
+
+  // 2. HTTP 101 websocket_open MUST NOT declare connected_direct
+  hooks.stateCb?.({
+    state: 'connecting_direct',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'WebSocket terbuka; meminta masuk ke room...',
+    diagnosticStage: 'websocket_open',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: true,
+    websocketHttpStatus: 101,
+    roomEntryFrameSent: false,
+    roomEntryConfirmed: false,
+    lastPayloadType: '',
+    lastFrameReceivedAt: null,
+    decodedEventCount: 0,
+    lastDecodedEventMethod: '',
+    lastEventReceivedAt: null,
+    lastTransportError: '',
+  });
+  const wsOpenStatus = connector.getStatus();
+  assertEqual(wsOpenStatus.state, 'connecting_direct', 'HTTP 101 must remain connecting_direct');
+  assertEqual(connector.isConnected(), false, 'HTTP 101 must not mark connector connected');
+  assertEqual(wsOpenStatus.diagnostics?.diagnosticStage, 'websocket_open', 'Stage is websocket_open');
+  assertEqual(wsOpenStatus.diagnostics?.roomLookupHttpStatus, 200, 'Room lookup HTTP 200 preserved');
+  assertEqual(wsOpenStatus.diagnostics?.websocketHttpStatus, 101, 'WebSocket HTTP 101 preserved');
+  assertEqual(typeof wsOpenStatus.diagnostics?.hasTtwidCookie, 'boolean', 'hasTtwidCookie is strictly boolean');
+  assertEqual(wsOpenStatus.diagnostics?.hasTtwidCookie, true, 'hasTtwidCookie true forwarded');
+  assertEqual(wsOpenStatus.diagnostics?.roomEntryConfirmed, false, 'Room entry not yet confirmed on HTTP 101');
+
+  // 3. Real Webcast event received BEFORE explicit im_enter_room_resp ACK is distinguished honestly
+  hooks.stateCb?.({
+    state: 'connected_direct',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 33,
+    totalLikeCount: 10,
+    message: 'Terhubung langsung ke TikTok LIVE @diag_streamer',
+    diagnosticStage: 'receiving_events',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: true,
+    websocketHttpStatus: 101,
+    roomEntryFrameSent: true,
+    roomEntryConfirmed: false,
+    eventReceivedBeforeRoomAck: true,
+    lastPayloadType: 'msg',
+    lastFrameReceivedAt: 1731571201000,
+    decodedEventCount: 1,
+    lastDecodedEventMethod: 'WebcastChatMessage',
+    lastEventReceivedAt: 1731571201010,
+    lastTransportError: '',
+  });
+  const earlyEventStatus = connector.getStatus();
+  assertEqual(earlyEventStatus.diagnostics?.roomEntryFrameSent, true, 'Room entry sent flag forwarded');
+  assertEqual(
+    earlyEventStatus.diagnostics?.roomEntryConfirmed,
+    false,
+    'Room ACK must remain false when only Webcast event arrived'
+  );
+  assertEqual(
+    earlyEventStatus.diagnostics?.eventReceivedBeforeRoomAck,
+    true,
+    'Event before ACK recorded separately'
+  );
+  assertEqual(earlyEventStatus.diagnostics?.decodedEventCount, 1, 'Decoded event count forwarded');
+  assertEqual(
+    earlyEventStatus.diagnostics?.lastDecodedEventMethod,
+    'WebcastChatMessage',
+    'Last decoded method forwarded'
+  );
+
+  // 4. Explicit im_enter_room_resp confirms roomEntryConfirmed=true
+  hooks.stateCb?.({
+    state: 'connected_direct',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 33,
+    totalLikeCount: 10,
+    message: 'Terhubung langsung ke TikTok LIVE @diag_streamer',
+    diagnosticStage: 'connected',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: true,
+    websocketHttpStatus: 101,
+    roomEntryFrameSent: true,
+    roomEntryConfirmed: true,
+    eventReceivedBeforeRoomAck: false,
+    lastPayloadType: 'im_enter_room_resp',
+    lastFrameReceivedAt: 1731571202000,
+    decodedEventCount: 1,
+    lastDecodedEventMethod: 'WebcastChatMessage',
+    lastEventReceivedAt: 1731571201010,
+    lastTransportError: '',
+  });
+  assertEqual(
+    connector.getStatus().diagnostics?.roomEntryConfirmed,
+    true,
+    'Explicit im_enter_room_resp sets roomEntryConfirmed=true'
+  );
+  assertEqual(
+    connector.getStatus().diagnostics?.lastPayloadType,
+    'im_enter_room_resp',
+    'lastPayloadType records im_enter_room_resp'
+  );
+
+  // 5. Credential, cookie, and raw chat payload sanitization in diagnostics
+  hooks.stateCb?.({
+    state: 'reconnecting',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Reconnecting',
+    diagnosticStage: 'reconnecting',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: 'ttwid=super_secret_cookie_value' as unknown as boolean,
+    websocketHttpStatus: 403,
+    roomEntryFrameSent: true,
+    roomEntryConfirmed: false,
+    lastPayloadType: 'WebcastChat raw payload {secret}',
+    decodedEventCount: 2,
+    lastDecodedEventMethod: 'halo halo chat text should not pass',
+    lastTransportError:
+      'Gagal ke https://ws.eulerstream.com?apiKey=my_euler_key&jwtKey=my_jwt_val&ttwid=cookie123 Cookie: ttwid=abc eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2ln',
+  });
+  const sanitizedDiag = connector.getStatus().diagnostics;
+  assertEqual(typeof sanitizedDiag?.hasTtwidCookie, 'boolean', 'Untyped cookie string coerced safely to boolean');
+  assertEqual(sanitizedDiag?.hasTtwidCookie, false, 'Non-boolean cookie string never treated as true');
+  assertEqual(sanitizedDiag?.lastPayloadType, null, 'Non-identifier payload type rejected');
+  assertEqual(sanitizedDiag?.lastDecodedEventMethod, null, 'Raw chat text in method field rejected');
+  const errStr = sanitizedDiag?.lastTransportError ?? '';
+  assert(!errStr.includes('my_euler_key'), 'Euler API key redacted from lastTransportError');
+  assert(!errStr.includes('my_jwt_val'), 'Euler JWT redacted from lastTransportError');
+  assert(!errStr.includes('cookie123'), 'Cookie value redacted from lastTransportError');
+  assert(!errStr.includes('eyJhbGciOiJIUzI1NiJ9'), 'JWT token redacted from lastTransportError');
+  assertEqual(
+    sanitizeDiagnosticErrorMessage('Error with token=abc123&sessionid=xyz999'),
+    'Error with token=[REDACTED]&sessionid=[REDACTED]',
+    'Sanitizer masks query credentials'
+  );
+
+  // 6. Starting a new session resets old session diagnostics (ACK, event counts, errors never carried over)
+  nextConnectPayload = {
+    state: 'resolving_room',
+    transport: 'none',
+    connectionMethod: 'direct',
+    username: 'fresh_creator',
+    roomId: '',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Mencari room LIVE @fresh_creator...',
+    diagnosticStage: 'resolving_room',
+    roomLookupHttpStatus: null,
+    hasTtwidCookie: false,
+    websocketHttpStatus: null,
+    roomEntryFrameSent: false,
+    roomEntryConfirmed: false,
+    eventReceivedBeforeRoomAck: false,
+    lastPayloadType: '',
+    lastFrameReceivedAt: null,
+    decodedEventCount: 0,
+    lastDecodedEventMethod: '',
+    lastEventReceivedAt: null,
+    lastTransportError: '',
+  };
+  const freshSession = await connector.connect({ username: 'fresh_creator' });
+  assertEqual(freshSession.diagnostics?.diagnosticStage, 'resolving_room', 'New session starts at resolving_room');
+  assertEqual(freshSession.diagnostics?.roomLookupHttpStatus, null, 'New session clears old HTTP status');
+  assertEqual(freshSession.diagnostics?.hasTtwidCookie, false, 'New session clears old cookie state');
+  assertEqual(freshSession.diagnostics?.websocketHttpStatus, null, 'New session clears old WS HTTP status');
+  assertEqual(freshSession.diagnostics?.roomEntryFrameSent, false, 'New session clears old roomEntryFrameSent');
+  assertEqual(freshSession.diagnostics?.roomEntryConfirmed, false, 'New session clears old roomEntryConfirmed');
+  assertEqual(freshSession.diagnostics?.decodedEventCount, 0, 'New session resets decodedEventCount');
+  assertEqual(freshSession.diagnostics?.lastTransportError, null, 'New session clears old transport error');
+
+  // 7. New session reset holds even when adapter returns accepted:true without status
+  hooks.stateCb?.({
+    state: 'connected_direct',
+    transport: 'direct_ws',
+    username: 'fresh_creator',
+    roomId: '999000',
+    viewerCount: 5,
+    totalLikeCount: 10,
+    message: 'Connected',
+    diagnosticStage: 'connected',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: true,
+    websocketHttpStatus: 101,
+    roomEntryFrameSent: true,
+    roomEntryConfirmed: true,
+    decodedEventCount: 7,
+    lastDecodedEventMethod: 'WebcastChatMessage',
+  });
+  assertEqual(connector.getStatus().diagnostics?.roomEntryConfirmed, true, 'Prior session has roomEntryConfirmed=true');
+  const noStatusAdapterConnector = new TikTokLiveConnector({
+    ...diagAdapter,
+    connect: async () => ({ accepted: true }),
+  });
+  // Seed prior session diagnostics on the connector
+  await noStatusAdapterConnector.ensureListenersAttached();
+  hooks.stateCb?.({
+    state: 'connected_direct',
+    transport: 'direct_ws',
+    username: 'old_creator',
+    roomId: '111',
+    viewerCount: 1,
+    totalLikeCount: 1,
+    message: 'Connected old',
+    diagnosticStage: 'connected',
+    roomEntryConfirmed: true,
+    decodedEventCount: 9,
+  });
+  assertEqual(
+    noStatusAdapterConnector.getStatus().diagnostics?.roomEntryConfirmed,
+    true,
+    'Old session had roomEntryConfirmed=true'
+  );
+  const newNoStatusRes = await noStatusAdapterConnector.connect({ username: 'new_creator' });
+  assertEqual(
+    newNoStatusRes.diagnostics,
+    undefined,
+    'Starting new session wipes prior diagnostics before native emits fresh snapshot'
+  );
+  await noStatusAdapterConnector.destroy();
+
+  // 8. Native Java & IntegrationsView static diagnostic contract checks
+  const javaSrc = readFileSync(
+    resolve(process.cwd(), 'android/app/src/main/java/com/syntxrr/streamtools/TikTokLiveConnector.java'),
+    'utf8'
+  );
+  const requiredJavaKeys = [
+    '"diagnosticStage"',
+    '"roomLookupHttpStatus"',
+    '"hasTtwidCookie"',
+    '"websocketHttpStatus"',
+    '"roomEntryFrameSent"',
+    '"roomEntryConfirmed"',
+    '"lastPayloadType"',
+    '"lastFrameReceivedAt"',
+    '"decodedEventCount"',
+    '"lastDecodedEventMethod"',
+    '"lastEventReceivedAt"',
+    '"lastTransportError"',
+  ];
+  for (const key of requiredJavaKeys) {
+    assert(javaSrc.includes(key), `TikTokLiveConnector.java must emit ${key}`);
+  }
+  const requiredStages = [
+    '"idle"',
+    '"resolving_room"',
+    '"room_resolved"',
+    '"websocket_connecting"',
+    '"websocket_open"',
+    '"room_entry_sent"',
+    '"waiting_room_ack"',
+    '"connected"',
+    '"receiving_events"',
+    '"reconnecting"',
+    '"waiting_for_live"',
+    '"error"',
+    '"disconnected"',
+  ];
+  for (const stage of requiredStages) {
+    assert(javaSrc.includes(stage), `TikTokLiveConnector.java must support stage ${stage}`);
+  }
+
+  const integrationsSrc = readFileSync(
+    resolve(process.cwd(), 'src/components/IntegrationsView.tsx'),
+    'utf8'
+  );
+  assert(
+    integrationsSrc.includes('Detail Diagnostik Koneksi'),
+    'IntegrationsView must include Detail Diagnostik Koneksi toggle'
+  );
+  assert(
+    integrationsSrc.includes('Belum tersedia'),
+    'IntegrationsView must display Belum tersedia when diagnostic data is unavailable'
+  );
+
+  await connector.disconnect();
+  await connector.destroy();
+}
+
 async function main(): Promise<void> {
   runNormalizerTests();
   runBoundedDedupTests();
@@ -742,6 +1101,7 @@ async function main(): Promise<void> {
   await runOAuthPkceAndScopeTests();
   runHonestStatusAndHudTests();
   runTargetUsernameResolutionTests();
+  await runConnectionDiagnosticsTests();
   console.log('ALL_TIKTOK_CONNECTOR_TESTS_PASSED');
 }
 

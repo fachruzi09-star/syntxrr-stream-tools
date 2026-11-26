@@ -6,9 +6,11 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import type {
   AppSettings,
   TikTokAccountState,
+  TikTokConnectionDiagnostics,
   TikTokConnectionMethod,
   TikTokConnectionState,
   TikTokConnectorStatus,
+  TikTokDiagnosticStage,
   TikTokRoomStatus,
 } from '../types';
 import { streamEventBus } from './eventBus';
@@ -97,6 +99,139 @@ function sanitizeUsernameInput(raw: string): string {
   return normalizeTikTokTargetUsername(raw);
 }
 
+const ALLOWED_DIAGNOSTIC_STAGES: ReadonlySet<TikTokDiagnosticStage> = new Set([
+  'idle',
+  'resolving_room',
+  'room_resolved',
+  'websocket_connecting',
+  'websocket_open',
+  'room_entry_sent',
+  'waiting_room_ack',
+  'connected',
+  'receiving_events',
+  'reconnecting',
+  'waiting_for_live',
+  'error',
+  'disconnected',
+]);
+
+function fallbackDiagnosticStageForState(state: TikTokConnectionState): TikTokDiagnosticStage {
+  switch (state) {
+    case 'resolving_room':
+      return 'resolving_room';
+    case 'connecting_direct':
+    case 'connecting_euler':
+      return 'websocket_connecting';
+    case 'connected_direct':
+    case 'connected_euler':
+      return 'connected';
+    case 'reconnecting':
+      return 'reconnecting';
+    case 'waiting_for_live':
+      return 'waiting_for_live';
+    case 'error':
+      return 'error';
+    default:
+      return 'disconnected';
+  }
+}
+
+export function sanitizeDiagnosticErrorMessage(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  let cleaned = raw.trim();
+  if (!cleaned) return null;
+
+  cleaned = cleaned
+    .replace(
+      /(apiKey|jwtKey|token|access_token|refresh_token|ttwid|sessionid|cookie|authorization)=([^&\s]+)/gi,
+      '$1=[REDACTED]'
+    )
+    .replace(/(?:^|\s)(?:Cookie|Set-Cookie|Authorization)\s*:\s*[^\r\n]+/gi, ' [REDACTED_HEADER]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, '[REDACTED]')
+    .trim();
+
+  if (cleaned.length > 220) {
+    cleaned = `${cleaned.slice(0, 217)}...`;
+  }
+  return cleaned || null;
+}
+
+function sanitizeDiagnosticIdentifier(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return /^[A-Za-z0-9_.:-]{1,64}$/.test(trimmed) ? trimmed : null;
+}
+
+function toFiniteIntegerOrNull(raw: unknown): number | null {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  return Math.trunc(raw);
+}
+
+export function extractDiagnosticsFromNativePayload(
+  payload: NativeTikTokStatePayload,
+  resolvedState: TikTokConnectionState
+): TikTokConnectionDiagnostics | undefined {
+  const nested = payload.diagnostics && typeof payload.diagnostics === 'object' ? payload.diagnostics : undefined;
+
+  const pick = <K extends keyof TikTokConnectionDiagnostics>(
+    key: K
+  ): unknown => {
+    const topValue = (payload as unknown as Record<string, unknown>)[key];
+    if (topValue !== undefined) return topValue;
+    if (nested) {
+      return (nested as unknown as Record<string, unknown>)[key];
+    }
+    return undefined;
+  };
+
+  const keys: Array<keyof TikTokConnectionDiagnostics> = [
+    'diagnosticStage',
+    'roomLookupHttpStatus',
+    'hasTtwidCookie',
+    'websocketHttpStatus',
+    'roomEntryFrameSent',
+    'roomEntryConfirmed',
+    'eventReceivedBeforeRoomAck',
+    'lastPayloadType',
+    'lastFrameReceivedAt',
+    'decodedEventCount',
+    'lastDecodedEventMethod',
+    'lastEventReceivedAt',
+    'lastTransportError',
+  ];
+
+  const hasAnyDiagnosticField = keys.some((k) => pick(k) !== undefined);
+  if (!hasAnyDiagnosticField) {
+    return undefined;
+  }
+
+  const rawStage = pick('diagnosticStage');
+  const diagnosticStage: TikTokDiagnosticStage =
+    typeof rawStage === 'string' && ALLOWED_DIAGNOSTIC_STAGES.has(rawStage as TikTokDiagnosticStage)
+      ? (rawStage as TikTokDiagnosticStage)
+      : fallbackDiagnosticStageForState(resolvedState);
+
+  const rawDecodedCount = toFiniteIntegerOrNull(pick('decodedEventCount'));
+
+  return {
+    diagnosticStage,
+    roomLookupHttpStatus: toFiniteIntegerOrNull(pick('roomLookupHttpStatus')),
+    hasTtwidCookie: pick('hasTtwidCookie') === true,
+    websocketHttpStatus: toFiniteIntegerOrNull(pick('websocketHttpStatus')),
+    roomEntryFrameSent: pick('roomEntryFrameSent') === true,
+    roomEntryConfirmed: pick('roomEntryConfirmed') === true,
+    eventReceivedBeforeRoomAck: pick('eventReceivedBeforeRoomAck') === true,
+    lastPayloadType: sanitizeDiagnosticIdentifier(pick('lastPayloadType')),
+    lastFrameReceivedAt: toFiniteIntegerOrNull(pick('lastFrameReceivedAt')),
+    decodedEventCount: rawDecodedCount !== null ? Math.max(0, rawDecodedCount) : 0,
+    lastDecodedEventMethod: sanitizeDiagnosticIdentifier(pick('lastDecodedEventMethod')),
+    lastEventReceivedAt: toFiniteIntegerOrNull(pick('lastEventReceivedAt')),
+    lastTransportError: sanitizeDiagnosticErrorMessage(pick('lastTransportError')),
+  };
+}
+
 function initialStatus(): TikTokConnectorStatus {
   return {
     state: 'disconnected',
@@ -108,6 +243,7 @@ function initialStatus(): TikTokConnectorStatus {
     viewerCount: 0,
     totalLikeCount: 0,
     message: 'Belum terhubung ke TikTok LIVE.',
+    diagnostics: undefined,
     updatedAt: Date.now(),
   };
 }
@@ -144,7 +280,10 @@ export class TikTokLiveConnector {
   }
 
   getStatus(): TikTokConnectorStatus {
-    return { ...this.status };
+    return {
+      ...this.status,
+      diagnostics: this.status.diagnostics ? { ...this.status.diagnostics } : undefined,
+    };
   }
 
   isConnected(): boolean {
@@ -329,6 +468,7 @@ export class TikTokLiveConnector {
         totalLikeCount: 0,
         message: `Mencari room LIVE @${cleanUser}...`,
         errorCode: undefined,
+        diagnostics: undefined,
       });
 
       const res = await this.adapter.connect({
@@ -354,6 +494,7 @@ export class TikTokLiveConnector {
           totalLikeCount: 0,
           message: res.message || 'Gagal memulai koneksi TikTok LIVE.',
           errorCode: 'CONNECT_REJECTED',
+          diagnostics: undefined,
         });
       }
       return this.getStatus();
@@ -384,6 +525,7 @@ export class TikTokLiveConnector {
       totalLikeCount: 0,
       message: 'Koneksi TikTok LIVE diputuskan.',
       errorCode: undefined,
+      diagnostics: undefined,
     });
     return this.getStatus();
   }
@@ -467,6 +609,8 @@ export class TikTokLiveConnector {
       ? 'not_live'
       : this.status.roomStatus ?? 'unknown';
 
+    const diagnostics = extractDiagnosticsFromNativePayload(payload, nextState);
+
     this.updateStatus({
       state: nextState,
       transport: payload.transport || 'none',
@@ -479,6 +623,7 @@ export class TikTokLiveConnector {
         typeof payload.totalLikeCount === 'number' ? payload.totalLikeCount : this.status.totalLikeCount,
       message: payload.message || this.status.message,
       errorCode: payload.errorCode || undefined,
+      diagnostics,
     });
   }
 

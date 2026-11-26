@@ -329,6 +329,37 @@ export interface TikTokAccountState {
   linkErrorMessage?: string;
 }
 
+export type TikTokDiagnosticStage =
+  | 'idle'
+  | 'resolving_room'
+  | 'room_resolved'
+  | 'websocket_connecting'
+  | 'websocket_open'
+  | 'room_entry_sent'
+  | 'waiting_room_ack'
+  | 'connected'
+  | 'receiving_events'
+  | 'reconnecting'
+  | 'waiting_for_live'
+  | 'error'
+  | 'disconnected';
+
+export interface TikTokConnectionDiagnostics {
+  diagnosticStage: TikTokDiagnosticStage;
+  roomLookupHttpStatus: number | null;
+  hasTtwidCookie: boolean;
+  websocketHttpStatus: number | null;
+  roomEntryFrameSent: boolean;
+  roomEntryConfirmed: boolean;
+  eventReceivedBeforeRoomAck?: boolean;
+  lastPayloadType: string | null;
+  lastFrameReceivedAt: number | null;
+  decodedEventCount: number;
+  lastDecodedEventMethod: string | null;
+  lastEventReceivedAt: number | null;
+  lastTransportError: string | null;
+}
+
 export interface TikTokConnectorStatus {
   state: TikTokConnectionState;
   transport: TikTokTransportMode;
@@ -340,6 +371,7 @@ export interface TikTokConnectorStatus {
   totalLikeCount: number;
   message: string;
   errorCode?: string;
+  diagnostics?: TikTokConnectionDiagnostics;
   updatedAt: number;
 }
 

@@ -8,8 +8,10 @@
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type {
+  TikTokConnectionDiagnostics,
   TikTokConnectionMethod,
   TikTokConnectionState,
+  TikTokDiagnosticStage,
   TikTokRoomStatus,
   TikTokTransportMode,
 } from '../types';
@@ -148,6 +150,20 @@ export interface NativeTikTokStatePayload {
   message: string;
   errorCode?: string;
   timestamp?: number;
+  diagnosticStage?: TikTokDiagnosticStage;
+  roomLookupHttpStatus?: number | null;
+  hasTtwidCookie?: boolean;
+  websocketHttpStatus?: number | null;
+  roomEntryFrameSent?: boolean;
+  roomEntryConfirmed?: boolean;
+  eventReceivedBeforeRoomAck?: boolean;
+  lastPayloadType?: string | null;
+  lastFrameReceivedAt?: number | null;
+  decodedEventCount?: number;
+  lastDecodedEventMethod?: string | null;
+  lastEventReceivedAt?: number | null;
+  lastTransportError?: string | null;
+  diagnostics?: Partial<TikTokConnectionDiagnostics> | null;
 }
 
 export interface NativeTikTokRawEventPayload {

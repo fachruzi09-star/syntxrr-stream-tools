@@ -5,8 +5,10 @@ import {
   IntegrationProviderId,
   ModeASessionMode,
   TikTokAccountState,
+  TikTokConnectionDiagnostics,
   TikTokConnectionMethod,
   TikTokConnectorStatus,
+  TikTokDiagnosticStage,
 } from '../types';
 import { STATUS_DEFINITIONS, FeatureStatus } from '../theme/designSystem';
 import {
@@ -14,6 +16,7 @@ import {
   isValidTikTokTargetUsername,
   normalizeTikTokTargetUsername,
   resolveTikTokTargetUsername,
+  sanitizeDiagnosticErrorMessage,
 } from '../services/tiktokLiveConnector';
 import {
   getTikTokAuthConfiguration,
@@ -37,6 +40,9 @@ import {
   Loader2,
   Trash2,
   AtSign,
+  ChevronDown,
+  ChevronUp,
+  Activity,
 } from 'lucide-react';
 
 interface IntegrationsViewProps {
@@ -103,6 +109,192 @@ function toneColor(tone: 'ok' | 'warn' | 'error' | 'off'): string {
   }
 }
 
+function formatDiagnosticStageLabel(stage: TikTokDiagnosticStage): string {
+  switch (stage) {
+    case 'idle':
+      return 'Siaga (idle)';
+    case 'resolving_room':
+      return 'Lookup Room (resolving_room)';
+    case 'room_resolved':
+      return 'Room Ditemukan (room_resolved)';
+    case 'websocket_connecting':
+      return 'Menghubungkan WebSocket (websocket_connecting)';
+    case 'websocket_open':
+      return 'WebSocket Terbuka (websocket_open)';
+    case 'room_entry_sent':
+      return 'Frame Masuk Dikirim (room_entry_sent)';
+    case 'waiting_room_ack':
+      return 'Menunggu ACK Room (waiting_room_ack)';
+    case 'connected':
+      return 'Terhubung (connected)';
+    case 'receiving_events':
+      return 'Menerima Event (receiving_events)';
+    case 'reconnecting':
+      return 'Menyambung Ulang (reconnecting)';
+    case 'waiting_for_live':
+      return 'Menunggu LIVE (waiting_for_live)';
+    case 'error':
+      return 'Gagal (error)';
+    case 'disconnected':
+      return 'Terputus (disconnected)';
+  }
+}
+
+interface TikTokDiagnosticsPanelProps {
+  diagnostics?: TikTokConnectionDiagnostics;
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+const TikTokDiagnosticsCollapsible: React.FC<TikTokDiagnosticsPanelProps> = ({
+  diagnostics,
+  isOpen,
+  onToggle,
+}) => {
+  const stageText = diagnostics?.diagnosticStage
+    ? formatDiagnosticStageLabel(diagnostics.diagnosticStage)
+    : 'Belum tersedia';
+  const roomLookupHttpText =
+    typeof diagnostics?.roomLookupHttpStatus === 'number'
+      ? diagnostics.roomLookupHttpStatus === 0
+        ? '0 (Gagal jaringan)'
+        : `HTTP ${diagnostics.roomLookupHttpStatus}`
+      : 'Belum tersedia';
+  const ttwidStatusText = diagnostics
+    ? diagnostics.hasTtwidCookie
+      ? 'Tersedia'
+      : 'Tidak tersedia'
+    : 'Belum tersedia';
+  const websocketHttpText =
+    typeof diagnostics?.websocketHttpStatus === 'number'
+      ? diagnostics.websocketHttpStatus === 0
+        ? '0 (Handshake gagal)'
+        : `HTTP ${diagnostics.websocketHttpStatus}`
+      : 'Belum tersedia';
+  const roomEntrySentText = diagnostics
+    ? diagnostics.roomEntryFrameSent
+      ? 'Sudah dikirim'
+      : 'Belum dikirim'
+    : 'Belum tersedia';
+  const roomEntryConfirmedText = diagnostics
+    ? diagnostics.roomEntryConfirmed
+      ? 'Terkonfirmasi'
+      : diagnostics.eventReceivedBeforeRoomAck
+      ? 'Belum ACK (event Webcast masuk)'
+      : 'Belum dikonfirmasi'
+    : 'Belum tersedia';
+  const lastPayloadTypeText = diagnostics?.lastPayloadType || 'Belum tersedia';
+  const decodedEventCountText =
+    typeof diagnostics?.decodedEventCount === 'number'
+      ? String(diagnostics.decodedEventCount)
+      : 'Belum tersedia';
+  const lastDecodedEventMethodText = diagnostics?.lastDecodedEventMethod || 'Belum tersedia';
+  const lastTransportErrorText =
+    sanitizeDiagnosticErrorMessage(diagnostics?.lastTransportError) || 'Belum tersedia';
+
+  return (
+    <div className="border-t border-[var(--app-border)] bg-[var(--app-surface)]">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        onClick={onToggle}
+        className="w-full min-h-[44px] px-4 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-[var(--app-surface-hover)] transition-colors"
+      >
+        <span className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--app-text)] min-w-0">
+          <Activity className="w-3.5 h-3.5 text-[var(--app-accent-text)] shrink-0" />
+          <span className="truncate">Detail Diagnostik Koneksi</span>
+        </span>
+        <span className="inline-flex items-center gap-2 text-[11px] text-[var(--app-text-muted)] shrink-0">
+          <span className="hidden sm:inline tabular-metrics">
+            {diagnostics?.diagnosticStage ?? 'Belum tersedia'}
+          </span>
+          {isOpen ? (
+            <ChevronUp className="w-4 h-4 text-[var(--app-text-secondary)]" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-[var(--app-text-secondary)]" />
+          )}
+        </span>
+      </button>
+
+      {isOpen && (
+        <div className="px-4 pb-3.5 pt-2 border-t border-[var(--app-border)] bg-[var(--app-surface-muted)]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Tahap koneksi saat ini</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5 break-words tabular-metrics">
+                {stageText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">HTTP status Room Lookup</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                {roomLookupHttpText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Cookie anonim &quot;ttwid&quot;</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                {ttwidStatusText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">HTTP status WebSocket</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                {websocketHttpText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Frame masuk room</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                {roomEntrySentText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Konfirmasi room</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                {roomEntryConfirmedText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Payload type terakhir</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5 truncate tabular-metrics">
+                {lastPayloadTypeText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Jumlah decoded event</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                {decodedEventCountText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Method event terakhir</div>
+              <div className="font-semibold text-[var(--app-text)] mt-0.5 truncate tabular-metrics">
+                {lastDecodedEventMethodText}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0 sm:col-span-2">
+              <div className="text-[10px] text-[var(--app-text-muted)]">Pesan kegagalan terakhir</div>
+              <div className="font-medium text-[var(--app-text-secondary)] mt-0.5 break-words">
+                {lastTransportErrorText}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   integrations,
   onUpdateIntegrations,
@@ -131,6 +323,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
     settings?.eulerStreamJwtKey?.trim() ? 'jwt' : 'api_key'
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
 
   const savedTargetUsername = resolveTikTokTargetUsername(settings, tiktokAccount);
   const [targetUsernameDraft, setTargetUsernameDraft] = useState(savedTargetUsername);
@@ -551,6 +744,12 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
               <span>{tiktokStatus.message}</span>
             </div>
           )}
+
+          <TikTokDiagnosticsCollapsible
+            diagnostics={tiktokStatus.diagnostics}
+            isOpen={isDiagnosticsOpen}
+            onToggle={() => setIsDiagnosticsOpen((prev) => !prev)}
+          />
         </section>
 
         {/* 2-Column Desktop Workbench */}
@@ -1041,6 +1240,12 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
               </span>
             </div>
           </div>
+
+          <TikTokDiagnosticsCollapsible
+            diagnostics={tiktokStatus.diagnostics}
+            isOpen={isDiagnosticsOpen}
+            onToggle={() => setIsDiagnosticsOpen((prev) => !prev)}
+          />
         </section>
       )}
 

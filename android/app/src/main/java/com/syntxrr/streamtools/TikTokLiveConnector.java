@@ -19,6 +19,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 /**
  * TikTokLiveConnector
@@ -129,6 +130,36 @@ public final class TikTokLiveConnector {
     private int mWaitingLiveAttempt = 0;
     private long mTransportConnectedAtMs = 0L;
 
+    // Mode A connection diagnostics (in-memory per session, never persisted or logged with secrets)
+    private static final Pattern SENSITIVE_QUERY_PARAM_PATTERN = Pattern.compile(
+            "(?i)(apiKey|jwtKey|token|access_token|refresh_token|ttwid|sessionid|cookie|authorization)=([^&\\s]+)"
+    );
+    private static final Pattern JWT_LIKE_PATTERN = Pattern.compile(
+            "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*"
+    );
+
+    @NonNull
+    private String mDiagStage = "idle";
+    @Nullable
+    private Integer mDiagRoomLookupHttpStatus = null;
+    private boolean mDiagHasTtwidCookie = false;
+    @Nullable
+    private Integer mDiagWebsocketHttpStatus = null;
+    private boolean mDiagRoomEntryFrameSent = false;
+    private boolean mDiagRoomEntryConfirmed = false;
+    private boolean mDiagEventReceivedBeforeRoomAck = false;
+    @NonNull
+    private String mDiagLastPayloadType = "";
+    @Nullable
+    private Long mDiagLastFrameReceivedAt = null;
+    private int mDiagDecodedEventCount = 0;
+    @NonNull
+    private String mDiagLastDecodedEventMethod = "";
+    @Nullable
+    private Long mDiagLastEventReceivedAt = null;
+    @NonNull
+    private String mDiagLastTransportError = "";
+
     private TikTokLiveConnector(@NonNull Context appContext) {
         this.mAppContext = appContext;
     }
@@ -156,6 +187,23 @@ public final class TikTokLiveConnector {
                 obj.put("message", mMessage);
                 obj.put("errorCode", mErrorCode);
                 obj.put("timestamp", System.currentTimeMillis());
+                obj.put("diagnosticStage", mDiagStage);
+                obj.put("roomLookupHttpStatus",
+                        mDiagRoomLookupHttpStatus != null ? mDiagRoomLookupHttpStatus : JSONObject.NULL);
+                obj.put("hasTtwidCookie", mDiagHasTtwidCookie);
+                obj.put("websocketHttpStatus",
+                        mDiagWebsocketHttpStatus != null ? mDiagWebsocketHttpStatus : JSONObject.NULL);
+                obj.put("roomEntryFrameSent", mDiagRoomEntryFrameSent);
+                obj.put("roomEntryConfirmed", mDiagRoomEntryConfirmed);
+                obj.put("eventReceivedBeforeRoomAck", mDiagEventReceivedBeforeRoomAck);
+                obj.put("lastPayloadType", mDiagLastPayloadType);
+                obj.put("lastFrameReceivedAt",
+                        mDiagLastFrameReceivedAt != null ? mDiagLastFrameReceivedAt : JSONObject.NULL);
+                obj.put("decodedEventCount", mDiagDecodedEventCount);
+                obj.put("lastDecodedEventMethod", mDiagLastDecodedEventMethod);
+                obj.put("lastEventReceivedAt",
+                        mDiagLastEventReceivedAt != null ? mDiagLastEventReceivedAt : JSONObject.NULL);
+                obj.put("lastTransportError", mDiagLastTransportError);
             } catch (Exception ignored) {
             }
             return obj;
@@ -229,6 +277,65 @@ public final class TikTokLiveConnector {
         return value != null ? value.trim() : "";
     }
 
+    static boolean hasTtwidCookie(@Nullable Map<String, String> cookies) {
+        if (cookies == null || cookies.isEmpty()) return false;
+        for (Map.Entry<String, String> entry : cookies.entrySet()) {
+            if (entry.getKey() != null && "ttwid".equalsIgnoreCase(entry.getKey().trim())) {
+                String value = entry.getValue();
+                return value != null && !value.trim().isEmpty();
+            }
+        }
+        return false;
+    }
+
+    @NonNull
+    static String sanitizeDiagnosticReason(
+            @Nullable String raw,
+            @Nullable String apiKey,
+            @Nullable String jwtKey
+    ) {
+        if (raw == null) return "";
+        String cleaned = raw.trim();
+        if (cleaned.isEmpty()) return "";
+        String cleanApiKey = normalizeSecret(apiKey);
+        if (!cleanApiKey.isEmpty()) {
+            cleaned = cleaned.replace(cleanApiKey, "[REDACTED]");
+        }
+        String cleanJwtKey = normalizeSecret(jwtKey);
+        if (!cleanJwtKey.isEmpty()) {
+            cleaned = cleaned.replace(cleanJwtKey, "[REDACTED]");
+        }
+        cleaned = SENSITIVE_QUERY_PARAM_PATTERN.matcher(cleaned).replaceAll("$1=[REDACTED]");
+        cleaned = JWT_LIKE_PATTERN.matcher(cleaned).replaceAll("[REDACTED]");
+        if (cleaned.length() > 220) {
+            cleaned = cleaned.substring(0, 217) + "...";
+        }
+        return cleaned;
+    }
+
+    private void resetDiagnosticsLocked(@NonNull String initialStage) {
+        mDiagStage = initialStage;
+        mDiagRoomLookupHttpStatus = null;
+        mDiagHasTtwidCookie = false;
+        mDiagWebsocketHttpStatus = null;
+        mDiagRoomEntryFrameSent = false;
+        mDiagRoomEntryConfirmed = false;
+        mDiagEventReceivedBeforeRoomAck = false;
+        mDiagLastPayloadType = "";
+        mDiagLastFrameReceivedAt = null;
+        mDiagDecodedEventCount = 0;
+        mDiagLastDecodedEventMethod = "";
+        mDiagLastEventReceivedAt = null;
+        mDiagLastTransportError = "";
+    }
+
+    private void resetWebSocketAttemptDiagnosticsLocked() {
+        mDiagWebsocketHttpStatus = null;
+        mDiagRoomEntryFrameSent = false;
+        mDiagRoomEntryConfirmed = false;
+        mDiagEventReceivedBeforeRoomAck = false;
+    }
+
     public void connect(
             @Nullable String rawUsername,
             @Nullable String eulerApiKey,
@@ -261,6 +368,9 @@ public final class TikTokLiveConnector {
         String suppliedJwtKey = normalizeSecret(eulerJwtKey);
         String credentialError = validateEulerCredentialErrorCode(method, suppliedApiKey, suppliedJwtKey);
         if (credentialError != null) {
+            synchronized (mLock) {
+                resetDiagnosticsLocked("error");
+            }
             if ("EULER_CONFLICTING_CREDENTIALS".equals(credentialError)) {
                 stopInternal("error", credentialError,
                         "EulerStream hanya menerima tepat satu kredensial: API key atau JWT, bukan keduanya.");
@@ -272,6 +382,7 @@ public final class TikTokLiveConnector {
         }
         if (normalized.isEmpty()) {
             synchronized (mLock) {
+                resetDiagnosticsLocked("error");
                 mRoomStatus = "not_found";
             }
             stopInternal("error", "INVALID_INPUT", "Username TikTok tidak valid atau kosong.");
@@ -322,6 +433,7 @@ public final class TikTokLiveConnector {
             mTransportConnectedAtMs = 0L;
             mTransportMode = "none";
             mErrorCode = "";
+            resetDiagnosticsLocked("resolving_room");
             setStateLocked("resolving_room", "none", "Mencari room LIVE @" + normalized + "...");
         }
 
@@ -340,6 +452,12 @@ public final class TikTokLiveConnector {
             mSessionGeneration.incrementAndGet();
             cancelPendingTaskLocked();
             closeActiveWsLocked();
+            if ("error".equals(terminalState)) {
+                mDiagStage = "error";
+                mDiagLastTransportError = sanitizeDiagnosticReason(message, mEulerApiKey, mEulerJwtKey);
+            } else {
+                mDiagStage = "disconnected";
+            }
             mEulerApiKey = "";
             mEulerJwtKey = "";
             mSessionCookies.clear();
@@ -382,17 +500,29 @@ public final class TikTokLiveConnector {
 
         switch (res.status) {
             case INVALID_INPUT:
-                synchronized (mLock) { mRoomStatus = "not_found"; }
+                synchronized (mLock) {
+                    if (isStaleGeneration(gen)) return;
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    mRoomStatus = "not_found";
+                }
                 failSessionIfCurrent(gen, "error", "INVALID_INPUT", res.message);
                 return;
             case ACCOUNT_NOT_FOUND:
-                synchronized (mLock) { mRoomStatus = "not_found"; }
+                synchronized (mLock) {
+                    if (isStaleGeneration(gen)) return;
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    mRoomStatus = "not_found";
+                }
                 failSessionIfCurrent(gen, "error", "ACCOUNT_NOT_FOUND", res.message);
                 return;
             case NOT_LIVE: {
                 final boolean tryEuler;
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
                     tryEuler = canAttemptEulerFallback(mAllowEulerFallback, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey)
                             || "euler".equals(mConnectionMethod);
                 }
@@ -410,6 +540,9 @@ public final class TikTokLiveConnector {
                 final boolean tryEuler;
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    mDiagLastTransportError = sanitizeDiagnosticReason(res.message, mEulerApiKey, mEulerJwtKey);
                     mRoomStatus = "unreadable";
                     mSessionCookies.putAll(res.sessionCookies);
                     tryEuler = canAttemptEulerFallback(mAllowEulerFallback, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey)
@@ -428,6 +561,9 @@ public final class TikTokLiveConnector {
                 final boolean isEuler;
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    mDiagLastTransportError = sanitizeDiagnosticReason(res.message, mEulerApiKey, mEulerJwtKey);
                     isEuler = "euler".equals(mConnectionMethod);
                 }
                 scheduleReconnectOrFail(
@@ -446,6 +582,10 @@ public final class TikTokLiveConnector {
                     mRoomId = res.roomId;
                     mRoomStatus = "live";
                     mSessionCookies = new LinkedHashMap<>(res.sessionCookies);
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    mDiagLastTransportError = "";
+                    mDiagStage = "room_resolved";
                     if (roomChanged) {
                         // A creator can start a new LIVE with a different room ID. Never
                         // carry a cursor/internalExt or retry budget from the previous room.
@@ -455,6 +595,7 @@ public final class TikTokLiveConnector {
                     }
                     mWaitingLiveAttempt = 0;
                     method = mConnectionMethod;
+                    emitCurrentState();
                 }
                 if ("euler".equals(method)) {
                     startEulerFallback(gen, "Menghubungkan via EulerStream ke @" + username + "...");
@@ -472,6 +613,7 @@ public final class TikTokLiveConnector {
             cancelPendingTaskLocked();
             mRoomStatus = "not_live";
             mErrorCode = "NOT_LIVE";
+            mDiagStage = "waiting_for_live";
 
             mWaitingLiveAttempt++;
             int currentAttempt = mWaitingLiveAttempt;
@@ -485,6 +627,7 @@ public final class TikTokLiveConnector {
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
                     mPendingTask = null;
+                    mDiagStage = "resolving_room";
                     setStateLocked("resolving_room", "none", "Memeriksa kembali status LIVE @" + username + "...");
                 }
                 mWorker.execute(() -> runRoomResolution(gen, username));
@@ -520,6 +663,8 @@ public final class TikTokLiveConnector {
             long delayMs = Math.min(WAITING_LIVE_MAX_INTERVAL_MS,
                     WAITING_LIVE_BASE_INTERVAL_MS * (1L << multiplier));
 
+            mDiagStage = "reconnecting";
+            mDiagLastTransportError = sanitizeDiagnosticReason(baseMessage, mEulerApiKey, mEulerJwtKey);
             setStateLocked(
                     "reconnecting",
                     "none",
@@ -530,6 +675,7 @@ public final class TikTokLiveConnector {
                 synchronized (mLock) {
                     if (isStaleGeneration(gen)) return;
                     mPendingTask = null;
+                    mDiagStage = "resolving_room";
                     setStateLocked(
                             "resolving_room",
                             "none",
@@ -560,6 +706,8 @@ public final class TikTokLiveConnector {
             useAlternateDirectHost = mUseAlternateDirectWsHost;
             username = mUsername;
             closeActiveWsLocked();
+            resetWebSocketAttemptDiagnosticsLocked();
+            mDiagStage = "websocket_connecting";
             setStateLocked(
                     "connecting_direct",
                     "direct_ws",
@@ -610,6 +758,14 @@ public final class TikTokLiveConnector {
             @Override
             public void onConnected(int httpStatus) {
                 if (isStaleTransport(gen, ws)) return;
+                synchronized (mLock) {
+                    if (isStaleTransport(gen, ws)) return;
+                    // A successful HTTP 101 only proves that the socket opened.
+                    // Never mark connected_direct on HTTP 101; record websocket_open first.
+                    mDiagWebsocketHttpStatus = httpStatus;
+                    mDiagStage = "websocket_open";
+                    emitCurrentState();
+                }
                 final byte[] enterFrame;
                 try {
                     enterFrame = TikTokWebcastDecoder.encodePushFrameEnterRoom(roomId, nextEnterUniqueId());
@@ -619,16 +775,24 @@ public final class TikTokLiveConnector {
                     return;
                 }
                 if (!ws.sendBinary(enterFrame)) {
+                    synchronized (mLock) {
+                        if (!isStaleTransport(gen, ws)) {
+                            mDiagRoomEntryFrameSent = false;
+                        }
+                    }
                     scheduleReconnectOrFail(gen, "DIRECT_ROOM_ENTER_SEND_FAILED",
                             "WebSocket terbuka tetapi pesan masuk ke room TikTok gagal dikirim.", false);
                     return;
                 }
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
-                    // A successful HTTP 101 only proves that the socket opened.
                     // Wait for im_enter_room_resp or real webcast data before reporting connected.
                     mTransportConnectedAtMs = 0L;
                     mErrorCode = "";
+                    mDiagRoomEntryFrameSent = true;
+                    mDiagStage = "room_entry_sent";
+                    emitCurrentState();
+                    mDiagStage = "waiting_room_ack";
                     setStateLocked(
                             "connecting_direct",
                             "direct_ws",
@@ -670,6 +834,8 @@ public final class TikTokLiveConnector {
                 boolean retryOnAlternateHost = false;
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
+                    mDiagWebsocketHttpStatus = httpStatus;
+                    mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
                     fallbackAvailable = canAttemptEulerFallback(allowEuler, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey);
                     mTransportConnectedAtMs = 0L;
                     if (!mUseAlternateDirectWsHost
@@ -701,14 +867,19 @@ public final class TikTokLiveConnector {
             @Override
             public void onClosed(int code, @NonNull String reason, boolean byRemote) {
                 if (!byRemote || isStaleTransport(gen, ws)) return;
+                String msg = "Koneksi WebSocket langsung ditutup server (kode " + code + ").";
                 synchronized (mLock) {
                     if (!isStaleTransport(gen, ws) && mTransportConnectedAtMs > 0L
                             && System.currentTimeMillis() - mTransportConnectedAtMs >= 60_000L) {
                         mReconnectAttempt = 0;
                     }
                     mTransportConnectedAtMs = 0L;
+                    mDiagLastTransportError = sanitizeDiagnosticReason(
+                            reason.isEmpty() ? msg : msg + " " + reason,
+                            mEulerApiKey,
+                            mEulerJwtKey
+                    );
                 }
-                String msg = "Koneksi WebSocket langsung ditutup server (kode " + code + ").";
                 scheduleReconnectOrFail(gen, "WS_CLOSED", msg, false);
             }
 
@@ -721,6 +892,7 @@ public final class TikTokLiveConnector {
                         mReconnectAttempt = 0;
                     }
                     mTransportConnectedAtMs = 0L;
+                    mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
                 }
                 scheduleReconnectOrFail(gen, "WS_ERROR", reason, false);
             }
@@ -735,6 +907,8 @@ public final class TikTokLiveConnector {
             if (isStaleGeneration(gen)) return;
             closeActiveWsLocked();
             cancelPendingTaskLocked();
+            resetWebSocketAttemptDiagnosticsLocked();
+            mDiagStage = "websocket_connecting";
             username = mUsername;
             apiKey = mEulerApiKey;
             jwtKey = mEulerJwtKey;
@@ -772,6 +946,9 @@ public final class TikTokLiveConnector {
                     mTransportConnectedAtMs = System.currentTimeMillis();
                     mErrorCode = "";
                     mRoomStatus = "live";
+                    mDiagWebsocketHttpStatus = httpStatus;
+                    mDiagLastTransportError = "";
+                    mDiagStage = "connected";
                     setStateLocked("connected_euler", "euler", "Terhubung via EulerStream ke @" + mUsername);
                 }
             }
@@ -786,12 +963,22 @@ public final class TikTokLiveConnector {
             @Override
             public void onTextFrame(@NonNull String text) {
                 if (isStaleTransport(gen, ws)) return;
+                synchronized (mLock) {
+                    if (isStaleTransport(gen, ws)) return;
+                    mDiagLastPayloadType = "euler_json";
+                    mDiagLastFrameReceivedAt = System.currentTimeMillis();
+                }
                 handleEulerJsonFrame(gen, text);
             }
 
             @Override
             public void onHandshakeRejected(int httpStatus, @NonNull String reason) {
                 if (isStaleTransport(gen, ws)) return;
+                synchronized (mLock) {
+                    if (isStaleTransport(gen, ws)) return;
+                    mDiagWebsocketHttpStatus = httpStatus;
+                    mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
+                }
                 if (httpStatus == 401 || httpStatus == 403) {
                     handleEulerFallbackUnavailable(gen, reason);
                 } else if (httpStatus == 404 || httpStatus == 410) {
@@ -821,6 +1008,11 @@ public final class TikTokLiveConnector {
                         mReconnectAttempt = 0;
                     }
                     mTransportConnectedAtMs = 0L;
+                    mDiagLastTransportError = sanitizeDiagnosticReason(
+                            "WebSocket EulerStream ditutup (kode " + code + "). " + reason,
+                            mEulerApiKey,
+                            mEulerJwtKey
+                    );
                 }
                 scheduleReconnectOrFail(gen, "EULER_WS_CLOSED",
                         "WebSocket EulerStream ditutup (kode " + code + "). " + reason, true);
@@ -835,6 +1027,7 @@ public final class TikTokLiveConnector {
                         mReconnectAttempt = 0;
                     }
                     mTransportConnectedAtMs = 0L;
+                    mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
                 }
                 scheduleReconnectOrFail(gen, "EULER_WS_ERROR", reason, true);
             }
@@ -1087,6 +1280,7 @@ public final class TikTokLiveConnector {
             @NonNull byte[] payload
     ) {
         TikTokWebcastDecoder.DecodedResponse decoded = TikTokWebcastDecoder.decodeWebSocketBinaryFrame(payload);
+        long frameReceivedAt = System.currentTimeMillis();
         boolean roomAccepted = "im_enter_room_resp".equalsIgnoreCase(decoded.payloadType);
         boolean hasNonEndWebcastData = false;
         for (JSONObject evt : decoded.events) {
@@ -1096,27 +1290,49 @@ public final class TikTokLiveConnector {
                 break;
             }
         }
-        if (roomAccepted || hasNonEndWebcastData) {
-            synchronized (mLock) {
-                if (isStaleTransport(gen, ws)) return;
-                if ("direct".equals(mConnectionMethod) && "connecting_direct".equals(mState)) {
-                    mRoomStatus = "live";
-                    mReconnectAttempt = 0;
-                    mTransportConnectedAtMs = System.currentTimeMillis();
-                    cancelPendingTaskLocked();
-                    setStateLocked("connected_direct", "direct_ws",
-                            "Terhubung langsung ke TikTok LIVE @" + mUsername);
-                }
-            }
-        }
+        boolean emitDiagUpdate = false;
         synchronized (mLock) {
             if (isStaleTransport(gen, ws)) return;
+            String previousPayloadType = mDiagLastPayloadType;
+            mDiagLastFrameReceivedAt = frameReceivedAt;
+            if (!decoded.payloadType.isEmpty()) {
+                mDiagLastPayloadType = decoded.payloadType;
+            }
+            if (roomAccepted) {
+                if (!mDiagRoomEntryConfirmed) {
+                    emitDiagUpdate = true;
+                }
+                mDiagRoomEntryConfirmed = true;
+            } else if (hasNonEndWebcastData && !mDiagRoomEntryConfirmed) {
+                mDiagEventReceivedBeforeRoomAck = true;
+            }
             if (!decoded.cursor.isEmpty()) mCursor = decoded.cursor;
             if (!decoded.internalExt.isEmpty()) mInternalExt = decoded.internalExt;
+
+            if ((roomAccepted || hasNonEndWebcastData)
+                    && "direct".equals(mConnectionMethod)
+                    && "connecting_direct".equals(mState)) {
+                mRoomStatus = "live";
+                mReconnectAttempt = 0;
+                mTransportConnectedAtMs = frameReceivedAt;
+                mDiagLastTransportError = "";
+                mDiagStage = hasNonEndWebcastData ? "receiving_events" : "connected";
+                cancelPendingTaskLocked();
+                setStateLocked("connected_direct", "direct_ws",
+                        "Terhubung langsung ke TikTok LIVE @" + mUsername);
+                emitDiagUpdate = false; // setStateLocked already emitted
+            } else if (!decoded.payloadType.isEmpty() && !decoded.payloadType.equals(previousPayloadType)
+                    && decoded.events.isEmpty()) {
+                emitDiagUpdate = true;
+            }
         }
 
         if (decoded.needAck && decoded.logId > 0L) {
             ws.sendBinary(TikTokWebcastDecoder.encodePushFrameAck(decoded.logId, decoded.internalExt));
+        }
+
+        if (emitDiagUpdate) {
+            emitCurrentState();
         }
 
         emitDecodedEvents(gen, decoded);
@@ -1127,6 +1343,7 @@ public final class TikTokLiveConnector {
         Listener listener = mListener;
         boolean ended = false;
         boolean stateStatsUpdated = false;
+        int dispatchedCount = 0;
 
         for (JSONObject evt : decoded.events) {
             if (isStaleGeneration(gen)) return true;
@@ -1155,6 +1372,21 @@ public final class TikTokLiveConnector {
                 }
             }
 
+            synchronized (mLock) {
+                if (!isStaleGeneration(gen)) {
+                    mDiagDecodedEventCount++;
+                    if (!method.isEmpty()) {
+                        mDiagLastDecodedEventMethod = method;
+                    }
+                    mDiagLastEventReceivedAt = System.currentTimeMillis();
+                    if (!ended) {
+                        mDiagStage = "receiving_events";
+                        mDiagLastTransportError = "";
+                    }
+                    dispatchedCount++;
+                }
+            }
+
             if (listener != null) {
                 try {
                     listener.onEventDecoded(evt);
@@ -1176,6 +1408,7 @@ public final class TikTokLiveConnector {
                     mSessionCookies.clear();
                     mRoomStatus = "not_live";
                     mErrorCode = "LIVE_ENDED";
+                    mDiagStage = "waiting_for_live";
                     setStateLocked("waiting_for_live", "none", "Siaran LIVE @" + mUsername + " telah berakhir. Memantau siaran berikutnya.");
                 }
             }
@@ -1185,7 +1418,7 @@ public final class TikTokLiveConnector {
             return true;
         }
 
-        if (stateStatsUpdated) {
+        if (stateStatsUpdated || dispatchedCount > 0) {
             emitCurrentState();
         }
         return false;
@@ -1257,6 +1490,8 @@ public final class TikTokLiveConnector {
                 mReconnectAttempt = 0;
                 targetUsername = mUsername;
                 mErrorCode = errorCode;
+                mDiagStage = "reconnecting";
+                mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
                 setStateLocked("reconnecting", "direct_ws",
                         reason + " Pemulihan akan dicoba kembali otomatis setelah jeda.");
                 mPendingTask = mScheduler.schedule(() -> {
@@ -1264,6 +1499,7 @@ public final class TikTokLiveConnector {
                     synchronized (mLock) {
                         if (isStaleGeneration(gen)) return;
                         mPendingTask = null;
+                        mDiagStage = "resolving_room";
                         setStateLocked("resolving_room", "none",
                                 "Memeriksa ulang room LIVE @" + targetUsername + " sebelum menyambung kembali...");
                     }
@@ -1282,6 +1518,8 @@ public final class TikTokLiveConnector {
             }
             targetUsername = mUsername;
             mErrorCode = errorCode;
+            mDiagStage = "reconnecting";
+            mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
             setStateLocked(
                     "reconnecting",
                     mTransportMode,
@@ -1300,6 +1538,7 @@ public final class TikTokLiveConnector {
                 } else {
                     synchronized (mLock) {
                         if (isStaleGeneration(gen)) return;
+                        mDiagStage = "resolving_room";
                         setStateLocked("resolving_room", "none",
                                 "Memeriksa ulang room LIVE @" + targetUsername + " sebelum menyambung kembali...");
                     }
@@ -1320,6 +1559,8 @@ public final class TikTokLiveConnector {
             mSessionGeneration.incrementAndGet();
             cancelPendingTaskLocked();
             closeActiveWsLocked();
+            mDiagStage = "error".equals(state) ? "error" : state;
+            mDiagLastTransportError = sanitizeDiagnosticReason(message, mEulerApiKey, mEulerJwtKey);
             mEulerApiKey = "";
             mEulerJwtKey = "";
             mSessionCookies.clear();
