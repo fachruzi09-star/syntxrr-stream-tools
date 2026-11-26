@@ -1,7 +1,5 @@
 package com.syntxrr.streamtools;
 
-import android.util.Base64;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -26,6 +24,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -46,6 +45,8 @@ import javax.net.ssl.SSLSocketFactory;
  * - Pembentukan URL & encoding query parameter ("room_id", "ws_direct", "resp_content_type",
  *   "heartbeat_duration", "client_enter", "last_rtt", plus cursor/internal_ext/routeParams).
  * - Validasi ketat HTTP 101 Switching Protocols, Upgrade, Connection, dan Sec-WebSocket-Accept.
+ * - Diagnostik aman saat handshake ditolak (status, host, Content-Type, Location tersanitasi,
+ *   Server, Upgrade/Connection, keberadaan Sec-WebSocket-Accept, ukuran & klasifikasi body <= 4 KB).
  * - Pengiriman frame binary bermask (ACK & heartbeat PushFrame), Ping/Pong, dan pengukuran last_rtt.
  * - Penutupan koneksi bersih tanpa kebocoran thread atau socket.
  */
@@ -56,17 +57,92 @@ public final class TikTokWebSocketTransport {
     public static final String DIRECT_WS_FALLBACK_BASE_URL =
             "wss://webcast-ws.us.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/";
 
+    public static final int MAX_DIAGNOSTIC_BODY_BYTES = 4 * 1024;
+
     private static final String WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private static final int CONNECT_TIMEOUT_MS = 12_000;
     private static final int READ_TIMEOUT_MS = 35_000;
     private static final int MAX_HEADER_BYTES = 32 * 1024;
     private static final int MAX_FRAME_BYTES = 4 * 1024 * 1024;
+    private static final Pattern SENSITIVE_TEXT_PATTERN = Pattern.compile(
+            "(?i)(apiKey|jwtKey|token|access_token|refresh_token|ttwid|sessionid|cookie|authorization|sec-websocket-key)\\s*[:=]\\s*[^&\\s;\\r\\n]+"
+    );
+    private static final Pattern BEARER_PATTERN = Pattern.compile("(?i)Bearer\\s+[A-Za-z0-9._-]+");
+    private static final Pattern JWT_LIKE_PATTERN = Pattern.compile(
+            "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*"
+    );
+
+    public static final class HandshakeDiagnostics {
+        public final int httpStatus;
+        @NonNull
+        public final String attemptedHost;
+        @NonNull
+        public final String contentType;
+        @NonNull
+        public final String redirectLocation;
+        @NonNull
+        public final String serverHeader;
+        @NonNull
+        public final String upgradeHeader;
+        @NonNull
+        public final String connectionHeader;
+        public final boolean hasSecWebSocketAccept;
+        public final int bodyBytes;
+        @NonNull
+        public final String bodyKind;
+        @NonNull
+        public final String responseClass;
+        @NonNull
+        public final String rejectionReason;
+
+        public HandshakeDiagnostics(
+                int httpStatus,
+                @NonNull String attemptedHost,
+                @NonNull String contentType,
+                @NonNull String redirectLocation,
+                @NonNull String serverHeader,
+                @NonNull String upgradeHeader,
+                @NonNull String connectionHeader,
+                boolean hasSecWebSocketAccept,
+                int bodyBytes,
+                @NonNull String bodyKind,
+                @NonNull String responseClass,
+                @NonNull String rejectionReason
+        ) {
+            this.httpStatus = httpStatus;
+            this.attemptedHost = attemptedHost;
+            this.contentType = contentType;
+            this.redirectLocation = redirectLocation;
+            this.serverHeader = serverHeader;
+            this.upgradeHeader = upgradeHeader;
+            this.connectionHeader = connectionHeader;
+            this.hasSecWebSocketAccept = hasSecWebSocketAccept;
+            this.bodyBytes = Math.max(0, bodyBytes);
+            this.bodyKind = bodyKind;
+            this.responseClass = responseClass;
+            this.rejectionReason = rejectionReason;
+        }
+    }
+
+    static final class HandshakeEvaluation {
+        final boolean accepted;
+        @NonNull
+        final HandshakeDiagnostics diagnostics;
+
+        HandshakeEvaluation(boolean accepted, @NonNull HandshakeDiagnostics diagnostics) {
+            this.accepted = accepted;
+            this.diagnostics = diagnostics;
+        }
+    }
 
     public interface Listener {
         void onConnected(int httpStatus);
         void onBinaryFrame(@NonNull byte[] payload);
         void onTextFrame(@NonNull String text);
         void onHandshakeRejected(int httpStatus, @NonNull String reason);
+        default void onHandshakeRejected(@NonNull HandshakeDiagnostics diagnostics) {
+            onHandshakeRejected(diagnostics.httpStatus, diagnostics.rejectionReason);
+        }
         void onClosed(int code, @NonNull String reason, boolean byRemote);
         void onError(@NonNull String reason);
     }
@@ -236,18 +312,27 @@ public final class TikTokWebSocketTransport {
 
         Thread connectThread = new Thread(() -> {
             SSLSocket socket = null;
+            String attemptedHostForDiag = "";
+            String secKeyForDiag = "";
             try {
                 URI uri = URI.create(wsUrl);
                 String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.US) : "";
                 if (!"wss".equals(scheme) && !"https".equals(scheme)) {
-                    listener.onHandshakeRejected(0, "Skema URL WebSocket tidak didukung: " + scheme);
+                    listener.onHandshakeRejected(new HandshakeDiagnostics(
+                            0, "", "", "", "", "", "", false, 0, "empty", "unknown",
+                            "Skema URL WebSocket tidak didukung: " + sanitizeHeaderValue(scheme)
+                    ));
                     return;
                 }
                 String host = uri.getHost();
                 if (host == null || host.isEmpty()) {
-                    listener.onHandshakeRejected(0, "Host URL WebSocket kosong.");
+                    listener.onHandshakeRejected(new HandshakeDiagnostics(
+                            0, "", "", "", "", "", "", false, 0, "empty", "unknown",
+                            "Host URL WebSocket kosong."
+                    ));
                     return;
                 }
+                attemptedHostForDiag = host;
                 int port = uri.getPort() > 0 ? uri.getPort() : 443;
                 String rawPath = uri.getRawPath();
                 if (rawPath == null || rawPath.isEmpty()) rawPath = "/";
@@ -282,7 +367,8 @@ public final class TikTokWebSocketTransport {
 
                 byte[] keyBytes = new byte[16];
                 mRandom.nextBytes(keyBytes);
-                String secWebSocketKey = Base64.encodeToString(keyBytes, Base64.NO_WRAP);
+                String secWebSocketKey = encodeBase64(keyBytes);
+                secKeyForDiag = secWebSocketKey;
 
                 OutputStream out = socket.getOutputStream();
                 BufferedInputStream in = new BufferedInputStream(socket.getInputStream(), 16 * 1024);
@@ -306,34 +392,10 @@ public final class TikTokWebSocketTransport {
                 out.write(req.toString().getBytes(StandardCharsets.US_ASCII));
                 out.flush();
 
-                HandshakeResponse hs = readHandshakeResponse(in);
-                if (hs.statusCode != 101) {
+                HandshakeEvaluation evaluation = readAndEvaluateHandshake(host, in, secWebSocketKey);
+                if (!evaluation.accepted) {
                     closeQuietly(socket);
-                    listener.onHandshakeRejected(
-                            hs.statusCode,
-                            "Handshake WebSocket ditolak server (HTTP " + hs.statusCode + ")."
-                    );
-                    return;
-                }
-
-                String upgradeHdr = hs.getHeader("upgrade");
-                String connHdr = hs.getHeader("connection");
-                String acceptHdr = hs.getHeader("sec-websocket-accept");
-
-                if (upgradeHdr == null || !upgradeHdr.toLowerCase(Locale.US).contains("websocket")) {
-                    closeQuietly(socket);
-                    listener.onHandshakeRejected(hs.statusCode, "Header Upgrade WebSocket tidak valid.");
-                    return;
-                }
-                if (connHdr == null || !connHdr.toLowerCase(Locale.US).contains("upgrade")) {
-                    closeQuietly(socket);
-                    listener.onHandshakeRejected(hs.statusCode, "Header Connection Upgrade tidak valid.");
-                    return;
-                }
-                String expectedAccept = computeAcceptKey(secWebSocketKey);
-                if (acceptHdr == null || !expectedAccept.equals(acceptHdr.trim())) {
-                    closeQuietly(socket);
-                    listener.onHandshakeRejected(hs.statusCode, "Sec-WebSocket-Accept tidak cocok.");
+                    listener.onHandshakeRejected(evaluation.diagnostics);
                     return;
                 }
 
@@ -343,7 +405,7 @@ public final class TikTokWebSocketTransport {
                 mOpen.set(true);
                 // Let the provider send its first application frame before starting keepalive.
                 // For Direct TikTok this is im_enter_room; its heartbeat must follow room entry.
-                listener.onConnected(hs.statusCode);
+                listener.onConnected(evaluation.diagnostics.httpStatus);
                 if (isOpen()) {
                     // Keep every WebSocket alive with RFC 6455 Ping. Direct TikTok also
                     // requires its application-level protobuf heartbeat; Euler does not.
@@ -354,10 +416,13 @@ public final class TikTokWebSocketTransport {
             } catch (Exception e) {
                 if (!mClosed.get()) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    String safeMsg = sanitizeDiagnosticText("Gagal terhubung WebSocket: " + msg, secKeyForDiag, 220);
                     if (!mOpen.get()) {
-                        listener.onHandshakeRejected(0, "Gagal terhubung WebSocket: " + msg);
+                        listener.onHandshakeRejected(new HandshakeDiagnostics(
+                                0, attemptedHostForDiag, "", "", "", "", "", false, 0, "empty", "unknown", safeMsg
+                        ));
                     } else {
-                        listener.onError("Koneksi WebSocket terputus: " + msg);
+                        listener.onError(sanitizeDiagnosticText("Koneksi WebSocket terputus: " + msg, secKeyForDiag, 220));
                     }
                 }
             } finally {
@@ -594,7 +659,7 @@ public final class TikTokWebSocketTransport {
         return out;
     }
 
-    private static final class HandshakeResponse {
+    static final class HandshakeResponse {
         final int statusCode;
         final Map<String, String> headers;
 
@@ -610,7 +675,437 @@ public final class TikTokWebSocketTransport {
     }
 
     @NonNull
-    private static HandshakeResponse readHandshakeResponse(@NonNull InputStream in) throws IOException {
+    static HandshakeEvaluation readAndEvaluateHandshake(
+            @NonNull String attemptedHost,
+            @NonNull InputStream in,
+            @NonNull String secWebSocketKey
+    ) throws Exception {
+        HandshakeResponse hs = readHandshakeResponse(in);
+        String expectedAccept = computeAcceptKey(secWebSocketKey);
+        if (isValidSwitchingProtocols(hs, expectedAccept)) {
+            HandshakeDiagnostics okDiag = buildRejectedOrOkDiagnostics(
+                    attemptedHost, hs, new byte[0], expectedAccept, secWebSocketKey, true
+            );
+            return new HandshakeEvaluation(true, okDiag);
+        }
+        byte[] bodySample = readBoundedDiagnosticBody(in, hs, MAX_DIAGNOSTIC_BODY_BYTES);
+        HandshakeDiagnostics rejectedDiag = buildRejectedOrOkDiagnostics(
+                attemptedHost, hs, bodySample, expectedAccept, secWebSocketKey, false
+        );
+        return new HandshakeEvaluation(false, rejectedDiag);
+    }
+
+    private static boolean isValidSwitchingProtocols(
+            @NonNull HandshakeResponse hs,
+            @NonNull String expectedAccept
+    ) {
+        if (hs.statusCode != 101) return false;
+        String upgradeHdr = hs.getHeader("upgrade");
+        String connHdr = hs.getHeader("connection");
+        String acceptHdr = hs.getHeader("sec-websocket-accept");
+        return upgradeHdr != null && upgradeHdr.toLowerCase(Locale.US).contains("websocket")
+                && connHdr != null && connHdr.toLowerCase(Locale.US).contains("upgrade")
+                && acceptHdr != null && expectedAccept.equals(acceptHdr.trim());
+    }
+
+    @NonNull
+    private static HandshakeDiagnostics buildRejectedOrOkDiagnostics(
+            @NonNull String attemptedHost,
+            @NonNull HandshakeResponse hs,
+            @NonNull byte[] bodySample,
+            @NonNull String expectedAccept,
+            @NonNull String secWebSocketKey,
+            boolean accepted
+    ) {
+        String safeHost = sanitizeHeaderValue(attemptedHost);
+        String contentType = sanitizeHeaderValue(hs.getHeader("content-type"));
+        String redirectLocation = sanitizeRedirectLocation(hs.getHeader("location"));
+        String serverHeader = sanitizeHeaderValue(hs.getHeader("server"));
+        String upgradeHdr = sanitizeHeaderValue(hs.getHeader("upgrade"));
+        String connHdr = sanitizeHeaderValue(hs.getHeader("connection"));
+        String acceptRaw = hs.getHeader("sec-websocket-accept");
+        boolean hasAccept = acceptRaw != null && !acceptRaw.trim().isEmpty();
+
+        if (accepted) {
+            return new HandshakeDiagnostics(
+                    hs.statusCode,
+                    safeHost,
+                    contentType,
+                    redirectLocation,
+                    serverHeader,
+                    upgradeHdr,
+                    connHdr,
+                    hasAccept,
+                    0,
+                    "empty",
+                    "unknown",
+                    ""
+            );
+        }
+
+        String bodyKind = classifyBody(bodySample, contentType);
+        String responseClass = classifyHandshakeResponse(
+                hs.statusCode, upgradeHdr, connHdr, acceptRaw, expectedAccept, bodyKind
+        );
+        String reason = buildSafeRejectionReason(
+                hs.statusCode, responseClass, bodyKind, redirectLocation,
+                upgradeHdr, connHdr, hasAccept, secWebSocketKey
+        );
+
+        return new HandshakeDiagnostics(
+                hs.statusCode,
+                safeHost,
+                contentType,
+                redirectLocation,
+                serverHeader,
+                upgradeHdr,
+                connHdr,
+                hasAccept,
+                bodySample.length,
+                bodyKind,
+                responseClass,
+                reason
+        );
+    }
+
+    @NonNull
+    static String sanitizeRedirectLocation(@Nullable String rawLocation) {
+        if (rawLocation == null) return "";
+        String cleaned = stripControlChars(rawLocation).trim();
+        if (cleaned.isEmpty()) return "";
+
+        int hashIdx = cleaned.indexOf('#');
+        if (hashIdx >= 0) cleaned = cleaned.substring(0, hashIdx);
+        int queryIdx = cleaned.indexOf('?');
+        if (queryIdx >= 0) cleaned = cleaned.substring(0, queryIdx);
+        cleaned = cleaned.trim();
+        if (cleaned.isEmpty()) return "";
+
+        try {
+            URI uri = new URI(cleaned);
+            String scheme = uri.getScheme();
+            if (scheme != null) {
+                String lowerScheme = scheme.toLowerCase(Locale.US);
+                if (!"http".equals(lowerScheme) && !"https".equals(lowerScheme)
+                        && !"ws".equals(lowerScheme) && !"wss".equals(lowerScheme)) {
+                    return "";
+                }
+            }
+            String host = uri.getHost();
+            String path = uri.getRawPath();
+            String safePath = (path != null && !path.isEmpty()) ? path : "/";
+            if (host != null && !host.isEmpty()) {
+                return capLength(host.toLowerCase(Locale.US) + safePath, 200);
+            }
+            if (cleaned.startsWith("/")) {
+                return capLength(safePath, 200);
+            }
+            return "";
+        } catch (Exception ignored) {
+            if (cleaned.startsWith("/")) {
+                return capLength(cleaned, 200);
+            }
+            return "";
+        }
+    }
+
+    @NonNull
+    static String sanitizeHeaderValue(@Nullable String rawValue) {
+        if (rawValue == null) return "";
+        String cleaned = stripControlChars(rawValue).trim();
+        if (cleaned.isEmpty()) return "";
+        return sanitizeDiagnosticText(cleaned, "", 128);
+    }
+
+    @NonNull
+    private static String sanitizeDiagnosticText(
+            @Nullable String raw,
+            @Nullable String secWebSocketKey,
+            int maxLen
+    ) {
+        if (raw == null) return "";
+        String cleaned = stripControlChars(raw).trim();
+        if (cleaned.isEmpty()) return "";
+        if (secWebSocketKey != null && !secWebSocketKey.isEmpty()) {
+            cleaned = cleaned.replace(secWebSocketKey, "[REDACTED]");
+        }
+        cleaned = SENSITIVE_TEXT_PATTERN.matcher(cleaned).replaceAll("$1=[REDACTED]");
+        cleaned = BEARER_PATTERN.matcher(cleaned).replaceAll("Bearer [REDACTED]");
+        cleaned = JWT_LIKE_PATTERN.matcher(cleaned).replaceAll("[REDACTED]");
+        return capLength(cleaned, maxLen);
+    }
+
+    @NonNull
+    private static String stripControlChars(@NonNull String value) {
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c >= 0x20 && c != 0x7F) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    @NonNull
+    private static String capLength(@NonNull String value, int maxLen) {
+        if (value.length() <= maxLen) return value;
+        return value.substring(0, Math.max(0, maxLen - 3)) + "...";
+    }
+
+    @NonNull
+    static String classifyBody(@Nullable byte[] bodyBytes, @Nullable String contentType) {
+        if (bodyBytes == null || bodyBytes.length == 0) {
+            return "empty";
+        }
+        String ctLower = contentType != null ? contentType.toLowerCase(Locale.US) : "";
+        String text = new String(bodyBytes, StandardCharsets.UTF_8);
+        String trimmed = text.trim();
+        String lowerPrefix = trimmed.toLowerCase(Locale.US);
+
+        if (ctLower.contains("text/html")
+                || ctLower.contains("application/xhtml+xml")
+                || lowerPrefix.startsWith("<!doctype html")
+                || lowerPrefix.startsWith("<html")
+                || lowerPrefix.startsWith("<head")
+                || lowerPrefix.startsWith("<body")
+                || lowerPrefix.startsWith("<script")) {
+            return "html";
+        }
+
+        if (ctLower.contains("application/json")
+                || ctLower.contains("+json")
+                || ((trimmed.startsWith("{") && trimmed.contains(":"))
+                || (trimmed.startsWith("[") && (trimmed.contains("{") || trimmed.endsWith("]"))))) {
+            return "json";
+        }
+
+        if (ctLower.startsWith("text/") || isMostlyPrintableText(bodyBytes)) {
+            return "plain_text";
+        }
+
+        return "unknown";
+    }
+
+    private static boolean isMostlyPrintableText(@NonNull byte[] bytes) {
+        if (bytes.length == 0) return false;
+        int printable = 0;
+        for (byte b : bytes) {
+            int unsigned = b & 0xFF;
+            if (unsigned == 0) return false;
+            if ((unsigned >= 0x20 && unsigned <= 0x7E)
+                    || unsigned == '\r' || unsigned == '\n' || unsigned == '\t'
+                    || unsigned >= 0x80) {
+                printable++;
+            }
+        }
+        return (printable * 100) / bytes.length >= 85;
+    }
+
+    @NonNull
+    static String classifyHandshakeResponse(
+            int statusCode,
+            @Nullable String upgradeHeader,
+            @Nullable String connectionHeader,
+            @Nullable String acceptHeader,
+            @NonNull String expectedAcceptKey,
+            @NonNull String bodyKind
+    ) {
+        if (statusCode == 301 || statusCode == 302 || statusCode == 303
+                || statusCode == 307 || statusCode == 308) {
+            return "redirect";
+        }
+
+        boolean validUpgrade = upgradeHeader != null
+                && upgradeHeader.toLowerCase(Locale.US).contains("websocket");
+        boolean validConn = connectionHeader != null
+                && connectionHeader.toLowerCase(Locale.US).contains("upgrade");
+
+        if (statusCode == 101) {
+            if (!validUpgrade || !validConn) {
+                return "upgrade_missing";
+            }
+            if (acceptHeader == null || !expectedAcceptKey.equals(acceptHeader.trim())) {
+                return "protocol_rejected";
+            }
+            return "unknown";
+        }
+
+        if (statusCode >= 200 && statusCode < 300) {
+            if ("html".equals(bodyKind)) {
+                return "edge_html";
+            }
+            if ("json".equals(bodyKind)) {
+                return "api_json";
+            }
+            if (!validUpgrade || !validConn) {
+                return "upgrade_missing";
+            }
+            return "unknown";
+        }
+
+        if (statusCode >= 400 && statusCode < 600) {
+            return "protocol_rejected";
+        }
+
+        return "unknown";
+    }
+
+    @NonNull
+    private static String buildSafeRejectionReason(
+            int statusCode,
+            @NonNull String responseClass,
+            @NonNull String bodyKind,
+            @NonNull String redirectLocation,
+            @NonNull String upgradeHdr,
+            @NonNull String connHdr,
+            boolean hasAccept,
+            @NonNull String secWebSocketKey
+    ) {
+        String raw;
+        if (statusCode == 101) {
+            if (!upgradeHdr.toLowerCase(Locale.US).contains("websocket")) {
+                raw = "Header Upgrade WebSocket tidak valid atau tidak tersedia.";
+            } else if (!connHdr.toLowerCase(Locale.US).contains("upgrade")) {
+                raw = "Header Connection Upgrade tidak valid atau tidak tersedia.";
+            } else if (!hasAccept) {
+                raw = "Header Sec-WebSocket-Accept tidak tersedia.";
+            } else {
+                raw = "Sec-WebSocket-Accept tidak cocok.";
+            }
+        } else if ("redirect".equals(responseClass)) {
+            raw = redirectLocation.isEmpty()
+                    ? "Handshake WebSocket dialihkan server (HTTP " + statusCode + ")."
+                    : "Handshake WebSocket dialihkan (HTTP " + statusCode + ") ke " + redirectLocation + ".";
+        } else if ("edge_html".equals(responseClass)) {
+            raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + "; respons HTML edge/HTTP biasa).";
+        } else if ("api_json".equals(responseClass)) {
+            raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + "; respons JSON API).";
+        } else if ("upgrade_missing".equals(responseClass)) {
+            raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + "; header Upgrade/Connection tidak ada, body=" + bodyKind + ").";
+        } else if ("protocol_rejected".equals(responseClass)) {
+            raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + ").";
+        } else {
+            raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + ").";
+        }
+        return sanitizeDiagnosticText(raw, secWebSocketKey, 220);
+    }
+
+    @NonNull
+    static byte[] readBoundedDiagnosticBody(
+            @NonNull InputStream in,
+            @NonNull HandshakeResponse hs,
+            int maxBytes
+    ) {
+        if (maxBytes <= 0 || hs.statusCode <= 0 || hs.statusCode == 101
+                || hs.statusCode == 204 || hs.statusCode == 304) {
+            return new byte[0];
+        }
+
+        String transferEncoding = hs.getHeader("transfer-encoding");
+        if (transferEncoding != null && transferEncoding.toLowerCase(Locale.US).contains("chunked")) {
+            return readBoundedChunkedBody(in, maxBytes);
+        }
+
+        String contentLengthRaw = hs.getHeader("content-length");
+        if (contentLengthRaw != null && !contentLengthRaw.trim().isEmpty()) {
+            try {
+                long contentLength = Long.parseLong(contentLengthRaw.trim());
+                if (contentLength <= 0L) {
+                    return new byte[0];
+                }
+                int limit = (int) Math.min(contentLength, (long) maxBytes);
+                return readUpToBytes(in, limit);
+            } catch (NumberFormatException ignored) {
+                // Fall back to bounded stream read below.
+            }
+        }
+
+        return readUpToBytes(in, maxBytes);
+    }
+
+    @NonNull
+    private static byte[] readUpToBytes(@NonNull InputStream in, int maxBytes) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[Math.min(1024, maxBytes)];
+        int total = 0;
+        try {
+            while (total < maxBytes) {
+                int toRead = Math.min(buf.length, maxBytes - total);
+                int r = in.read(buf, 0, toRead);
+                if (r == -1) break;
+                if (r > 0) {
+                    out.write(buf, 0, r);
+                    total += r;
+                }
+            }
+        } catch (IOException ignored) {
+            // Return whatever bounded prefix was read safely before timeout/close.
+        }
+        return out.toByteArray();
+    }
+
+    @NonNull
+    private static byte[] readBoundedChunkedBody(@NonNull InputStream in, int maxBytes) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            while (out.size() < maxBytes) {
+                String sizeLine = readAsciiLine(in, 256);
+                if (sizeLine == null) break;
+                int semi = sizeLine.indexOf(';');
+                String hex = (semi >= 0 ? sizeLine.substring(0, semi) : sizeLine).trim();
+                if (hex.isEmpty()) break;
+                int chunkSize;
+                try {
+                    chunkSize = Integer.parseInt(hex, 16);
+                } catch (NumberFormatException e) {
+                    break;
+                }
+                if (chunkSize <= 0) break;
+
+                int remainingChunk = chunkSize;
+                byte[] buf = new byte[Math.min(1024, maxBytes)];
+                while (remainingChunk > 0 && out.size() < maxBytes) {
+                    int want = Math.min(buf.length, Math.min(remainingChunk, maxBytes - out.size()));
+                    int r = in.read(buf, 0, want);
+                    if (r == -1) {
+                        return out.toByteArray();
+                    }
+                    out.write(buf, 0, r);
+                    remainingChunk -= r;
+                }
+                if (out.size() >= maxBytes) break;
+
+                // Consume trailing CRLF after chunk payload before reading next chunk header.
+                int cr = in.read();
+                if (cr == '\r') {
+                    in.read();
+                } else if (cr == -1) {
+                    break;
+                }
+            }
+        } catch (IOException ignored) {
+            // Keep safely sampled bytes.
+        }
+        return out.toByteArray();
+    }
+
+    @Nullable
+    private static String readAsciiLine(@NonNull InputStream in, int maxLineBytes) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        while (line.size() < maxLineBytes) {
+            int b = in.read();
+            if (b == -1) {
+                return line.size() == 0 ? null : new String(line.toByteArray(), StandardCharsets.ISO_8859_1);
+            }
+            if (b == '\n') break;
+            if (b != '\r') line.write(b);
+        }
+        return new String(line.toByteArray(), StandardCharsets.ISO_8859_1);
+    }
+
+    @NonNull
+    static HandshakeResponse readHandshakeResponse(@NonNull InputStream in) throws IOException {
         ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
         int matchState = 0;
         while (headerBytes.size() < MAX_HEADER_BYTES) {
@@ -642,17 +1137,45 @@ public final class TikTokWebSocketTransport {
             int colon = lines[i].indexOf(':');
             if (colon <= 0) continue;
             String name = lines[i].substring(0, colon).trim().toLowerCase(Locale.US);
+            if ("set-cookie".equals(name) || "cookie".equals(name) || "authorization".equals(name)) {
+                continue;
+            }
             String val = lines[i].substring(colon + 1).trim();
-            headers.put(name, val);
+            if (("connection".equals(name) || "upgrade".equals(name)) && headers.containsKey(name)) {
+                String existing = headers.get(name);
+                headers.put(name, existing + ", " + val);
+            } else {
+                headers.put(name, val);
+            }
         }
         return new HandshakeResponse(statusCode, headers);
     }
 
     @NonNull
-    private static String computeAcceptKey(@NonNull String key) throws Exception {
+    static String computeAcceptKey(@NonNull String key) throws Exception {
         MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
         byte[] hash = sha1.digest((key + WS_MAGIC_GUID).getBytes(StandardCharsets.US_ASCII));
-        return Base64.encodeToString(hash, Base64.NO_WRAP);
+        return encodeBase64(hash);
+    }
+
+    private static final char[] BASE64_ALPHABET =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toCharArray();
+
+    @NonNull
+    static String encodeBase64(@NonNull byte[] data) {
+        if (data.length == 0) return "";
+        StringBuilder out = new StringBuilder(((data.length + 2) / 3) * 4);
+        for (int i = 0; i < data.length; i += 3) {
+            int b0 = data[i] & 0xFF;
+            int b1 = (i + 1 < data.length) ? (data[i + 1] & 0xFF) : 0;
+            int b2 = (i + 2 < data.length) ? (data[i + 2] & 0xFF) : 0;
+            int triple = (b0 << 16) | (b1 << 8) | b2;
+            out.append(BASE64_ALPHABET[(triple >>> 18) & 0x3F]);
+            out.append(BASE64_ALPHABET[(triple >>> 12) & 0x3F]);
+            out.append(i + 1 < data.length ? BASE64_ALPHABET[(triple >>> 6) & 0x3F] : '=');
+            out.append(i + 2 < data.length ? BASE64_ALPHABET[triple & 0x3F] : '=');
+        }
+        return out.toString();
     }
 
     private static void closeQuietly(@Nullable SSLSocket socket) {

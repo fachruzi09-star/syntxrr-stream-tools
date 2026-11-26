@@ -11,6 +11,8 @@ import type {
   TikTokConnectionState,
   TikTokConnectorStatus,
   TikTokDiagnosticStage,
+  TikTokHandshakeBodyKind,
+  TikTokHandshakeResponseClass,
   TikTokRoomStatus,
 } from '../types';
 import { streamEventBus } from './eventBus';
@@ -169,6 +171,63 @@ function toFiniteIntegerOrNull(raw: unknown): number | null {
   return Math.trunc(raw);
 }
 
+const ALLOWED_BODY_KINDS: ReadonlySet<TikTokHandshakeBodyKind> = new Set([
+  'html',
+  'json',
+  'plain_text',
+  'empty',
+  'unknown',
+]);
+
+const ALLOWED_RESPONSE_CLASSES: ReadonlySet<TikTokHandshakeResponseClass> = new Set([
+  'redirect',
+  'edge_html',
+  'api_json',
+  'upgrade_missing',
+  'protocol_rejected',
+  'unknown',
+]);
+
+function sanitizeDiagnosticHeaderValue(raw: unknown, maxLen: number = 128): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = sanitizeDiagnosticErrorMessage(raw);
+  if (!cleaned) return null;
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen - 3)}...` : cleaned;
+}
+
+export function sanitizeDiagnosticRedirectLocation(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  let cleaned = raw.replace(/[\u0000-\u001F\u007F]/g, '').trim();
+  if (!cleaned) return null;
+  const hashIdx = cleaned.indexOf('#');
+  if (hashIdx >= 0) cleaned = cleaned.slice(0, hashIdx);
+  const queryIdx = cleaned.indexOf('?');
+  if (queryIdx >= 0) cleaned = cleaned.slice(0, queryIdx);
+  cleaned = cleaned.trim();
+  if (!cleaned) return null;
+
+  if (/^(https?|wss?):\/\//i.test(cleaned) || cleaned.startsWith('//')) {
+    try {
+      const normalized = cleaned.startsWith('//') ? `https:${cleaned}` : cleaned;
+      const parsed = new URL(normalized);
+      const host = parsed.hostname.toLowerCase();
+      if (!host) return null;
+      const path = parsed.pathname || '/';
+      const combined = `${host}${path}`;
+      return combined.length > 200 ? `${combined.slice(0, 197)}...` : combined;
+    } catch {
+      return null;
+    }
+  }
+  if (cleaned.startsWith('/')) {
+    return cleaned.length > 200 ? `${cleaned.slice(0, 197)}...` : cleaned;
+  }
+  if (/^[A-Za-z0-9.-]+(\/.*)?$/.test(cleaned)) {
+    return cleaned.length > 200 ? `${cleaned.slice(0, 197)}...` : cleaned;
+  }
+  return null;
+}
+
 export function extractDiagnosticsFromNativePayload(
   payload: NativeTikTokStatePayload,
   resolvedState: TikTokConnectionState
@@ -191,6 +250,17 @@ export function extractDiagnosticsFromNativePayload(
     'roomLookupHttpStatus',
     'hasTtwidCookie',
     'websocketHttpStatus',
+    'websocketAttemptHost',
+    'websocketContentType',
+    'websocketRedirectLocation',
+    'websocketServerHeader',
+    'websocketUpgradeHeader',
+    'websocketConnectionHeader',
+    'websocketHasAcceptHeader',
+    'websocketBodyBytes',
+    'websocketBodyKind',
+    'websocketResponseClass',
+    'websocketRejectionReason',
     'roomEntryFrameSent',
     'roomEntryConfirmed',
     'eventReceivedBeforeRoomAck',
@@ -214,12 +284,34 @@ export function extractDiagnosticsFromNativePayload(
       : fallbackDiagnosticStageForState(resolvedState);
 
   const rawDecodedCount = toFiniteIntegerOrNull(pick('decodedEventCount'));
+  const rawBodyBytes = toFiniteIntegerOrNull(pick('websocketBodyBytes'));
+  const rawBodyKind = pick('websocketBodyKind');
+  const rawResponseClass = pick('websocketResponseClass');
+  const rawHasAccept = pick('websocketHasAcceptHeader');
 
   return {
     diagnosticStage,
     roomLookupHttpStatus: toFiniteIntegerOrNull(pick('roomLookupHttpStatus')),
     hasTtwidCookie: pick('hasTtwidCookie') === true,
     websocketHttpStatus: toFiniteIntegerOrNull(pick('websocketHttpStatus')),
+    websocketAttemptHost: sanitizeDiagnosticIdentifier(pick('websocketAttemptHost')),
+    websocketContentType: sanitizeDiagnosticHeaderValue(pick('websocketContentType')),
+    websocketRedirectLocation: sanitizeDiagnosticRedirectLocation(pick('websocketRedirectLocation')),
+    websocketServerHeader: sanitizeDiagnosticHeaderValue(pick('websocketServerHeader')),
+    websocketUpgradeHeader: sanitizeDiagnosticHeaderValue(pick('websocketUpgradeHeader')),
+    websocketConnectionHeader: sanitizeDiagnosticHeaderValue(pick('websocketConnectionHeader')),
+    websocketHasAcceptHeader: typeof rawHasAccept === 'boolean' ? rawHasAccept : null,
+    websocketBodyBytes: rawBodyBytes !== null ? Math.max(0, rawBodyBytes) : null,
+    websocketBodyKind:
+      typeof rawBodyKind === 'string' && ALLOWED_BODY_KINDS.has(rawBodyKind as TikTokHandshakeBodyKind)
+        ? (rawBodyKind as TikTokHandshakeBodyKind)
+        : null,
+    websocketResponseClass:
+      typeof rawResponseClass === 'string' &&
+      ALLOWED_RESPONSE_CLASSES.has(rawResponseClass as TikTokHandshakeResponseClass)
+        ? (rawResponseClass as TikTokHandshakeResponseClass)
+        : null,
+    websocketRejectionReason: sanitizeDiagnosticErrorMessage(pick('websocketRejectionReason')),
     roomEntryFrameSent: pick('roomEntryFrameSent') === true,
     roomEntryConfirmed: pick('roomEntryConfirmed') === true,
     eventReceivedBeforeRoomAck: pick('eventReceivedBeforeRoomAck') === true,

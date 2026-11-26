@@ -191,6 +191,18 @@ const TikTokDiagnosticsCollapsible: React.FC<TikTokDiagnosticsPanelProps> = ({
   const lastDecodedEventMethodText = diagnostics?.lastDecodedEventMethod || 'Belum tersedia';
   const lastTransportErrorText =
     sanitizeDiagnosticErrorMessage(diagnostics?.lastTransportError) || 'Belum tersedia';
+  const handshakeAttemptHostText = diagnostics?.websocketAttemptHost || 'Belum tersedia';
+  const handshakeContentTypeText = diagnostics?.websocketContentType || 'Belum tersedia';
+  const handshakeRedirectText = diagnostics?.websocketRedirectLocation || null;
+  const handshakeResponseClassText = diagnostics?.websocketResponseClass
+    ? diagnostics.websocketBodyKind
+      ? typeof diagnostics.websocketBodyBytes === 'number'
+        ? `${diagnostics.websocketResponseClass} (${diagnostics.websocketBodyKind} · ${diagnostics.websocketBodyBytes} B)`
+        : `${diagnostics.websocketResponseClass} (${diagnostics.websocketBodyKind})`
+      : diagnostics.websocketResponseClass
+    : 'Belum tersedia';
+  const handshakeRejectionReasonText =
+    sanitizeDiagnosticErrorMessage(diagnostics?.websocketRejectionReason) || 'Belum tersedia';
 
   return (
     <div className="border-t border-[var(--app-border)] bg-[var(--app-surface)]">
@@ -286,6 +298,57 @@ const TikTokDiagnosticsCollapsible: React.FC<TikTokDiagnosticsPanelProps> = ({
               <div className="text-[10px] text-[var(--app-text-muted)]">Pesan kegagalan terakhir</div>
               <div className="font-medium text-[var(--app-text-secondary)] mt-0.5 break-words">
                 {lastTransportErrorText}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-2.5 border-t border-[var(--app-border)]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--app-text-muted)] mb-2">
+              Diagnostik Handshake WebSocket
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Host percobaan</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 truncate tabular-metrics">
+                  {handshakeAttemptHostText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">HTTP status handshake</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                  {websocketHttpText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Content-Type</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 truncate tabular-metrics">
+                  {handshakeContentTypeText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Jenis respons</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 truncate tabular-metrics">
+                  {handshakeResponseClassText}
+                </div>
+              </div>
+
+              {handshakeRedirectText && (
+                <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0 sm:col-span-2">
+                  <div className="text-[10px] text-[var(--app-text-muted)]">Redirect host/path</div>
+                  <div className="font-semibold text-[var(--app-text)] mt-0.5 break-all tabular-metrics">
+                    {handshakeRedirectText}
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0 sm:col-span-2">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Alasan handshake ditolak</div>
+                <div className="font-medium text-[var(--app-text-secondary)] mt-0.5 break-words">
+                  {handshakeRejectionReasonText}
+                </div>
               </div>
             </div>
           </div>

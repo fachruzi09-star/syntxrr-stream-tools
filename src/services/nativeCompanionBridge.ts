@@ -12,6 +12,8 @@ import type {
   TikTokConnectionMethod,
   TikTokConnectionState,
   TikTokDiagnosticStage,
+  TikTokHandshakeBodyKind,
+  TikTokHandshakeResponseClass,
   TikTokRoomStatus,
   TikTokTransportMode,
 } from '../types';
@@ -154,6 +156,17 @@ export interface NativeTikTokStatePayload {
   roomLookupHttpStatus?: number | null;
   hasTtwidCookie?: boolean;
   websocketHttpStatus?: number | null;
+  websocketAttemptHost?: string | null;
+  websocketContentType?: string | null;
+  websocketRedirectLocation?: string | null;
+  websocketServerHeader?: string | null;
+  websocketUpgradeHeader?: string | null;
+  websocketConnectionHeader?: string | null;
+  websocketHasAcceptHeader?: boolean | null;
+  websocketBodyBytes?: number | null;
+  websocketBodyKind?: TikTokHandshakeBodyKind | null;
+  websocketResponseClass?: TikTokHandshakeResponseClass | null;
+  websocketRejectionReason?: string | null;
   roomEntryFrameSent?: boolean;
   roomEntryConfirmed?: boolean;
   eventReceivedBeforeRoomAck?: boolean;

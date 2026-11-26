@@ -344,11 +344,32 @@ export type TikTokDiagnosticStage =
   | 'error'
   | 'disconnected';
 
+export type TikTokHandshakeBodyKind = 'html' | 'json' | 'plain_text' | 'empty' | 'unknown';
+
+export type TikTokHandshakeResponseClass =
+  | 'redirect'
+  | 'edge_html'
+  | 'api_json'
+  | 'upgrade_missing'
+  | 'protocol_rejected'
+  | 'unknown';
+
 export interface TikTokConnectionDiagnostics {
   diagnosticStage: TikTokDiagnosticStage;
   roomLookupHttpStatus: number | null;
   hasTtwidCookie: boolean;
   websocketHttpStatus: number | null;
+  websocketAttemptHost?: string | null;
+  websocketContentType?: string | null;
+  websocketRedirectLocation?: string | null;
+  websocketServerHeader?: string | null;
+  websocketUpgradeHeader?: string | null;
+  websocketConnectionHeader?: string | null;
+  websocketHasAcceptHeader?: boolean | null;
+  websocketBodyBytes?: number | null;
+  websocketBodyKind?: TikTokHandshakeBodyKind | null;
+  websocketResponseClass?: TikTokHandshakeResponseClass | null;
+  websocketRejectionReason?: string | null;
   roomEntryFrameSent: boolean;
   roomEntryConfirmed: boolean;
   eventReceivedBeforeRoomAck?: boolean;

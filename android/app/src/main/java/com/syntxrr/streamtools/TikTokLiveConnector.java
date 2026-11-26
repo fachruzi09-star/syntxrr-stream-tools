@@ -145,6 +145,28 @@ public final class TikTokLiveConnector {
     private boolean mDiagHasTtwidCookie = false;
     @Nullable
     private Integer mDiagWebsocketHttpStatus = null;
+    @NonNull
+    private String mDiagWebsocketAttemptHost = "";
+    @NonNull
+    private String mDiagWebsocketContentType = "";
+    @NonNull
+    private String mDiagWebsocketRedirectLocation = "";
+    @NonNull
+    private String mDiagWebsocketServerHeader = "";
+    @NonNull
+    private String mDiagWebsocketUpgradeHeader = "";
+    @NonNull
+    private String mDiagWebsocketConnectionHeader = "";
+    @Nullable
+    private Boolean mDiagWebsocketHasAcceptHeader = null;
+    @Nullable
+    private Integer mDiagWebsocketBodyBytes = null;
+    @NonNull
+    private String mDiagWebsocketBodyKind = "";
+    @NonNull
+    private String mDiagWebsocketResponseClass = "";
+    @NonNull
+    private String mDiagWebsocketRejectionReason = "";
     private boolean mDiagRoomEntryFrameSent = false;
     private boolean mDiagRoomEntryConfirmed = false;
     private boolean mDiagEventReceivedBeforeRoomAck = false;
@@ -193,6 +215,19 @@ public final class TikTokLiveConnector {
                 obj.put("hasTtwidCookie", mDiagHasTtwidCookie);
                 obj.put("websocketHttpStatus",
                         mDiagWebsocketHttpStatus != null ? mDiagWebsocketHttpStatus : JSONObject.NULL);
+                obj.put("websocketAttemptHost", mDiagWebsocketAttemptHost);
+                obj.put("websocketContentType", mDiagWebsocketContentType);
+                obj.put("websocketRedirectLocation", mDiagWebsocketRedirectLocation);
+                obj.put("websocketServerHeader", mDiagWebsocketServerHeader);
+                obj.put("websocketUpgradeHeader", mDiagWebsocketUpgradeHeader);
+                obj.put("websocketConnectionHeader", mDiagWebsocketConnectionHeader);
+                obj.put("websocketHasAcceptHeader",
+                        mDiagWebsocketHasAcceptHeader != null ? mDiagWebsocketHasAcceptHeader : JSONObject.NULL);
+                obj.put("websocketBodyBytes",
+                        mDiagWebsocketBodyBytes != null ? mDiagWebsocketBodyBytes : JSONObject.NULL);
+                obj.put("websocketBodyKind", mDiagWebsocketBodyKind);
+                obj.put("websocketResponseClass", mDiagWebsocketResponseClass);
+                obj.put("websocketRejectionReason", mDiagWebsocketRejectionReason);
                 obj.put("roomEntryFrameSent", mDiagRoomEntryFrameSent);
                 obj.put("roomEntryConfirmed", mDiagRoomEntryConfirmed);
                 obj.put("eventReceivedBeforeRoomAck", mDiagEventReceivedBeforeRoomAck);
@@ -317,10 +352,7 @@ public final class TikTokLiveConnector {
         mDiagStage = initialStage;
         mDiagRoomLookupHttpStatus = null;
         mDiagHasTtwidCookie = false;
-        mDiagWebsocketHttpStatus = null;
-        mDiagRoomEntryFrameSent = false;
-        mDiagRoomEntryConfirmed = false;
-        mDiagEventReceivedBeforeRoomAck = false;
+        resetWebSocketAttemptDiagnosticsLocked();
         mDiagLastPayloadType = "";
         mDiagLastFrameReceivedAt = null;
         mDiagDecodedEventCount = 0;
@@ -331,9 +363,53 @@ public final class TikTokLiveConnector {
 
     private void resetWebSocketAttemptDiagnosticsLocked() {
         mDiagWebsocketHttpStatus = null;
+        mDiagWebsocketAttemptHost = "";
+        mDiagWebsocketContentType = "";
+        mDiagWebsocketRedirectLocation = "";
+        mDiagWebsocketServerHeader = "";
+        mDiagWebsocketUpgradeHeader = "";
+        mDiagWebsocketConnectionHeader = "";
+        mDiagWebsocketHasAcceptHeader = null;
+        mDiagWebsocketBodyBytes = null;
+        mDiagWebsocketBodyKind = "";
+        mDiagWebsocketResponseClass = "";
+        mDiagWebsocketRejectionReason = "";
         mDiagRoomEntryFrameSent = false;
         mDiagRoomEntryConfirmed = false;
         mDiagEventReceivedBeforeRoomAck = false;
+    }
+
+    @NonNull
+    private static String extractHostFromWsUrl(@Nullable String wsUrl) {
+        if (wsUrl == null || wsUrl.trim().isEmpty()) return "";
+        try {
+            String host = java.net.URI.create(wsUrl.trim()).getHost();
+            return host != null ? host.trim().toLowerCase(Locale.US) : "";
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private void applyHandshakeDiagnosticsLocked(
+            @NonNull TikTokWebSocketTransport.HandshakeDiagnostics diag
+    ) {
+        mDiagWebsocketHttpStatus = diag.httpStatus;
+        if (!diag.attemptedHost.isEmpty()) {
+            mDiagWebsocketAttemptHost = diag.attemptedHost;
+        }
+        mDiagWebsocketContentType = diag.contentType;
+        mDiagWebsocketRedirectLocation = diag.redirectLocation;
+        mDiagWebsocketServerHeader = diag.serverHeader;
+        mDiagWebsocketUpgradeHeader = diag.upgradeHeader;
+        mDiagWebsocketConnectionHeader = diag.connectionHeader;
+        mDiagWebsocketHasAcceptHeader = diag.hasSecWebSocketAccept;
+        mDiagWebsocketBodyBytes = diag.bodyBytes;
+        mDiagWebsocketBodyKind = diag.bodyKind;
+        mDiagWebsocketResponseClass = diag.responseClass;
+        mDiagWebsocketRejectionReason = sanitizeDiagnosticReason(
+                diag.rejectionReason, mEulerApiKey, mEulerJwtKey
+        );
+        mDiagLastTransportError = mDiagWebsocketRejectionReason;
     }
 
     public void connect(
@@ -750,6 +826,8 @@ public final class TikTokLiveConnector {
                 return;
             }
             mActiveWs = ws;
+            mDiagWebsocketAttemptHost = extractHostFromWsUrl(wsUrl);
+            emitCurrentState();
         }
 
         ws.connect(wsUrl, cookies, heartbeatMs,
@@ -763,6 +841,11 @@ public final class TikTokLiveConnector {
                     // A successful HTTP 101 only proves that the socket opened.
                     // Never mark connected_direct on HTTP 101; record websocket_open first.
                     mDiagWebsocketHttpStatus = httpStatus;
+                    mDiagWebsocketHasAcceptHeader = true;
+                    mDiagWebsocketUpgradeHeader = "websocket";
+                    mDiagWebsocketConnectionHeader = "Upgrade";
+                    mDiagWebsocketResponseClass = "";
+                    mDiagWebsocketRejectionReason = "";
                     mDiagStage = "websocket_open";
                     emitCurrentState();
                 }
@@ -828,14 +911,26 @@ public final class TikTokLiveConnector {
 
             @Override
             public void onHandshakeRejected(int httpStatus, @NonNull String reason) {
+                onHandshakeRejected(new TikTokWebSocketTransport.HandshakeDiagnostics(
+                        httpStatus, extractHostFromWsUrl(wsUrl), "", "", "", "", "",
+                        false, 0, "empty", "unknown", reason
+                ));
+            }
+
+            @Override
+            public void onHandshakeRejected(@NonNull TikTokWebSocketTransport.HandshakeDiagnostics diagnostics) {
                 if (isStaleTransport(gen, ws)) return;
-                Log.w(TAG, "Direct WebSocket handshake ditolak (http=" + httpStatus + ")");
+                int httpStatus = diagnostics.httpStatus;
+                String reason = diagnostics.rejectionReason;
+                Log.w(TAG, "Direct WebSocket handshake ditolak (http=" + httpStatus
+                        + ", host=" + diagnostics.attemptedHost
+                        + ", class=" + diagnostics.responseClass
+                        + ", body=" + diagnostics.bodyKind + ")");
                 boolean fallbackAvailable;
                 boolean retryOnAlternateHost = false;
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
-                    mDiagWebsocketHttpStatus = httpStatus;
-                    mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
+                    applyHandshakeDiagnosticsLocked(diagnostics);
                     fallbackAvailable = canAttemptEulerFallback(allowEuler, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey);
                     mTransportConnectedAtMs = 0L;
                     if (!mUseAlternateDirectWsHost
@@ -933,6 +1028,8 @@ public final class TikTokLiveConnector {
                 return;
             }
             mActiveWs = ws;
+            mDiagWebsocketAttemptHost = extractHostFromWsUrl(wsUrl);
+            emitCurrentState();
         }
 
         // Euler sends JSON event envelopes by default. Do not send TikTok-specific
@@ -947,6 +1044,11 @@ public final class TikTokLiveConnector {
                     mErrorCode = "";
                     mRoomStatus = "live";
                     mDiagWebsocketHttpStatus = httpStatus;
+                    mDiagWebsocketHasAcceptHeader = true;
+                    mDiagWebsocketUpgradeHeader = "websocket";
+                    mDiagWebsocketConnectionHeader = "Upgrade";
+                    mDiagWebsocketResponseClass = "";
+                    mDiagWebsocketRejectionReason = "";
                     mDiagLastTransportError = "";
                     mDiagStage = "connected";
                     setStateLocked("connected_euler", "euler", "Terhubung via EulerStream ke @" + mUsername);
@@ -973,11 +1075,20 @@ public final class TikTokLiveConnector {
 
             @Override
             public void onHandshakeRejected(int httpStatus, @NonNull String reason) {
+                onHandshakeRejected(new TikTokWebSocketTransport.HandshakeDiagnostics(
+                        httpStatus, extractHostFromWsUrl(wsUrl), "", "", "", "", "",
+                        false, 0, "empty", "unknown", reason
+                ));
+            }
+
+            @Override
+            public void onHandshakeRejected(@NonNull TikTokWebSocketTransport.HandshakeDiagnostics diagnostics) {
                 if (isStaleTransport(gen, ws)) return;
+                int httpStatus = diagnostics.httpStatus;
+                String reason = diagnostics.rejectionReason;
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
-                    mDiagWebsocketHttpStatus = httpStatus;
-                    mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
+                    applyHandshakeDiagnosticsLocked(diagnostics);
                 }
                 if (httpStatus == 401 || httpStatus == 403) {
                     handleEulerFallbackUnavailable(gen, reason);

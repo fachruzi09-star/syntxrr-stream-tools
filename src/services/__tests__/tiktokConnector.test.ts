@@ -19,6 +19,7 @@ import {
   normalizeTikTokTargetUsername,
   resolveTikTokTargetUsername,
   sanitizeDiagnosticErrorMessage,
+  sanitizeDiagnosticRedirectLocation,
   type TikTokTransportAdapter,
 } from '../tiktokLiveConnector';
 import {
@@ -1004,13 +1005,25 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
     lastDecodedEventMethod: 'WebcastChatMessage',
   });
   assertEqual(connector.getStatus().diagnostics?.roomEntryConfirmed, true, 'Prior session has roomEntryConfirmed=true');
+  const noStatusHooks: {
+    stateCb: ((payload: NativeTikTokStatePayload) => void) | null;
+  } = { stateCb: null };
   const noStatusAdapterConnector = new TikTokLiveConnector({
     ...diagAdapter,
+    onState: async (cb) => {
+      noStatusHooks.stateCb = cb;
+      return {
+        remove: async () => {
+          noStatusHooks.stateCb = null;
+        },
+      };
+    },
+    onEvent: async () => ({ remove: async () => {} }),
     connect: async () => ({ accepted: true }),
   });
   // Seed prior session diagnostics on the connector
   await noStatusAdapterConnector.ensureListenersAttached();
-  hooks.stateCb?.({
+  noStatusHooks.stateCb?.({
     state: 'connected_direct',
     transport: 'direct_ws',
     username: 'old_creator',
@@ -1035,7 +1048,66 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
   );
   await noStatusAdapterConnector.destroy();
 
-  // 8. Native Java & IntegrationsView static diagnostic contract checks
+  // 8. WebSocket handshake diagnostics extraction & sanitization (HTTP 200 / 302 / 403)
+  hooks.stateCb?.({
+    state: 'reconnecting',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Reconnecting',
+    diagnosticStage: 'reconnecting',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: false,
+    websocketHttpStatus: 200,
+    websocketAttemptHost: 'webcast-ws.tiktok.com',
+    websocketContentType: 'text/html; charset=utf-8',
+    websocketRedirectLocation: 'https://www.tiktok.com/verify/page?ttwid=secret_cookie&token=abc#frag',
+    websocketServerHeader: 'AkamaiGHost Bearer secret_tok',
+    websocketUpgradeHeader: '',
+    websocketConnectionHeader: 'keep-alive',
+    websocketHasAcceptHeader: false,
+    websocketBodyBytes: 2048,
+    websocketBodyKind: 'html',
+    websocketResponseClass: 'edge_html',
+    websocketRejectionReason:
+      'Handshake WebSocket ditolak server (HTTP 200; respons HTML edge/HTTP biasa). token=abc',
+    roomEntryFrameSent: false,
+    roomEntryConfirmed: false,
+    decodedEventCount: 0,
+  });
+  const hsDiag = connector.getStatus().diagnostics;
+  assertEqual(hsDiag?.websocketAttemptHost, 'webcast-ws.tiktok.com', 'Attempt host forwarded');
+  assertEqual(hsDiag?.websocketHttpStatus, 200, 'WS HTTP 200 forwarded');
+  assertEqual(hsDiag?.websocketContentType, 'text/html; charset=utf-8', 'Content-Type forwarded');
+  assertEqual(
+    hsDiag?.websocketRedirectLocation,
+    'www.tiktok.com/verify/page',
+    'Redirect Location stripped to host + path without query or fragment'
+  );
+  assert(
+    Boolean(hsDiag?.websocketServerHeader?.includes('AkamaiGHost')) &&
+      !(hsDiag?.websocketServerHeader ?? '').includes('secret_tok'),
+    'Server header preserved safely and bearer redacted'
+  );
+  assertEqual(hsDiag?.websocketUpgradeHeader, null, 'Empty upgrade header normalized to null');
+  assertEqual(hsDiag?.websocketConnectionHeader, 'keep-alive', 'Connection header forwarded');
+  assertEqual(hsDiag?.websocketHasAcceptHeader, false, 'websocketHasAcceptHeader false forwarded');
+  assertEqual(hsDiag?.websocketBodyBytes, 2048, 'websocketBodyBytes forwarded');
+  assertEqual(hsDiag?.websocketBodyKind, 'html', 'websocketBodyKind forwarded');
+  assertEqual(hsDiag?.websocketResponseClass, 'edge_html', 'websocketResponseClass forwarded');
+  assert(
+    !(hsDiag?.websocketRejectionReason ?? '').includes('=abc'),
+    'Token query param redacted from websocketRejectionReason'
+  );
+  assertEqual(
+    sanitizeDiagnosticRedirectLocation('https://user:pass@www.tiktok.com/login?next=1#top'),
+    'www.tiktok.com/login',
+    'Redirect sanitizer drops userinfo, query, and fragment'
+  );
+
+  // 9. Native Java & IntegrationsView static diagnostic contract checks
   const javaSrc = readFileSync(
     resolve(process.cwd(), 'android/app/src/main/java/com/syntxrr/streamtools/TikTokLiveConnector.java'),
     'utf8'
@@ -1045,6 +1117,17 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
     '"roomLookupHttpStatus"',
     '"hasTtwidCookie"',
     '"websocketHttpStatus"',
+    '"websocketAttemptHost"',
+    '"websocketContentType"',
+    '"websocketRedirectLocation"',
+    '"websocketServerHeader"',
+    '"websocketUpgradeHeader"',
+    '"websocketConnectionHeader"',
+    '"websocketHasAcceptHeader"',
+    '"websocketBodyBytes"',
+    '"websocketBodyKind"',
+    '"websocketResponseClass"',
+    '"websocketRejectionReason"',
     '"roomEntryFrameSent"',
     '"roomEntryConfirmed"',
     '"lastPayloadType"',
@@ -1083,6 +1166,18 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
   assert(
     integrationsSrc.includes('Detail Diagnostik Koneksi'),
     'IntegrationsView must include Detail Diagnostik Koneksi toggle'
+  );
+  assert(
+    integrationsSrc.includes('Diagnostik Handshake WebSocket'),
+    'IntegrationsView must include Diagnostik Handshake WebSocket section'
+  );
+  assert(
+    integrationsSrc.includes('Host percobaan'),
+    'IntegrationsView must include Host percobaan'
+  );
+  assert(
+    integrationsSrc.includes('Alasan handshake ditolak'),
+    'IntegrationsView must include Alasan handshake ditolak'
   );
   assert(
     integrationsSrc.includes('Belum tersedia'),
