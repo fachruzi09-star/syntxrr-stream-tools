@@ -302,12 +302,20 @@ export function sanitizeHistoryTrackSnapshot(
     typeof item.copyrightNotice === 'string' && item.copyrightNotice.trim()
       ? item.copyrightNotice.trim()
       : undefined;
+  const hasValidAudiusLicense =
+    Boolean(cleanLicenseType) && isPermittedAudiusLicenseLabel(cleanLicenseType).permitted;
   const canRefreshAudiusStream =
     provider === 'audius' &&
     sourceType === 'remote_url' &&
     item.playable === true &&
     Boolean(cleanProviderTrackId) &&
-    (!cleanLicenseType || isPermittedAudiusLicenseLabel(cleanLicenseType).permitted);
+    hasValidAudiusLicense;
+  const isPlayableSnapshot =
+    sourceType === 'remote_url' &&
+    item.playable === true &&
+    (provider === 'audius'
+      ? hasValidAudiusLicense && (Boolean(safeAudioUrl) || canRefreshAudiusStream)
+      : Boolean(safeAudioUrl));
 
   return {
     id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `sr_hist_item_${Date.now()}`,
@@ -326,7 +334,7 @@ export function sanitizeHistoryTrackSnapshot(
     sourceType,
     provider,
     ...(cleanProviderTrackId ? { providerTrackId: cleanProviderTrackId } : {}),
-    playable: sourceType === 'remote_url' && item.playable === true && (Boolean(safeAudioUrl) || canRefreshAudiusStream),
+    playable: isPlayableSnapshot,
     ...(safeAudioUrl ? { audioUrl: safeAudioUrl } : {}),
     ...(safeExternalUrl ? { externalUrl: safeExternalUrl } : {}),
     ...(safeThumbnailUrl ? { thumbnailUrl: safeThumbnailUrl } : {}),
@@ -921,7 +929,7 @@ export class SongRequestEngine {
           ...(candidate.attribution.copyrightNotice
             ? { copyrightNotice: candidate.attribution.copyrightNotice }
             : {}),
-          notes: `Audius (${candidate.attribution.licenseType}) · Hak cipta: ${candidate.attribution.rightsHolder}`,
+          notes: `Audius (${candidate.attribution.licenseType}) · Kreator: ${candidate.attribution.rightsHolder}`,
         },
       };
     }
@@ -1159,8 +1167,11 @@ export class SongRequestEngine {
     let authorizedUrl = isAuthorizedPlaybackAudioUrl(activeItem.audioUrl) ? activeItem.audioUrl.trim() : '';
 
     if (activeItem.provider === 'audius') {
-      if (activeItem.licenseType && !isPermittedAudiusLicenseLabel(activeItem.licenseType).permitted) {
-        const msg = `Track Audius "${activeItem.title}" ditolak karena lisensi (${activeItem.licenseType}) tidak memenuhi syarat.`;
+      const licenseCheck = isPermittedAudiusLicenseLabel(activeItem.licenseType);
+      if (!activeItem.licenseType || !activeItem.licenseType.trim() || !licenseCheck.permitted) {
+        const msg =
+          licenseCheck.reason ||
+          `Track Audius "${activeItem.title}" ditolak karena bukti lisensi tidak tersedia atau tidak memenuhi syarat.`;
         this.updateState({
           currentTrack: { ...activeItem, playable: false, audioUrl: undefined },
           isPlaying: false,
@@ -1222,6 +1233,7 @@ export class SongRequestEngine {
             thumbnailUrl: refreshed.candidate.thumbnailUrl || activeItem.thumbnailUrl,
             rightsHolder: refreshed.candidate.attribution.rightsHolder,
             licenseType: refreshed.candidate.attribution.licenseType,
+            notes: `Audius (${refreshed.candidate.attribution.licenseType}) · Kreator: ${refreshed.candidate.attribution.rightsHolder}`,
             ...(refreshed.candidate.attribution.copyrightNotice
               ? { copyrightNotice: refreshed.candidate.attribution.copyrightNotice }
               : {}),

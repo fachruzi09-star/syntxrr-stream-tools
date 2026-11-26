@@ -528,7 +528,7 @@ export interface UnifiedQueueItem {
   thumbnailUrl?: string;
   duration?: number;
   requesterName: string;
-  platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'Spotify' | 'Local' | 'Manual';
+  platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'Spotify' | 'Audius' | 'Local' | 'Manual';
   addedAt: number;
   status: QueueItemStatus;
   notes?: string;
@@ -541,7 +541,7 @@ export interface SongRequest {
   artist: string;
   duration: number;
   requesterName: string;
-  platform: 'TikTok' | 'Twitch' | 'YouTube' | 'Manual' | 'Spotify' | 'Local';
+  platform: 'TikTok' | 'Twitch' | 'YouTube' | 'Manual' | 'Spotify' | 'Audius' | 'Local';
   status: 'playing' | 'queued' | 'played';
   requestedAt: number;
   coverArt?: string;

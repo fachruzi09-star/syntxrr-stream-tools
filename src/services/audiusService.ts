@@ -26,6 +26,7 @@ export interface AudiusTrack {
   genre?: string;
   mood?: string;
   permalink?: string;
+  is_available?: boolean;
   is_streamable?: boolean;
   is_stream_gated?: boolean;
   stream_conditions?: Record<string, unknown> | null;
@@ -35,11 +36,11 @@ export interface AudiusTrack {
   } | null;
   is_unlisted?: boolean;
   is_delete?: boolean;
-  license?: string | { type?: string; name?: string; oml?: boolean } | null;
-  open_music_license?: boolean;
+  license?: string | { type?: string; name?: string } | null;
   copyright_notice?: string;
   copyright?: string;
   copyright_line?: { year?: number | string; text?: string } | null;
+  producer_copyright_line?: { year?: number | string; text?: string } | null;
   artwork?: AudiusArtwork | null;
   track_image?: AudiusArtwork | null;
   user?: AudiusUser | null;
@@ -105,33 +106,51 @@ function extractLicenseString(license: AudiusTrack['license']): string {
   return '';
 }
 
-function isLicenseOmlObject(license: AudiusTrack['license']): boolean {
-  return Boolean(license && typeof license === 'object' && license.oml === true);
+export interface AudiusLicenseEvaluationOptions {
+  /**
+   * True ONLY when caller has verified full Audius API track metadata:
+   * is_available !== false, !is_unlisted, !is_delete, is_streamable === true,
+   * !is_stream_gated, stream_conditions null/empty, access?.stream !== false.
+   * Under Audius Terms of Use & OML, public API-streamable ungated tracks with
+   * "All rights reserved" or null/empty license are licensed under Open Music License (OML).
+   */
+  apiStreamableUngated?: boolean;
 }
 
 export function isPermittedAudiusLicenseLabel(
   licenseInput: AudiusTrack['license'],
-  openMusicLicenseFlag?: boolean,
+  options?: AudiusLicenseEvaluationOptions,
 ): { permitted: boolean; normalizedLabel?: string; reason?: string } {
   const raw = extractLicenseString(licenseInput);
-  const omlFlag = openMusicLicenseFlag === true || isLicenseOmlObject(licenseInput);
   const normalized = raw.replace(/\s+/g, ' ').trim();
   const lower = normalized.toLowerCase();
+  const apiStreamableUngated = options?.apiStreamableUngated === true;
 
   if (!normalized) {
-    if (omlFlag) {
+    if (apiStreamableUngated) {
       return { permitted: true, normalizedLabel: 'Open Music License' };
     }
     return {
       permitted: false,
-      reason: 'Metadata lisensi track Audius tidak tersedia atau tidak jelas.',
+      reason: 'Bukti lisensi track Audius tidak tersedia atau kosong.',
     };
   }
 
   if (
     lower === 'all rights reserved' ||
     lower === 'all-rights-reserved' ||
-    lower === 'all_rights_reserved' ||
+    lower === 'all_rights_reserved'
+  ) {
+    if (apiStreamableUngated) {
+      return { permitted: true, normalizedLabel: 'Open Music License' };
+    }
+    return {
+      permitted: false,
+      reason: `Label "${normalized}" tanpa verifikasi status streamable & ungated API Audius (OML) tidak dapat diputar langsung.`,
+    };
+  }
+
+  if (
     lower === 'arr' ||
     lower === 'copyright' ||
     lower === 'unknown' ||
@@ -140,51 +159,50 @@ export function isPermittedAudiusLicenseLabel(
   ) {
     return {
       permitted: false,
-      reason: `Track Audius menggunakan lisensi "${normalized}" yang tidak mengizinkan pemutaran otomatis.`,
+      reason: `Metadata lisensi "${normalized}" tidak cukup jelas untuk pemutaran otomatis.`,
     };
   }
 
-  // Reject restrictive Creative Commons modifiers (NonCommercial / NoDerivatives) in stage 1.
+  // 1. Check NonCommercial (NC) FIRST — includes CC BY-NC, CC BY-NC-SA, CC BY-NC-ND.
   if (
     /\b(nc|non[-_\s]?commercial)\b/i.test(lower) ||
-    /\b(nd|no[-_\s]?derivatives?)\b/i.test(lower) ||
-    /(^|[\s_-])by[\s_-]*nc([\s_-]|$)/i.test(lower) ||
+    /(^|[\s_-])by[\s_-]*nc([\s_-]|$)/i.test(lower)
+  ) {
+    return {
+      permitted: false,
+      reason: `Lisensi "${normalized}" memiliki pembatasan NonCommercial (NC) yang tidak diizinkan untuk siaran langsung.`,
+    };
+  }
+
+  // 2. Check NoDerivatives (ND) SEPARATELY — CC BY-ND permits commercial use without derivative works,
+  // but is held back conservatively in Stage 1 due to live broadcast mixing/overlay derivative ambiguity.
+  if (
+    /\b(nd|no[-_\s]?derivatives?|noderivs)\b/i.test(lower) ||
     /(^|[\s_-])by[\s_-]*nd([\s_-]|$)/i.test(lower)
   ) {
     return {
       permitted: false,
-      reason: `Lisensi "${normalized}" memiliki pembatasan (NonCommercial/NoDerivatives) untuk siaran langsung.`,
+      reason: `Lisensi "${normalized}" (CC BY-ND) mengizinkan penggunaan komersial tanpa karya turunan, tetapi ditolak secara konservatif karena pembatasan NoDerivatives (ND) saat diputar bersama siaran live.`,
     };
   }
 
   if (
     /^(audius[\s_-]+)?open[\s_-]+music[\s_-]+license(\s*\(oml\))?$/i.test(normalized) ||
-    /^oml$/i.test(normalized) ||
-    omlFlag
+    /^oml$/i.test(normalized)
   ) {
-    // Even if omlFlag is true, reject unrecognized explicit conflicting text unless text itself is OML.
-    if (
-      omlFlag &&
-      normalized &&
-      !/^(audius[\s_-]+)?open[\s_-]+music[\s_-]+license(\s*\(oml\))?$/i.test(normalized) &&
-      !/^oml$/i.test(normalized)
-    ) {
-      return {
-        permitted: false,
-        reason: `Lisensi alternatif "${normalized}" tidak dapat diverifikasi secara jelas.`,
-      };
-    }
     return { permitted: true, normalizedLabel: 'Open Music License' };
   }
 
-  if (/^(cc0(\s*1\.0)?|cc0-1\.0|public[\s_-]+domain)$/i.test(normalized)) {
+  if (
+    /^(cc0(\s*1\.0)?|cc0-1\.0|public[\s_-]+domain(\s+cc0)?)$/i.test(normalized)
+  ) {
     return { permitted: true, normalizedLabel: 'CC0 / Public Domain' };
   }
 
   if (
     /^(cc[\s_-]*)?by(\s*4\.0)?$/i.test(normalized) ||
     /^creative\s+commons\s+attribution(\s*4\.0)?$/i.test(normalized) ||
-    /^attribution\s*\(cc[\s_-]*by\)$/i.test(normalized)
+    /^attribution(\s*\(?\s*cc[\s_-]*by\s*\)?)?$/i.test(normalized)
   ) {
     return { permitted: true, normalizedLabel: 'CC BY' };
   }
@@ -192,7 +210,7 @@ export function isPermittedAudiusLicenseLabel(
   if (
     /^(cc[\s_-]*)?by[\s_-]*sa(\s*4\.0)?$/i.test(normalized) ||
     /^creative\s+commons\s+attribution[\s_-]*sharealike(\s*4\.0)?$/i.test(normalized) ||
-    /^attribution[\s_-]*sharealike\s*\(cc[\s_-]*by[\s_-]*sa\)$/i.test(normalized)
+    /^attribution[\s_-]*sharealike(\s*\(?\s*cc[\s_-]*by[\s_-]*sa\s*\)?)?$/i.test(normalized)
   ) {
     return { permitted: true, normalizedLabel: 'CC BY-SA' };
   }
@@ -250,6 +268,14 @@ function resolveAudiusCopyrightNotice(track: AudiusTrack): string | undefined {
     const year = track.copyright_line.year ? `${track.copyright_line.year} ` : '';
     return `${year}${track.copyright_line.text.trim()}`.trim();
   }
+  if (
+    track.producer_copyright_line &&
+    typeof track.producer_copyright_line.text === 'string' &&
+    track.producer_copyright_line.text.trim()
+  ) {
+    const year = track.producer_copyright_line.year ? `${track.producer_copyright_line.year} ` : '';
+    return `${year}${track.producer_copyright_line.text.trim()}`.trim();
+  }
   return undefined;
 }
 
@@ -279,10 +305,10 @@ export function evaluateAudiusTrackAuthorization(
     ...(trackUrl ? { trackUrl } : {}),
   };
 
-  if (track.is_delete === true || track.is_unlisted === true) {
+  if (track.is_delete === true || track.is_unlisted === true || track.is_available === false) {
     return {
       allowed: false,
-      reason: 'Track Audius tidak tersedia untuk publik (unlisted atau dihapus).',
+      reason: 'Track Audius tidak tersedia untuk publik (unlisted, dihapus, atau tidak tersedia).',
       attribution: baseAttribution,
     };
   }
@@ -309,7 +335,9 @@ export function evaluateAudiusTrackAuthorization(
     };
   }
 
-  const licenseEval = isPermittedAudiusLicenseLabel(track.license, track.open_music_license);
+  const licenseEval = isPermittedAudiusLicenseLabel(track.license, {
+    apiStreamableUngated: true,
+  });
   if (!licenseEval.permitted || !licenseEval.normalizedLabel) {
     return {
       allowed: false,
@@ -347,6 +375,194 @@ function isValidHttpStreamUrl(url: unknown): url is string {
     return true;
   } catch {
     return false;
+  }
+}
+
+function isPrivateOrLocalHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.endsWith('.local')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isValidAudiusRedirectUrl(candidateUrl: unknown, originalEndpointUrl: string): candidateUrl is string {
+  if (!isValidHttpStreamUrl(candidateUrl)) return false;
+  try {
+    const target = new URL(candidateUrl);
+    const origin = new URL(originalEndpointUrl);
+    if (target.username || target.password) return false;
+    // Do not allow HTTPS endpoint to downgrade to plaintext HTTP
+    if (origin.protocol === 'https:' && target.protocol !== 'https:') {
+      return false;
+    }
+    if (target.hostname !== origin.hostname) {
+      if (isPrivateOrLocalHostname(target.hostname) && !isPrivateOrLocalHostname(origin.hostname)) {
+        return false;
+      }
+      // Redirected content node URLs on Audius resolve to /tracks/cidstream/<cid> or /tracks/<id>/stream
+      const path = target.pathname;
+      const matchesAudiusStreamPath =
+        /^\/tracks\/cidstream\/[^/]+/i.test(path) ||
+        /^\/(v1\/)?tracks\/[^/]+\/stream$/i.test(path);
+      if (!matchesAudiusStreamPath) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeMimeType(contentTypeHeader: string | null): string {
+  if (!contentTypeHeader) return '';
+  return contentTypeHeader.split(';')[0].trim().toLowerCase();
+}
+
+function isExplicitlyRejectedMimeType(mime: string): boolean {
+  if (!mime) return true;
+  if (
+    mime === 'application/json' ||
+    mime === 'text/html' ||
+    mime === 'text/plain' ||
+    mime === 'application/xml' ||
+    mime === 'text/xml' ||
+    mime === 'application/xhtml+xml' ||
+    mime.startsWith('text/') ||
+    mime.startsWith('image/')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function hasAudioMagicBytes(bytes: Uint8Array): boolean {
+  if (!bytes || bytes.byteLength < 2) return false;
+
+  // 1. ID3v2 tag ("ID3") — common MP3 container returned by Audius creatornode
+  if (bytes.byteLength >= 3 && bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+    return true;
+  }
+  // 2. Ogg ("OggS")
+  if (
+    bytes.byteLength >= 4 &&
+    bytes[0] === 0x4f &&
+    bytes[1] === 0x67 &&
+    bytes[2] === 0x67 &&
+    bytes[3] === 0x53
+  ) {
+    return true;
+  }
+  // 3. FLAC ("fLaC")
+  if (
+    bytes.byteLength >= 4 &&
+    bytes[0] === 0x66 &&
+    bytes[1] === 0x4c &&
+    bytes[2] === 0x61 &&
+    bytes[3] === 0x43
+  ) {
+    return true;
+  }
+  // 4. WAV ("RIFF....WAVE")
+  if (
+    bytes.byteLength >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x41 &&
+    bytes[10] === 0x56 &&
+    bytes[11] === 0x45
+  ) {
+    return true;
+  }
+  // 5. AIFF ("FORM....AIFF" / "FORM....AIFC")
+  if (
+    bytes.byteLength >= 12 &&
+    bytes[0] === 0x46 &&
+    bytes[1] === 0x4f &&
+    bytes[2] === 0x52 &&
+    bytes[3] === 0x4d &&
+    bytes[8] === 0x41 &&
+    bytes[9] === 0x49 &&
+    bytes[10] === 0x46 &&
+    (bytes[11] === 0x46 || bytes[11] === 0x43)
+  ) {
+    return true;
+  }
+  // 6. ISO BMFF / M4A / MP4 ("....ftyp")
+  if (
+    bytes.byteLength >= 8 &&
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70
+  ) {
+    return true;
+  }
+  // 7. Matroska / WebM EBML header (0x1A 0x45 0xDF 0xA3)
+  if (
+    bytes.byteLength >= 4 &&
+    bytes[0] === 0x1a &&
+    bytes[1] === 0x45 &&
+    bytes[2] === 0xdf &&
+    bytes[3] === 0xa3
+  ) {
+    return true;
+  }
+  // 8. Raw MPEG audio frame sync (MP3 without ID3) or ADTS AAC syncword
+  if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) {
+    const versionBits = (bytes[1] >> 3) & 0x03;
+    const layerBits = (bytes[1] >> 1) & 0x03;
+    // MPEG-1/2/2.5 audio: versionBits !== 1, layerBits !== 0
+    if (versionBits !== 0x01 && layerBits !== 0x00) {
+      return true;
+    }
+    // ADTS AAC frame sync: 0xFFF with layer === 0
+    if ((bytes[1] & 0xf6) === 0xf0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function readPrefixBytes(res: Response, maxBytes: number = 64): Promise<Uint8Array> {
+  if (res.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    const collected = new Uint8Array(maxBytes);
+    let offset = 0;
+    try {
+      while (offset < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done || !value || value.byteLength === 0) break;
+        const copyLen = Math.min(value.byteLength, maxBytes - offset);
+        collected.set(value.subarray(0, copyLen), offset);
+        offset += copyLen;
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore stream cancel errors
+      }
+    }
+    return collected.subarray(0, offset);
+  }
+  try {
+    const buf = await res.arrayBuffer();
+    return new Uint8Array(buf.slice(0, maxBytes));
+  } catch {
+    return new Uint8Array(0);
   }
 }
 
@@ -489,25 +705,27 @@ export const AudiusService = {
     }
 
     try {
+      let usedGetFallback = false;
       let res = await fetchWithTimeout(streamEndpoint, {
         method: 'HEAD',
         redirect: 'follow',
       });
 
       if (res.status === 405 || res.status === 501) {
+        usedGetFallback = true;
         res = await fetchWithTimeout(streamEndpoint, {
           method: 'GET',
-          headers: { Range: 'bytes=0-1' },
+          headers: { Range: 'bytes=0-63' },
           redirect: 'follow',
         });
-        try {
-          await res.body?.cancel();
-        } catch {
-          // ignore stream cancel errors
-        }
       }
 
       if (res.status === 429) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
         return {
           ok: false,
           rateLimited: true,
@@ -516,31 +734,155 @@ export const AudiusService = {
       }
 
       if (!res.ok) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
         return {
           ok: false,
           error: `Stream audio Audius tidak tersedia (HTTP ${res.status}).`,
         };
       }
 
-      const contentType = (res.headers.get('content-type') || '').toLowerCase();
-      if (contentType.includes('application/json') || contentType.includes('text/html')) {
+      const candidateUrl = res.url && res.url.trim() ? res.url.trim() : streamEndpoint;
+      if (!isValidAudiusRedirectUrl(candidateUrl, streamEndpoint)) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
+        return {
+          ok: false,
+          error: 'URL tujuan redirect stream Audius tidak valid atau tidak aman.',
+        };
+      }
+
+      const mimeType = normalizeMimeType(res.headers.get('content-type'));
+      if (isExplicitlyRejectedMimeType(mimeType)) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
         return {
           ok: false,
           error: 'Respons endpoint stream Audius bukan aliran audio yang valid.',
         };
       }
 
-      const candidateUrl = res.url && res.url.trim() ? res.url.trim() : streamEndpoint;
-      if (!isValidHttpStreamUrl(candidateUrl)) {
+      const contentLengthHeader = res.headers.get('content-length');
+      if (contentLengthHeader !== null && Number(contentLengthHeader) === 0) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
         return {
           ok: false,
-          error: 'URL tujuan stream Audius tidak valid atau tidak aman.',
+          error: 'Respons endpoint stream Audius kosong (content-length 0).',
+        };
+      }
+
+      if (mimeType.startsWith('audio/')) {
+        if (usedGetFallback) {
+          try {
+            await res.body?.cancel();
+          } catch {
+            // ignore
+          }
+        }
+        return {
+          ok: true,
+          streamUrl: candidateUrl,
+        };
+      }
+
+      if (mimeType !== 'application/octet-stream') {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
+        return {
+          ok: false,
+          error: `MIME stream Audius tidak dikenal atau tidak didukung (${mimeType || 'kosong'}).`,
+        };
+      }
+
+      // Real Audius /tracks/{id}/stream often returns application/octet-stream.
+      // Never accept HEAD 2xx blindly: inspect real prefix audio bytes via GET Range.
+      let inspectRes = res;
+      if (!usedGetFallback) {
+        inspectRes = await fetchWithTimeout(candidateUrl, {
+          method: 'GET',
+          headers: { Range: 'bytes=0-63' },
+          redirect: 'follow',
+        });
+
+        if (inspectRes.status === 429) {
+          try {
+            await inspectRes.body?.cancel();
+          } catch {
+            // ignore
+          }
+          return {
+            ok: false,
+            rateLimited: true,
+            error: 'Endpoint stream Audius sedang terkena rate limit (429).',
+          };
+        }
+
+        if (!inspectRes.ok) {
+          try {
+            await inspectRes.body?.cancel();
+          } catch {
+            // ignore
+          }
+          return {
+            ok: false,
+            error: `Verifikasi byte audio Audius gagal (HTTP ${inspectRes.status}).`,
+          };
+        }
+      }
+
+      const finalUrl = inspectRes.url && inspectRes.url.trim() ? inspectRes.url.trim() : candidateUrl;
+      if (!isValidAudiusRedirectUrl(finalUrl, streamEndpoint)) {
+        try {
+          await inspectRes.body?.cancel();
+        } catch {
+          // ignore
+        }
+        return {
+          ok: false,
+          error: 'URL tujuan redirect stream Audius tidak valid atau tidak aman.',
+        };
+      }
+
+      const inspectMime = normalizeMimeType(inspectRes.headers.get('content-type'));
+      if (isExplicitlyRejectedMimeType(inspectMime) || (inspectMime !== 'application/octet-stream' && !inspectMime.startsWith('audio/'))) {
+        try {
+          await inspectRes.body?.cancel();
+        } catch {
+          // ignore
+        }
+        return {
+          ok: false,
+          error: `Respons inspeksi stream Audius bukan audio yang valid (${inspectMime || 'kosong'}).`,
+        };
+      }
+
+      const sampleBytes = await readPrefixBytes(inspectRes, 64);
+      if (sampleBytes.byteLength === 0 || !hasAudioMagicBytes(sampleBytes)) {
+        return {
+          ok: false,
+          error: 'Respons application/octet-stream Audius tidak terbukti berisi header/byte audio yang valid.',
         };
       }
 
       return {
         ok: true,
-        streamUrl: candidateUrl,
+        streamUrl: finalUrl,
       };
     } catch (err: any) {
       const isAbort = err?.name === 'AbortError';

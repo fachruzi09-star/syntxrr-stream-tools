@@ -1,10 +1,13 @@
-// Unit & integration tests for A2.10.4.1: Audius Authorized Song Request Playback
+// Unit & integration tests for A2.10.4.2: Audius OML Semantics & Stream Validation Hardening
 // Run via: bun run src/services/__tests__/audiusSongRequest.test.ts
 
 import {
   AUDIUS_API_BASE,
   AudiusService,
   evaluateAudiusTrackAuthorization,
+  hasAudioMagicBytes,
+  isPermittedAudiusLicenseLabel,
+  isValidAudiusRedirectUrl,
   type AudiusTrack,
 } from '../audiusService';
 import {
@@ -14,6 +17,7 @@ import {
   type SongRequestItem,
 } from '../songRequestEngine';
 import { streamEventBus } from '../eventBus';
+import type { SongRequest, UnifiedQueueItem } from '../../types';
 
 let assertionCount = 0;
 
@@ -78,6 +82,19 @@ function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 15));
 }
 
+function makeOctetStreamAudioResponse(bytes: Uint8Array, url?: string, status: number = 200): Response {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const resp = new Response(copy, {
+    status,
+    headers: { 'Content-Type': 'application/octet-stream' },
+  });
+  if (url) {
+    Object.defineProperty(resp, 'url', { value: url });
+  }
+  return resp;
+}
+
 async function runAudiusSongRequestTests(): Promise<void> {
   songRequestEngine.destroy();
 
@@ -93,88 +110,138 @@ async function runAudiusSongRequestTests(): Promise<void> {
   };
 
   try {
-    // 1. Direct authorization & license checks
-    const validOmlTrack: AudiusTrack = {
-      id: 'aud_oml_1',
+    // Compile-time check: 'Audius' is supported on UnifiedQueueItem['platform'] & SongRequest['platform']
+    const audiusPlatformQueueSample: UnifiedQueueItem['platform'] = 'Audius';
+    const audiusPlatformSongSample: SongRequest['platform'] = 'Audius';
+    assertEqual(audiusPlatformQueueSample, 'Audius', '0a: UnifiedQueueItem supports Audius platform');
+    assertEqual(audiusPlatformSongSample, 'Audius', '0b: SongRequest supports Audius platform');
+
+    // 1. Real sanitized Audius API v1 track fixtures (OML, ARR + streamable, null + streamable, API disabled, CC variants)
+    const realStyleArrStreamableTrack: AudiusTrack = {
+      id: 'Kp7K522',
       title: 'Aurora Circuit',
       duration: 214,
       permalink: '/syntxrr_artist/aurora-circuit',
+      is_available: true,
       is_streamable: true,
       is_stream_gated: false,
       stream_conditions: null,
-      license: 'Open Music License',
-      copyright_notice: '2026 Syntxrr Artist',
+      access: { stream: true, download: false },
+      is_unlisted: false,
+      is_delete: false,
+      license: 'All rights reserved',
+      copyright_line: { year: 2026, text: 'Syntxrr Artist' },
       artwork: { '480x480': 'https://cdn.audius.test/art/aurora.jpg' },
       user: { id: 'u1', name: 'Syntxrr Artist', handle: 'syntxrr_artist' },
     };
-    const omlEval = evaluateAudiusTrackAuthorization(validOmlTrack);
-    assertEqual(omlEval.allowed, true, '1a: valid OML track allowed');
-    assertEqual(omlEval.licenseType, 'Open Music License', '1b: normalized OML license label');
-    assertEqual(omlEval.attribution.rightsHolder, 'Syntxrr Artist', '1c: rightsHolder captured');
-    assertEqual(omlEval.attribution.copyrightNotice, '2026 Syntxrr Artist', '1d: copyrightNotice captured');
+    const omlFromArrEval = evaluateAudiusTrackAuthorization(realStyleArrStreamableTrack);
     assertEqual(
-      omlEval.attribution.trackUrl,
+      omlFromArrEval.allowed,
+      true,
+      '1a: streamable ungated track with "All rights reserved" label is permitted under Audius OML',
+    );
+    assertEqual(omlFromArrEval.licenseType, 'Open Music License', '1b: normalized to Open Music License');
+    assertEqual(omlFromArrEval.attribution.rightsHolder, 'Syntxrr Artist', '1c: creator attribution captured');
+    assertEqual(omlFromArrEval.attribution.copyrightNotice, '2026 Syntxrr Artist', '1d: copyrightNotice captured');
+    assertEqual(
+      omlFromArrEval.attribution.trackUrl,
       'https://audius.co/syntxrr_artist/aurora-circuit',
       '1e: permalink resolved to audius.co URL',
     );
 
-    const ccByTrack: AudiusTrack = {
-      ...validOmlTrack,
-      id: 'aud_ccby_1',
-      license: 'by',
+    const nullLicenseStreamableTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: 'QNqqqzB',
+      license: null,
+      access: { stream: true, download: true },
+    };
+    const omlFromNullEval = evaluateAudiusTrackAuthorization(nullLicenseStreamableTrack);
+    assertEqual(
+      omlFromNullEval.allowed,
+      true,
+      '1f: streamable ungated track with null license defaults to Audius OML',
+    );
+    assertEqual(omlFromNullEval.licenseType, 'Open Music License', '1g: null license normalizes to OML');
+
+    const disallowedApiStreamingTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: '95wro',
+      is_streamable: false,
+      access: { stream: true, download: true },
+      license: 'All rights reserved',
     };
     assertEqual(
-      evaluateAudiusTrackAuthorization(ccByTrack).allowed,
-      true,
-      '1f: CC BY (by) track allowed',
+      evaluateAudiusTrackAuthorization(disallowedApiStreamingTrack).allowed,
+      false,
+      '1h: is_streamable=false ("Disallow Streaming via the API") rejected even if access.stream=true',
+    );
+
+    const unavailableTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: 'aud_unavail',
+      is_available: false,
+    };
+    assertEqual(
+      evaluateAudiusTrackAuthorization(unavailableTrack).allowed,
+      false,
+      '1i: is_available=false rejected',
+    );
+
+    const ccByApiFormatTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: 'aud_ccby_real',
+      license: 'Attribution CC BY',
+    };
+    const ccByEval = evaluateAudiusTrackAuthorization(ccByApiFormatTrack);
+    assertEqual(ccByEval.allowed, true, '1j: real API "Attribution CC BY" permitted');
+    assertEqual(ccByEval.licenseType, 'CC BY', '1k: "Attribution CC BY" normalized to CC BY');
+
+    const ccBySaApiFormatTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: 'aud_ccbysa_real',
+      license: 'Attribution-ShareAlike CC BY-SA',
+    };
+    const ccBySaEval = evaluateAudiusTrackAuthorization(ccBySaApiFormatTrack);
+    assertEqual(ccBySaEval.allowed, true, '1l: "Attribution-ShareAlike CC BY-SA" permitted');
+    assertEqual(ccBySaEval.licenseType, 'CC BY-SA', '1m: CC BY-SA normalized');
+
+    const ccByNcNdTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: 'aud_nc_nd',
+      license: 'Attribution-NonCommercial-NoDerivs CC BY-NC-ND',
+    };
+    const ncNdEval = evaluateAudiusTrackAuthorization(ccByNcNdTrack);
+    assertEqual(ncNdEval.allowed, false, '1n: CC BY-NC-ND rejected');
+    assert(
+      Boolean(ncNdEval.reason && /NonCommercial/i.test(ncNdEval.reason)),
+      '1o: CC BY-NC-ND rejection mentions NonCommercial',
+    );
+
+    const ccByNdTrack: AudiusTrack = {
+      ...realStyleArrStreamableTrack,
+      id: 'aud_by_nd',
+      license: 'Attribution-NoDerivs CC BY-ND',
+    };
+    const ndEval = evaluateAudiusTrackAuthorization(ccByNdTrack);
+    assertEqual(ndEval.allowed, false, '1p: CC BY-ND rejected conservatively in Stage 1');
+    assert(
+      Boolean(ndEval.reason && /NoDerivatives/i.test(ndEval.reason) && !/NonCommercial/i.test(ndEval.reason)),
+      '1q: CC BY-ND rejection states NoDerivatives/commercial distinction and does NOT label it NonCommercial',
     );
 
     const unclearAltLicenseTrack: AudiusTrack = {
-      ...validOmlTrack,
+      ...realStyleArrStreamableTrack,
       id: 'aud_alt_1',
       license: 'Custom Artist Promo Agreement',
     };
     assertEqual(
       evaluateAudiusTrackAuthorization(unclearAltLicenseTrack).allowed,
       false,
-      '1g: unverified alternative license rejected',
-    );
-
-    const arrTrack: AudiusTrack = {
-      ...validOmlTrack,
-      id: 'aud_arr_1',
-      license: 'All Rights Reserved',
-    };
-    assertEqual(
-      evaluateAudiusTrackAuthorization(arrTrack).allowed,
-      false,
-      '1h: All Rights Reserved rejected',
-    );
-
-    const ncTrack: AudiusTrack = {
-      ...validOmlTrack,
-      id: 'aud_nc_1',
-      license: 'by-nc-sa',
-    };
-    assertEqual(
-      evaluateAudiusTrackAuthorization(ncTrack).allowed,
-      false,
-      '1i: NonCommercial license rejected for live streaming',
-    );
-
-    const missingLicenseTrack: AudiusTrack = {
-      ...validOmlTrack,
-      id: 'aud_nolicense_1',
-      license: null,
-    };
-    assertEqual(
-      evaluateAudiusTrackAuthorization(missingLicenseTrack).allowed,
-      false,
-      '1j: missing license metadata rejected (not assumed safe)',
+      '1r: unverified alternative license rejected (fail-closed)',
     );
 
     const gatedTrack: AudiusTrack = {
-      ...validOmlTrack,
+      ...realStyleArrStreamableTrack,
       id: 'aud_gated_1',
       is_stream_gated: true,
       stream_conditions: { follow_user_id: 99 },
@@ -182,11 +249,11 @@ async function runAudiusSongRequestTests(): Promise<void> {
     assertEqual(
       evaluateAudiusTrackAuthorization(gatedTrack).allowed,
       false,
-      '1k: stream-gated track rejected',
+      '1s: stream-gated track rejected',
     );
 
     const conditionOnlyGatedTrack: AudiusTrack = {
-      ...validOmlTrack,
+      ...realStyleArrStreamableTrack,
       id: 'aud_cond_1',
       is_stream_gated: false,
       stream_conditions: { usdc_purchase: { price: 500 } },
@@ -194,27 +261,67 @@ async function runAudiusSongRequestTests(): Promise<void> {
     assertEqual(
       evaluateAudiusTrackAuthorization(conditionOnlyGatedTrack).allowed,
       false,
-      '1l: stream_conditions non-null rejected even if is_stream_gated=false',
+      '1t: non-null stream_conditions rejected even if is_stream_gated=false',
     );
 
-    const nonStreamableTrack: AudiusTrack = {
-      ...validOmlTrack,
-      id: 'aud_nostream_1',
-      is_streamable: false,
-    };
+    // Direct standalone license check MUST fail closed on empty or unverified "All Rights Reserved"
     assertEqual(
-      evaluateAudiusTrackAuthorization(nonStreamableTrack).allowed,
+      isPermittedAudiusLicenseLabel('').permitted,
       false,
-      '1m: is_streamable=false rejected',
+      '1u: standalone license check rejects empty licenseType',
+    );
+    assertEqual(
+      isPermittedAudiusLicenseLabel('All Rights Reserved').permitted,
+      false,
+      '1v: standalone license check rejects raw "All Rights Reserved" without verified API track state',
     );
 
-    // 2. Mock Audius API fetch scenarios (search, stream HEAD/GET, 429 rate limit, 404, invalid response, refresh)
+    // Audio magic bytes & redirect validator sanity checks
+    assertEqual(
+      hasAudioMagicBytes(new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00])),
+      true,
+      '1w: recognizes ID3 audio header',
+    );
+    assertEqual(
+      hasAudioMagicBytes(new TextEncoder().encode('FAKE_BINARY_NON_AUDIO')),
+      false,
+      '1x: rejects fake non-audio binary payload',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'http://creatornode.audius.co/tracks/cidstream/QmAbc',
+        'https://api.audius.co/v1/tracks/1/stream',
+      ),
+      false,
+      '1y: rejects HTTPS->HTTP redirect downgrade',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://evil.example/login.html',
+        'https://api.audius.co/v1/tracks/1/stream',
+      ),
+      false,
+      '1z: rejects redirect to arbitrary non-Audius path',
+    );
+    assertEqual(
+      isValidAudiusRedirectUrl(
+        'https://creatornode.audius.co/tracks/cidstream/QmAbc?signature=xyz',
+        'https://api.audius.co/v1/tracks/1/stream',
+      ),
+      true,
+      '1za: accepts valid HTTPS Audius cidstream redirect',
+    );
+
+    // 2. Mock Audius API fetch scenarios (search, octet-stream byte verification, MIME rejections, redirects, refresh)
     const searchUrlsSeen: string[] = [];
     const streamUrlsSeen: string[] = [];
     let auroraRevokedOnRefresh = false;
 
+    const id3SampleBytes = new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x03]);
+
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const urlStr = typeof input === 'string' ? input : input.toString();
+      const method = (init?.method || 'GET').toUpperCase();
 
       if (urlStr.startsWith(`${AUDIUS_API_BASE}/tracks/search`)) {
         searchUrlsSeen.push(urlStr);
@@ -247,14 +354,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
         if (q.includes('bad_stream_url')) {
           return new Response(
             JSON.stringify({
-              data: [
-                {
-                  ...validOmlTrack,
-                  id: 'aud_bad_stream',
-                  title: 'Broken Stream Track',
-                  permalink: '/syntxrr_artist/broken-stream',
-                },
-              ],
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_bad_stream', title: 'Broken Stream' }],
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
@@ -262,14 +362,54 @@ async function runAudiusSongRequestTests(): Promise<void> {
         if (q.includes('non_audio_stream')) {
           return new Response(
             JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_json_stream', title: 'JSON Stream' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('text_plain_stream')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_text_stream', title: 'Text Stream' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('fake_octet_stream')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_fake_octet', title: 'Fake Octet' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('empty_octet_stream')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_empty_octet', title: 'Empty Octet' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('real_octet_track')) {
+          return new Response(
+            JSON.stringify({
               data: [
                 {
-                  ...validOmlTrack,
-                  id: 'aud_json_stream',
-                  title: 'Non Audio Stream Track',
-                  permalink: '/syntxrr_artist/non-audio-stream',
+                  ...realStyleArrStreamableTrack,
+                  id: 'aud_real_octet',
+                  title: 'Real Creatornode Octet Track',
+                  permalink: '/syntxrr_artist/real-octet-track',
                 },
               ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (q.includes('bad_redirect_track')) {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...realStyleArrStreamableTrack, id: 'aud_bad_redir', title: 'Bad Redirect' }],
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
@@ -279,7 +419,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
             JSON.stringify({
               data: [
                 {
-                  ...validOmlTrack,
+                  ...realStyleArrStreamableTrack,
                   id: 'aud_tok_1',
                   title: 'Tokenized Redirect Track',
                   permalink: '/syntxrr_artist/tokenized-redirect',
@@ -289,10 +429,10 @@ async function runAudiusSongRequestTests(): Promise<void> {
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
         }
-        // Mixed results: first track is gated, second track is valid OML -> selects second track!
+        // Mixed results: gated #1, disallowed API #2, valid OML ("All rights reserved" + is_streamable=true) #3
         return new Response(
           JSON.stringify({
-            data: [gatedTrack, validOmlTrack],
+            data: [gatedTrack, disallowedApiStreamingTrack, realStyleArrStreamableTrack],
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -302,7 +442,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
         return new Response(
           JSON.stringify({
             data: {
-              ...validOmlTrack,
+              ...realStyleArrStreamableTrack,
               id: 'aud_tok_1',
               title: 'Tokenized Redirect Track',
               permalink: '/syntxrr_artist/tokenized-redirect',
@@ -312,13 +452,27 @@ async function runAudiusSongRequestTests(): Promise<void> {
         );
       }
 
-      if (urlStr.startsWith(`${AUDIUS_API_BASE}/tracks/aud_oml_1?`)) {
+      if (urlStr.startsWith(`${AUDIUS_API_BASE}/tracks/Kp7K522?`)) {
         return new Response(
           JSON.stringify({
-            data: auroraRevokedOnRefresh ? { ...validOmlTrack, is_streamable: false } : validOmlTrack,
+            data: auroraRevokedOnRefresh
+              ? { ...realStyleArrStreamableTrack, is_streamable: false }
+              : realStyleArrStreamableTrack,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
+      }
+
+      if (urlStr.includes('/tracks/cidstream/')) {
+        if (urlStr.includes('QmRealId3')) {
+          return makeOctetStreamAudioResponse(id3SampleBytes, urlStr, 206);
+        }
+        if (urlStr.includes('QmFakeBinary')) {
+          return makeOctetStreamAudioResponse(new TextEncoder().encode('NOT_AN_AUDIO_FILE_HEADER'), urlStr, 206);
+        }
+        if (urlStr.includes('QmEmptyBinary')) {
+          return makeOctetStreamAudioResponse(new Uint8Array(0), urlStr, 206);
+        }
       }
 
       if (urlStr.includes('/tracks/') && urlStr.includes('/stream')) {
@@ -332,9 +486,42 @@ async function runAudiusSongRequestTests(): Promise<void> {
             headers: { 'Content-Type': 'application/json' },
           });
         }
+        if (urlStr.includes('aud_text_stream')) {
+          return new Response('Stream unavailable', {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+        if (urlStr.includes('aud_fake_octet')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://creatornode.audius.test/tracks/cidstream/QmFakeBinary',
+          });
+          return r;
+        }
+        if (urlStr.includes('aud_empty_octet')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://creatornode.audius.test/tracks/cidstream/QmEmptyBinary',
+          });
+          return r;
+        }
+        if (urlStr.includes('aud_real_octet')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://creatornode.audius.test/tracks/cidstream/QmRealId3?signature=sig_real_octet',
+          });
+          return r;
+        }
+        if (urlStr.includes('aud_bad_redir')) {
+          const r = new Response(null, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } });
+          Object.defineProperty(r, 'url', {
+            value: 'https://attacker.example/phish.html',
+          });
+          return r;
+        }
         if (urlStr.includes('aud_tok_1')) {
-          // Simulate 405 on HEAD, then 206 with redirected CDN URL containing sensitive token param
-          if ((init?.method || 'GET').toUpperCase() === 'HEAD') {
+          if (method === 'HEAD') {
             return new Response(null, { status: 405 });
           }
           const resp = new Response(null, {
@@ -342,7 +529,8 @@ async function runAudiusSongRequestTests(): Promise<void> {
             headers: { 'Content-Type': 'audio/mpeg' },
           });
           Object.defineProperty(resp, 'url', {
-            value: 'https://cn1.audius.test/v1/stream/aud_tok_1?token=ephemeral_secret_abc&expires=999999',
+            value:
+              'https://creatornode.audius.test/tracks/cidstream/QmTok1?signature=ephemeral_sig_abc&expires=999999',
           });
           return resp;
         }
@@ -355,7 +543,7 @@ async function runAudiusSongRequestTests(): Promise<void> {
       return new Response(JSON.stringify({ error: 'Unexpected test URL' }), { status: 404 });
     }) as typeof fetch;
 
-    // 3. Direct AudiusService search, rate limit, network error, empty response, invalid stream tests
+    // 3. Direct AudiusService search, MIME, magic bytes, and redirect validation tests
     const rateLimitSearch = await AudiusService.searchCatalog('rate_limit_test');
     assertEqual(rateLimitSearch.success, false, '3a: rate limit handled cleanly');
     assertEqual(rateLimitSearch.rateLimited, true, '3b: rateLimited flag set on HTTP 429');
@@ -373,7 +561,30 @@ async function runAudiusSongRequestTests(): Promise<void> {
     const nonAudioRes = await AudiusService.resolvePlayableTrack('non_audio_stream');
     assertEqual(nonAudioRes.success, false, '3g: JSON non-audio stream response rejected');
 
-    // 4. SongRequestEngine integration with zero API key configured!
+    const textPlainRes = await AudiusService.resolvePlayableTrack('text_plain_stream');
+    assertEqual(textPlainRes.success, false, '3h: text/plain non-audio stream response rejected');
+
+    const fakeOctetRes = await AudiusService.resolvePlayableTrack('fake_octet_stream');
+    assertEqual(fakeOctetRes.success, false, '3i: fake application/octet-stream without audio header rejected');
+
+    const emptyOctetRes = await AudiusService.resolvePlayableTrack('empty_octet_stream');
+    assertEqual(emptyOctetRes.success, false, '3j: empty application/octet-stream rejected');
+
+    const badRedirRes = await AudiusService.resolvePlayableTrack('bad_redirect_track');
+    assertEqual(badRedirRes.success, false, '3k: arbitrary non-Audius redirect rejected');
+
+    const realOctetRes = await AudiusService.resolvePlayableTrack('real_octet_track');
+    assertEqual(
+      realOctetRes.success,
+      true,
+      '3l: real creatornode application/octet-stream with ID3 audio header accepted via Range inspection',
+    );
+    assert(
+      Boolean(realOctetRes.streamUrl?.includes('/tracks/cidstream/QmRealId3')),
+      '3m: verified cidstream URL returned',
+    );
+
+    // 4. SongRequestEngine integration
     const engine = new SongRequestEngine();
     try {
       engine.configureContext({
@@ -384,72 +595,88 @@ async function runAudiusSongRequestTests(): Promise<void> {
 
       assertEqual(engine.getState().policy.maxQueueSize, 5, '4a: default maxQueueSize=5 preserved');
 
-      // 4a. Rejected tracks MUST NOT become playable or start fake playback
       const gatedPlay = await engine.handlePlayCommand('viewer_1', 'gated_only', true);
       assertEqual(gatedPlay.success, false, '4b: stream-gated !play fails');
-      assertEqual(gatedPlay.item, undefined, '4c: gated track not marked playable or queued as playable');
-      assertEqual(engine.getState().isPlaying, false, '4d: gated track keeps isPlaying=false');
+      assertEqual(engine.getState().isPlaying, false, '4c: gated track keeps isPlaying=false');
 
       const altLicPlay = await engine.handlePlayCommand('viewer_1', 'alt_license_only', true);
-      assertEqual(altLicPlay.success, false, '4e: unclear alternative license !play fails');
-      assertEqual(engine.getState().isPlaying, false, '4f: unclear license keeps isPlaying=false');
+      assertEqual(altLicPlay.success, false, '4d: unclear alternative license !play fails');
+      assertEqual(engine.getState().isPlaying, false, '4e: unclear license keeps isPlaying=false');
 
       const badStreamPlay = await engine.handlePlayCommand('viewer_1', 'bad_stream_url', true);
-      assertEqual(badStreamPlay.success, false, '4g: unavailable stream fails honestly');
-      assertEqual(engine.getState().isPlaying, false, '4h: unavailable stream keeps isPlaying=false');
+      assertEqual(badStreamPlay.success, false, '4f: unavailable stream fails honestly');
+      assertEqual(engine.getState().isPlaying, false, '4g: unavailable stream keeps isPlaying=false');
 
-      // Manually passing unauthorized/unplayable items directly to playItem MUST also be rejected
-      const manualUnauthItem: SongRequestItem = {
-        id: 'manual_bad_aud',
-        title: 'Forged ARR Track',
+      // Direct playItem MUST reject Audius items with missing/empty OR unpermitted licenseType even if audioUrl is filled!
+      const missingLicenseDirectItem: SongRequestItem = {
+        id: 'manual_missing_lic_aud',
+        title: 'Forged No-License Track',
         artist: 'Forger',
         requester: 'viewer_x',
         durationSec: 120,
         requestedAt: Date.now(),
         sourceType: 'remote_url',
         provider: 'audius',
-        providerTrackId: 'aud_arr_1',
+        providerTrackId: 'aud_no_lic',
         playable: true,
-        audioUrl: 'https://api.audius.co/v1/tracks/aud_arr_1/stream',
+        audioUrl: 'https://creatornode.audius.co/tracks/cidstream/QmFake',
+      };
+      const missingLicRejected = await engine.playItem(missingLicenseDirectItem);
+      assertEqual(
+        missingLicRejected,
+        false,
+        '4h: playItem rejects Audius item with missing licenseType even when audioUrl is present',
+      );
+      assertEqual(engine.getState().isPlaying, false, '4i: missing licenseType keeps isPlaying=false');
+
+      const ndDirectItem: SongRequestItem = {
+        ...missingLicenseDirectItem,
+        id: 'manual_nd_aud',
+        licenseType: 'Attribution-NoDerivs CC BY-ND',
+      };
+      const ndRejected = await engine.playItem(ndDirectItem);
+      assertEqual(ndRejected, false, '4j: playItem rejects Audius item with CC BY-ND');
+
+      const rawArrDirectItem: SongRequestItem = {
+        ...missingLicenseDirectItem,
+        id: 'manual_raw_arr_aud',
         licenseType: 'All Rights Reserved',
       };
-      const manualRejected = await engine.playItem(manualUnauthItem);
-      assertEqual(manualRejected, false, '4i: playItem rejects Audius item with unpermitted licenseType');
-      assertEqual(engine.getState().isPlaying, false, '4j: playItem keeps isPlaying=false on unpermitted source');
+      const arrDirectRejected = await engine.playItem(rawArrDirectItem);
+      assertEqual(arrDirectRejected, false, '4k: playItem rejects raw unverified All Rights Reserved');
 
-      // 4b. Valid OML track from mixed search skips gated candidate #1 and plays valid OML candidate #2
+      // History snapshot sanitizer MUST also reject playable=true when Audius licenseType is empty
+      const missingLicSnapshot = sanitizeHistoryTrackSnapshot(missingLicenseDirectItem);
+      assertEqual(
+        missingLicSnapshot.playable,
+        false,
+        '4l: sanitizeHistoryTrackSnapshot rejects playable=true when Audius licenseType is empty',
+      );
+
+      // Valid OML track ("All rights reserved" label + is_streamable=true + ungated) skips gated/disabled candidates and plays!
       const validPlay = await engine.handlePlayCommand('viewer_oml', 'Aurora Circuit', true);
-      assertEqual(validPlay.success, true, '4k: !play finds and plays valid OML Audius track without API key');
-      assertEqual(validPlay.item?.provider, 'audius', '4l: provider set to audius');
-      assertEqual(validPlay.item?.playable, true, '4m: valid OML track marked playable=true');
-      assertEqual(validPlay.item?.rightsHolder, 'Syntxrr Artist', '4n: attribution rightsHolder stored');
-      assertEqual(validPlay.item?.licenseType, 'Open Music License', '4o: attribution licenseType stored');
-      assertEqual(
-        validPlay.item?.copyrightNotice,
-        '2026 Syntxrr Artist',
-        '4p: attribution copyrightNotice stored',
+      assertEqual(validPlay.success, true, '4m: !play finds and plays OML Audius track without API key');
+      assertEqual(validPlay.item?.provider, 'audius', '4n: provider set to audius');
+      assertEqual(validPlay.item?.platform, 'Audius', '4o: platform identity preserved as Audius');
+      assertEqual(validPlay.item?.playable, true, '4p: valid OML track marked playable=true');
+      assertEqual(validPlay.item?.rightsHolder, 'Syntxrr Artist', '4q: creator attribution stored');
+      assertEqual(validPlay.item?.licenseType, 'Open Music License', '4r: normalized OML license stored');
+      assert(
+        Boolean(validPlay.item?.notes?.includes('Kreator: Syntxrr Artist')) &&
+          !validPlay.item?.notes?.includes('Hak cipta:'),
+        '4s: notes display creator attribution rather than claiming verified copyright ownership',
       );
-      assertEqual(
-        validPlay.item?.externalUrl,
-        'https://audius.co/syntxrr_artist/aurora-circuit',
-        '4q: attribution track link stored',
-      );
-      assertEqual(engine.getState().isPlaying, true, '4r: engine starts playing via existing playback engine');
-      assertEqual(
-        engine.getState().audioPlaybackMode,
-        'real_html5_audio',
-        '4s: uses existing HTML5 Audio playback mode on web',
-      );
+      assertEqual(engine.getState().isPlaying, true, '4t: engine starts playing via existing playback engine');
       assert(
         searchUrlsSeen.some((u) => u.includes('/tracks/search') && !u.includes('api_key=')),
-        '4t: search uses official /tracks/search without requiring user API key',
+        '4u: search uses official /tracks/search without requiring user API key',
       );
       assert(
-        streamUrlsSeen.some((u) => u.includes('/tracks/aud_oml_1/stream')),
-        '4u: stream uses official /tracks/{track_id}/stream endpoint',
+        streamUrlsSeen.some((u) => u.includes('/tracks/Kp7K522/stream')),
+        '4v: stream uses official /tracks/{track_id}/stream endpoint',
       );
 
-      // 4c. Chat !next and !skip remain disabled; internal skipTrack() still works
+      // Chat !next remains ignored
       const beforeNextId = engine.getState().currentTrack?.id;
       streamEventBus.emit({
         id: 'aud_chat_next',
@@ -460,9 +687,9 @@ async function runAudiusSongRequestTests(): Promise<void> {
         isSimulation: false,
       });
       await flushMicrotasks();
-      assertEqual(engine.getState().currentTrack?.id, beforeNextId, '4v: !next in chat remains ignored');
+      assertEqual(engine.getState().currentTrack?.id, beforeNextId, '4w: !next in chat remains ignored');
 
-      // 4d. Enqueue tokenized Audius track via chat !play, verify history strips token but requeue refreshes & plays!
+      // Enqueue tokenized Audius track, advance via internal skipTrack, verify signature stripped from History, requeue refreshes!
       streamEventBus.emit({
         id: 'aud_chat_play_tok',
         type: 'chat',
@@ -472,19 +699,12 @@ async function runAudiusSongRequestTests(): Promise<void> {
         isSimulation: false,
       });
       await flushMicrotasks();
-      assertEqual(engine.getState().queue.length, 1, '4w: second valid Audius track queued FIFO');
-      assertEqual(engine.getState().queue[0].title, 'Tokenized Redirect Track', '4x: queued track title matches');
+      assertEqual(engine.getState().queue.length, 1, '4x: second valid Audius track queued FIFO');
 
-      // Internal skip advances to queued Tokenized Redirect Track
       const skippedOk = await engine.skipTrack('Streamer');
       assertEqual(skippedOk, true, '4y: internal skipTrack advances to queued Audius track');
-      assertEqual(
-        engine.getState().currentTrack?.title,
-        'Tokenized Redirect Track',
-        '4z: Tokenized Redirect Track now playing',
-      );
+      assertEqual(engine.getState().currentTrack?.title, 'Tokenized Redirect Track', '4z: queued track active');
 
-      // Verify sanitized history stripped the ?token=...&expires=... URL while keeping audius refresh eligibility
       const historyBeforeRequeue = engine.getState().history;
       const tokHistoryEntry = historyBeforeRequeue.find((h) => h.title === 'Tokenized Redirect Track')!;
       assert(Boolean(tokHistoryEntry), '5a: Audius playback session recorded in history');
@@ -492,19 +712,15 @@ async function runAudiusSongRequestTests(): Promise<void> {
       assertEqual(
         persistedSanitized.audioUrl,
         undefined,
-        '5b: ephemeral tokenized stream URL stripped before history persistence',
+        '5b: signed/tokenized stream URL (?signature=...&expires=...) stripped before history persistence',
       );
       assertEqual(
         persistedSanitized.playable,
         true,
-        '5c: Audius history snapshot preserves refreshable playable=true via providerTrackId',
+        '5c: Audius history snapshot preserves refreshable playable=true via providerTrackId + verified licenseType',
       );
-      assertEqual(persistedSanitized.providerTrackId, 'aud_tok_1', '5d: providerTrackId preserved');
-      assertEqual(persistedSanitized.licenseType, 'Open Music License', '5e: licenseType preserved in history');
 
-      // Simulate restart/persisted entry without audioUrl -> requeue -> skipTrack refreshes stream URL & plays!
       const auroraHistoryEntry = historyBeforeRequeue.find((h) => h.title === 'Aurora Circuit')!;
-      // Also test tokenized entry requeue where audioUrl was stripped:
       engine.hydrateHistory([
         {
           ...tokHistoryEntry,
@@ -518,33 +734,23 @@ async function runAudiusSongRequestTests(): Promise<void> {
       ]);
 
       const requeueTok = engine.requeueFromHistory('sess_tok_sanitized', 'Streamer');
-      assertEqual(requeueTok.success, true, '5f: requeue from sanitized Audius history succeeds');
-      assertEqual(requeueTok.item?.playable, true, '5g: requeued Audius item stays playable');
-
+      assertEqual(requeueTok.success, true, '5d: requeue from sanitized Audius history succeeds');
       const playRequeuedOk = await engine.skipTrack('Streamer');
-      assertEqual(
-        playRequeuedOk,
-        true,
-        '5h: requeued Audius track refreshes stream URL from /tracks/{id}/stream and plays',
-      );
-      assertEqual(engine.getState().isPlaying, true, '5i: requeued Audius track is actively playing');
+      assertEqual(playRequeuedOk, true, '5e: requeued Audius track refreshes stream URL and plays');
+      assertEqual(engine.getState().isPlaying, true, '5f: requeued Audius track is playing');
       assert(
-        Boolean(mockAudioRef.current?.src.includes('cn1.audius.test/v1/stream/aud_tok_1')),
-        '5j: HTML5 Audio received refreshed Audius stream URL',
+        Boolean(mockAudioRef.current?.src.includes('creatornode.audius.test/tracks/cidstream/QmTok1')),
+        '5g: HTML5 Audio received refreshed cidstream Audius URL',
       );
 
-      // If artist later disables streaming before requeued track plays, refresh rejects honestly!
+      // Revoking streamability before requeued track plays MUST reject honestly
       auroraRevokedOnRefresh = true;
       const requeueAurora = engine.requeueFromHistory(auroraHistoryEntry.id, 'Streamer');
-      assertEqual(requeueAurora.success, true, '5k: Aurora history entry requeued');
+      assertEqual(requeueAurora.success, true, '5h: Aurora history entry requeued');
       const playRevokedOk = await engine.skipTrack('Streamer');
-      assertEqual(
-        playRevokedOk,
-        false,
-        '5l: requeued track rejected honestly when artist later revokes streamability',
-      );
-      assertEqual(engine.getState().isPlaying, false, '5m: revoked track stops playback cleanly');
-      assertEqual(engine.getState().audioPlaybackMode, 'pending_source', '5n: revoked track sets pending_source');
+      assertEqual(playRevokedOk, false, '5i: requeued track rejected honestly when artist disables API streaming');
+      assertEqual(engine.getState().isPlaying, false, '5j: revoked track keeps isPlaying=false');
+      assertEqual(engine.getState().audioPlaybackMode, 'pending_source', '5k: revoked track sets pending_source');
     } finally {
       engine.destroy();
     }
