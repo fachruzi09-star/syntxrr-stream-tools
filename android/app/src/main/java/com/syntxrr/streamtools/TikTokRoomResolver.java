@@ -433,24 +433,54 @@ public final class TikTokRoomResolver {
     }
 
     /**
-     * TikTok issues an anonymous device cookie (commonly ttwid) from the public homepage.
-     * The cookie is used only in memory for this connection attempt; no TikTok-app session
-     * cookies are read or persisted.
+     * TikTok issues an anonymous device cookie (commonly ttwid) from the public homepage
+     * or public LIVE page. The cookie is used only in memory for this connection attempt;
+     * no TikTok-app session cookies are read, logged, or persisted.
      */
     @NonNull
-    private static Map<String, String> fetchAnonymousDeviceCookies() {
+    private static Map<String, String> fetchAnonymousDeviceCookies(
+            @NonNull String normalizedUsername,
+            @NonNull String deviceId
+    ) {
+        final String htmlAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+        final int warmUpMaxBytes = 64 * 1024;
         Map<String, String> cookies = new LinkedHashMap<>();
         try {
             executeGetWithCookieCapture(
                     "https://www.tiktok.com/",
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    htmlAccept,
                     cookies,
-                    64 * 1024
+                    warmUpMaxBytes
             );
         } catch (Exception ignored) {
             // Cookie warm-up is opportunistic; room resolution still proceeds without it.
         }
+
+        if (!hasTtwidCookie(cookies) && !normalizedUsername.isEmpty()) {
+            try {
+                String livePageUrl = buildLivePageUrl(normalizedUsername, deviceId);
+                executeGetWithCookieCapture(
+                        livePageUrl,
+                        htmlAccept,
+                        cookies,
+                        warmUpMaxBytes
+                );
+            } catch (Exception ignored) {
+                // Single LIVE page warm-up is opportunistic; room resolution still proceeds without it.
+            }
+        }
         return cookies;
+    }
+
+    private static boolean hasTtwidCookie(@Nullable Map<String, String> cookies) {
+        if (cookies == null || cookies.isEmpty()) return false;
+        for (Map.Entry<String, String> entry : cookies.entrySet()) {
+            if (entry.getKey() != null && "ttwid".equalsIgnoreCase(entry.getKey().trim())) {
+                String value = entry.getValue();
+                return value != null && !value.trim().isEmpty();
+            }
+        }
+        return false;
     }
 
     @NonNull
@@ -470,7 +500,9 @@ public final class TikTokRoomResolver {
         }
 
         String sessionDeviceId = generateRandomDeviceId();
-        Map<String, String> cookies = new LinkedHashMap<>(fetchAnonymousDeviceCookies());
+        Map<String, String> cookies = new LinkedHashMap<>(
+                fetchAnonymousDeviceCookies(normalized, sessionDeviceId)
+        );
         LiveHtmlFallback htmlFallbackRunner = (user, cookieJar) ->
                 resolveViaLiveHtmlPage(user, cookieJar, sessionDeviceId);
 
