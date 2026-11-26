@@ -38,6 +38,7 @@ import {
   transformPresetGroupElements,
 } from '../services/presetModel';
 import type { PresetGroupBounds } from '../services/presetModel';
+import { executeProtectedStudioMediaDelete } from '../services/studioMediaReferences';
 import type { ModeBStreamSnapshot } from '../services/nativeStreamingBridge';
 import {
   MODE_B_SCREENSAVER_DEFAULT_FADE_MS,
@@ -547,6 +548,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   } | null>(null);
 
   const createdObjectUrlsRef = useRef<Map<string, string>>(new Map());
+  const deletingMediaAssetIdsRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2205,19 +2207,52 @@ export const StudioView: React.FC<StudioViewProps> = ({
   };
 
   const handleDeleteLocalMediaAsset = async (item: LocalMediaItem) => {
-    if (isStrictModeBLocked || !item.assetId) return;
-    await StorageService.deleteStudioMediaAsset(item.assetId);
-    const cachedUrl = createdObjectUrlsRef.current.get(item.assetId);
-    if (cachedUrl) {
-      try {
-        URL.revokeObjectURL(cachedUrl);
-      } catch {}
-      createdObjectUrlsRef.current.delete(item.assetId);
-    }
-    setMediaLibrary((prev) => prev.filter((entry) => entry.id !== item.id));
-    if (previewAssetId === item.assetId) {
-      setPreviewMediaUrl(null);
-      setPreviewAssetId(undefined);
+    const assetId = item.assetId;
+    if (isStrictModeBLocked || !assetId) return;
+    if (deletingMediaAssetIdsRef.current.has(assetId)) return;
+
+    deletingMediaAssetIdsRef.current.add(assetId);
+    setMediaUploadError(null);
+    try {
+      const result = await executeProtectedStudioMediaDelete({
+        assetId,
+        assetName: item.name,
+        activeElements: elementsRef.current,
+        presets,
+        activePresetId: activePresetIdRef.current,
+        deleteFromStorage: (id) => StorageService.deleteStudioMediaAsset(id),
+      });
+
+      if (!result.deleted) {
+        if (isMountedRef.current) {
+          setMediaUploadError(result.message);
+        }
+        showInAppNotice({
+          tone: 'error',
+          title: result.blockedByReferences
+            ? 'Aset media masih digunakan'
+            : 'Gagal menghapus aset media',
+          message: result.message,
+        });
+        return;
+      }
+
+      const cachedUrl = createdObjectUrlsRef.current.get(assetId);
+      if (cachedUrl) {
+        try {
+          URL.revokeObjectURL(cachedUrl);
+        } catch {}
+        createdObjectUrlsRef.current.delete(assetId);
+      }
+
+      if (!isMountedRef.current) return;
+      setMediaLibrary((prev) => prev.filter((entry) => entry.id !== item.id));
+      if (previewAssetId === assetId) {
+        setPreviewMediaUrl(null);
+        setPreviewAssetId(undefined);
+      }
+    } finally {
+      deletingMediaAssetIdsRef.current.delete(assetId);
     }
   };
 

@@ -1301,13 +1301,100 @@ export const StorageService = {
 
   async deleteStudioMediaAsset(id: string): Promise<void> {
     if (!VALID_STUDIO_MEDIA_ASSET_ID.test(id)) return;
-    await idbDelete(`studio_media_asset:${id}`);
-    const currentIndex = (await idbGet<StoredStudioMediaAsset[]>('studio_media_assets_index')) || [];
-    if (Array.isArray(currentIndex)) {
-      await idbSet(
-        'studio_media_assets_index',
-        currentIndex.filter((entry) => entry && entry.id !== id),
-      );
+    let updatedIndex: StoredStudioMediaAsset[] | null = null;
+    const db = await openDB();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let abortReason: unknown = null;
+        const finishResolve = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        const finishReject = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          reject(
+            err instanceof Error
+              ? err
+              : new Error('Gagal menghapus aset media Studio dari IndexedDB.'),
+          );
+        };
+
+        let tx: IDBTransaction;
+        try {
+          tx = db.transaction('store', 'readwrite');
+        } catch (err) {
+          finishReject(err);
+          return;
+        }
+
+        tx.oncomplete = () => finishResolve();
+        tx.onerror = () =>
+          finishReject(
+            abortReason || tx.error || new Error('Transaksi penghapusan aset media gagal.'),
+          );
+        tx.onabort = () =>
+          finishReject(
+            abortReason || tx.error || new Error('Transaksi penghapusan aset media dibatalkan.'),
+          );
+
+        try {
+          const store = tx.objectStore('store');
+          const blobDeleteReq = store.delete(`studio_media_asset:${id}`);
+          blobDeleteReq.onerror = () => {
+            abortReason =
+              blobDeleteReq.error || new Error('Gagal menghapus blob aset media Studio.');
+            try {
+              tx.abort();
+            } catch {}
+            finishReject(abortReason);
+          };
+
+          const indexGetReq = store.get('studio_media_assets_index');
+          indexGetReq.onsuccess = () => {
+            const currentIndex = indexGetReq.result;
+            if (!Array.isArray(currentIndex)) return;
+            const nextIndex = currentIndex.filter((entry) => entry && entry.id !== id);
+            updatedIndex = nextIndex;
+            const indexPutReq = store.put(nextIndex, 'studio_media_assets_index');
+            indexPutReq.onerror = () => {
+              abortReason =
+                indexPutReq.error || new Error('Gagal memperbarui indeks aset media Studio.');
+              try {
+                tx.abort();
+              } catch {}
+              finishReject(abortReason);
+            };
+          };
+          indexGetReq.onerror = () => {
+            abortReason =
+              indexGetReq.error || new Error('Gagal membaca indeks aset media Studio.');
+            try {
+              tx.abort();
+            } catch {}
+            finishReject(abortReason);
+          };
+        } catch (syncError) {
+          abortReason = syncError;
+          try {
+            tx.abort();
+          } catch {}
+          finishReject(abortReason);
+        }
+      });
+    } finally {
+      db.close();
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(`syntxrr_studio_media_asset:${id}`);
+        if (updatedIndex !== null) {
+          localStorage.setItem('syntxrr_studio_media_assets_index', JSON.stringify(updatedIndex));
+        }
+      } catch {}
     }
   },
 

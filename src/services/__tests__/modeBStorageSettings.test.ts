@@ -81,21 +81,66 @@ function createInMemoryIndexedDB(): IDBFactory {
           storeNames.add(storeName);
         },
         close: () => {},
-        transaction: () => ({
-          objectStore: () => ({
-            get: (key: string) => makeRequest(() => dbMap.get(key) ?? null),
+        transaction: () => {
+          const txObj: Record<string, unknown> = {
+            error: null,
+            oncomplete: null,
+            onerror: null,
+            onabort: null,
+          };
+          let pending = 0;
+          const scheduleCompleteCheck = () => {
+            queueMicrotask(() => {
+              if (pending === 0 && typeof txObj.oncomplete === 'function') {
+                (txObj.oncomplete as (ev: unknown) => void)({ target: txObj });
+              }
+            });
+          };
+          const trackRequest = <T>(executor: () => T): IDBRequest<T> => {
+            pending += 1;
+            const req: Record<string, unknown> = {
+              onsuccess: null,
+              onerror: null,
+              result: undefined,
+              error: null,
+            };
+            queueMicrotask(() => {
+              try {
+                req.result = executor();
+                if (typeof req.onsuccess === 'function') {
+                  (req.onsuccess as (ev: unknown) => void)({ target: req });
+                }
+                pending -= 1;
+                scheduleCompleteCheck();
+              } catch (err) {
+                req.error = err;
+                txObj.error = err;
+                if (typeof req.onerror === 'function') {
+                  (req.onerror as (ev: unknown) => void)({ target: req });
+                }
+                pending -= 1;
+                if (typeof txObj.onerror === 'function') {
+                  (txObj.onerror as (ev: unknown) => void)({ target: txObj });
+                }
+              }
+            });
+            return req as unknown as IDBRequest<T>;
+          };
+          txObj.objectStore = () => ({
+            get: (key: string) => trackRequest(() => dbMap.get(key) ?? null),
             put: (value: unknown, key: string) =>
-              makeRequest(() => {
+              trackRequest(() => {
                 dbMap.set(key, value);
                 return key;
               }),
             delete: (key: string) =>
-              makeRequest(() => {
+              trackRequest(() => {
                 dbMap.delete(key);
                 return undefined;
               }),
-          }),
-        }),
+          });
+          return txObj;
+        },
       };
 
       queueMicrotask(() => {
