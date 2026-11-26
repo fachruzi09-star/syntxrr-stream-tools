@@ -595,27 +595,34 @@ public final class NativeStreamingPlugin extends Plugin implements ModeBStreamSe
         call.resolve(result);
     }
 
+    private JSObject createStatusPayload(ModeBStreamStatusSnapshot snapshot, boolean includeTimestamp) {
+        JSObject payload = new JSObject();
+        payload.put("status", snapshot.status);
+        payload.put("message", snapshot.message);
+        payload.put("isStreaming", snapshot.streaming);
+        payload.put("bitrateKbps", snapshot.bitrateKbps);
+        payload.put("canStartNewSession", ModeBStreamService.canStartNewSession());
+        if (snapshot.hasOutputDimensions()) {
+            payload.put("outputWidth", snapshot.outputWidth);
+            payload.put("outputHeight", snapshot.outputHeight);
+        }
+        if (snapshot.hasOutputFps()) {
+            payload.put("outputFps", snapshot.outputFps);
+        }
+        if (includeTimestamp) {
+            payload.put("timestamp", System.currentTimeMillis());
+        }
+        return payload;
+    }
+
     @PluginMethod
     public void getStatus(PluginCall call) {
-        JSObject result = new JSObject();
-        result.put("status", ModeBStreamService.getLastStatus());
-        result.put("message", ModeBStreamService.getLastMessage());
-        result.put("isStreaming", ModeBStreamService.isLastStreaming());
-        result.put("bitrateKbps", ModeBStreamService.getLastBitrateKbps());
-        result.put("canStartNewSession", ModeBStreamService.canStartNewSession());
-        call.resolve(result);
+        call.resolve(createStatusPayload(ModeBStreamService.getStatusSnapshot(), false));
     }
 
     @Override
-    public void onModeBStreamState(String status, String message, boolean streaming, long bitrateKbps) {
-        JSObject event = new JSObject();
-        event.put("status", status);
-        event.put("message", message);
-        event.put("isStreaming", streaming);
-        event.put("bitrateKbps", bitrateKbps);
-        event.put("canStartNewSession", ModeBStreamService.canStartNewSession());
-        event.put("timestamp", System.currentTimeMillis());
-        notifyListeners("streamState", event);
+    public void onModeBStreamState(ModeBStreamStatusSnapshot snapshot) {
+        notifyListeners("streamState", createStatusPayload(snapshot, true));
     }
 
     private String safeError(Exception exception) {

@@ -904,9 +904,10 @@ async function runStudioInspectorControlsTests(): Promise<void> {
     liveTextInspectorSection.includes('buildLiveTextRenderModel(') &&
       liveTextInspectorSection.includes('modeBStatus') &&
       liveTextInspectorSection.includes('isModeBSelected') &&
-      liveTextInspectorSection.includes('belum dipasok') &&
+      liveTextInspectorSection.includes('TARGET FPS:') &&
+      liveTextInspectorSection.includes('bukan FPS aktual yang terukur') &&
       liveTextInspectorSection.includes('&mdash;'),
-    'live_text inspector binds preview to runtime Mode B helper and states FPS/resolution telemetry limitation honestly',
+    'live_text inspector binds preview to runtime Mode B helper, labels TARGET FPS distinctly, and explains unavailable fallback',
   );
 
   const liveTextRendererSection = extractBetween(
@@ -921,9 +922,10 @@ async function runStudioInspectorControlsTests(): Promise<void> {
       liveTextRendererSection.includes('modeBStatus,') &&
       liveTextRendererSection.includes('showFps: props.showFps !== false') &&
       liveTextRendererSection.includes('showBitrate: props.showBitrate !== false') &&
+      liveTextRendererSection.includes('TARGET FPS: {liveModel.fpsLabel}') &&
       !liveTextRendererSection.includes('fps:') &&
       !liveTextRendererSection.includes('resolution:'),
-    'live_text canvas renderer connects to buildLiveTextRenderModel and modeBStatus without fabricating fps/resolution',
+    'live_text canvas renderer connects to buildLiveTextRenderModel and modeBStatus with TARGET FPS label without fabricating fps/resolution',
   );
 
   // 18. A2.5 Targeted P2 Regression Fixes (Media Lock & Chat Message Background Opacity)

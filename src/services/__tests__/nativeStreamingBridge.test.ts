@@ -664,6 +664,67 @@ async function runTests(): Promise<void> {
     'unsafe HTTP/private userAvatar stripped cleanly while retaining chat event',
   );
 
+  // 8. A2.10.5.3 getStatus() and streamState outputWidth / outputHeight / outputFps parity
+  const metricsPlugin = createMockPlugin({
+    async getStatus() {
+      return {
+        status: 'live',
+        message: 'LIVE aktif',
+        isStreaming: true,
+        bitrateKbps: 3500,
+        outputWidth: 1280,
+        outputHeight: 720,
+        outputFps: 30,
+        canStartNewSession: false,
+      };
+    },
+  });
+  __setNativeStreamingBridgeTestAdapter({ plugin: metricsPlugin.plugin, isNativeAvailable: true });
+  const polledLiveMetrics = await getModeBStreamStatus();
+  assertEqual(polledLiveMetrics.outputWidth, 1280, 'getStatus preserves outputWidth');
+  assertEqual(polledLiveMetrics.outputHeight, 720, 'getStatus preserves outputHeight');
+  assertEqual(polledLiveMetrics.outputFps, 30, 'getStatus preserves outputFps');
+
+  const hostWaitWithMetrics = await setModeBHostWait(true);
+  assertEqual(hostWaitWithMetrics.outputWidth, 1280, 'setModeBHostWait preserves outputWidth');
+  assertEqual(hostWaitWithMetrics.outputHeight, 720, 'setModeBHostWait preserves outputHeight');
+  assertEqual(hostWaitWithMetrics.outputFps, 30, 'setModeBHostWait preserves outputFps');
+
+  const streamedMetrics: ModeBStreamSnapshot[] = [];
+  const metricsSub = await onModeBStreamState((s) => {
+    streamedMetrics.push(s);
+  });
+  metricsPlugin.emitState({
+    status: 'live',
+    message: 'LIVE aktif',
+    isStreaming: true,
+    bitrateKbps: 3500,
+    outputWidth: 1280,
+    outputHeight: 720,
+    outputFps: 30,
+    canStartNewSession: false,
+    timestamp: 5000,
+  });
+  assertEqual(streamedMetrics.length, 1, 'streamState delivers active session snapshot');
+  assertEqual(streamedMetrics[0].outputWidth, polledLiveMetrics.outputWidth, 'getStatus and streamState match outputWidth');
+  assertEqual(streamedMetrics[0].outputHeight, polledLiveMetrics.outputHeight, 'getStatus and streamState match outputHeight');
+  assertEqual(streamedMetrics[0].outputFps, polledLiveMetrics.outputFps, 'getStatus and streamState match outputFps');
+
+  metricsPlugin.emitState({
+    status: 'stopped',
+    message: 'Stopped',
+    isStreaming: false,
+    bitrateKbps: 0,
+    outputWidth: 1280,
+    outputHeight: 720,
+    outputFps: 30,
+    timestamp: 5100,
+  });
+  assertEqual(streamedMetrics[1].outputWidth, undefined, 'stopped snapshot strips stale outputWidth');
+  assertEqual(streamedMetrics[1].outputHeight, undefined, 'stopped snapshot strips stale outputHeight');
+  assertEqual(streamedMetrics[1].outputFps, undefined, 'stopped snapshot strips stale outputFps');
+  await metricsSub?.remove();
+
   await __resetNativeStreamingBridgeForTests();
   const browserFallbackStatus = await getModeBStreamStatus();
   assertEqual(browserFallbackStatus.canStartNewSession, false, 'non-Android status returns canStartNewSession=false');

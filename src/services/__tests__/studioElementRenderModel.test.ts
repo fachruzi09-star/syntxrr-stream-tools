@@ -872,6 +872,169 @@ function runStudioElementRenderModelTests(): void {
   assertEqual(bitrateHiddenByToggle.bitrateLabel, '—', 'showBitrate=false hides valid live bitrate');
   assertEqual(bitrateHiddenByToggle.fpsLabel, '—', 'unavailable fps stays — even when showFps=true');
 
+  // === A2.10.5.3 LIVE TEXT ENCODER OUTPUT METRICS ===
+  const live720p30 = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 3500,
+      outputWidth: 1280,
+      outputHeight: 720,
+      outputFps: 30,
+    },
+    showFps: true,
+    showBitrate: true,
+  });
+  assertEqual(live720p30.statusLabel, 'LIVE', 'A2.10.5.3 active session reports LIVE');
+  assertEqual(live720p30.resolutionLabel, '1280×720', 'A2.10.5.3 formats 1280×720 using × sign');
+  assertEqual(live720p30.fpsLabel, '30', 'A2.10.5.3 formats target FPS 30 cleanly');
+  assertEqual(live720p30.bitrateLabel, '3500 kbps', 'A2.10.5.3 preserves actual bitrateKbps');
+
+  const live1080p60 = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 6000,
+      outputWidth: 1920,
+      outputHeight: 1080,
+      outputFps: 60,
+    },
+  });
+  assertEqual(live1080p60.resolutionLabel, '1920×1080', 'A2.10.5.3 formats 1920×1080 dynamically from snapshot');
+  assertEqual(live1080p60.fpsLabel, '60', 'A2.10.5.3 formats target FPS 60 dynamically from snapshot');
+  assertEqual(live1080p60.bitrateLabel, '6000 kbps', 'A2.10.5.3 reports 6000 kbps');
+
+  const invalidDimensionsZero = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 3500,
+      outputWidth: 0,
+      outputHeight: 720,
+      outputFps: 30,
+    },
+  });
+  assertEqual(invalidDimensionsZero.resolutionLabel, '—', 'zero outputWidth falls back to —');
+  assertEqual(invalidDimensionsZero.fpsLabel, '30', 'valid outputFps stays intact when only width is invalid');
+
+  const invalidDimensionsNan = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 3500,
+      outputWidth: 1280,
+      outputHeight: Number.NaN,
+      outputFps: 0,
+    },
+  });
+  assertEqual(invalidDimensionsNan.resolutionLabel, '—', 'NaN outputHeight falls back to —');
+  assertEqual(invalidDimensionsNan.fpsLabel, '—', 'zero outputFps falls back to —');
+
+  const invalidFpsNegative = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 3500,
+      outputWidth: 1280,
+      outputHeight: 720,
+      outputFps: -30,
+    },
+  });
+  assertEqual(invalidFpsNegative.resolutionLabel, '1280×720', 'valid resolution preserved even if fps is invalid');
+  assertEqual(invalidFpsNegative.fpsLabel, '—', 'negative outputFps falls back to —');
+
+  const snapshotWithoutOutputMetrics = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 3500,
+    },
+  });
+  assertEqual(snapshotWithoutOutputMetrics.resolutionLabel, '—', 'missing dimensions do not fabricate fake values');
+  assertEqual(snapshotWithoutOutputMetrics.fpsLabel, '—', 'missing target fps does not fabricate fake values');
+
+  const modeAWithModeBMetrics = buildLiveTextRenderModel({
+    isModeBSelected: false,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 4200,
+      outputWidth: 1920,
+      outputHeight: 1080,
+      outputFps: 60,
+    },
+  });
+  assertEqual(modeAWithModeBMetrics.statusLabel, 'STANDBY', 'Mode A always displays STANDBY');
+  assertEqual(modeAWithModeBMetrics.resolutionLabel, '—', 'Mode A hides Mode B encoder resolution');
+  assertEqual(modeAWithModeBMetrics.fpsLabel, '—', 'Mode A hides Mode B encoder target FPS');
+  assertEqual(modeAWithModeBMetrics.bitrateLabel, '—', 'Mode A hides Mode B bitrate');
+
+  for (const terminalStatus of ['stopped', 'error', 'disconnected', 'capture_lost', 'idle', 'stopping'] as const) {
+    const staleTerminal = buildLiveTextRenderModel({
+      isModeBSelected: true,
+      modeBStatus: {
+        status: terminalStatus,
+        message: 'Ended',
+        isStreaming: false,
+        bitrateKbps: 3500,
+        outputWidth: 1280,
+        outputHeight: 720,
+        outputFps: 30,
+      },
+    });
+    assertEqual(staleTerminal.resolutionLabel, '—', `${terminalStatus} never shows prior session resolution`);
+    assertEqual(staleTerminal.fpsLabel, '—', `${terminalStatus} never shows prior session target FPS`);
+    assertEqual(staleTerminal.bitrateLabel, '—', `${terminalStatus} never shows prior session bitrate`);
+  }
+
+  const connectingWithConfig = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'connecting',
+      message: 'Connecting...',
+      isStreaming: false,
+      bitrateKbps: 0,
+      outputWidth: 1280,
+      outputHeight: 720,
+      outputFps: 30,
+    },
+  });
+  assertEqual(connectingWithConfig.statusLabel, 'CONNECTING', 'connecting keeps CONNECTING badge');
+  assertEqual(connectingWithConfig.resolutionLabel, '1280×720', 'connecting displays established session resolution');
+  assertEqual(connectingWithConfig.fpsLabel, '30', 'connecting displays established session target FPS');
+  assertEqual(connectingWithConfig.bitrateLabel, '—', 'connecting hides 0 kbps until actual bitrate arrives');
+
+  const togglesDisabledWithMetrics = buildLiveTextRenderModel({
+    isModeBSelected: true,
+    modeBStatus: {
+      status: 'live',
+      message: 'LIVE',
+      isStreaming: true,
+      bitrateKbps: 3500,
+      outputWidth: 1280,
+      outputHeight: 720,
+      outputFps: 30,
+    },
+    showFps: false,
+    showBitrate: false,
+  });
+  assertEqual(togglesDisabledWithMetrics.resolutionLabel, '1280×720', 'resolution remains visible when FPS/bitrate toggled off');
+  assertEqual(togglesDisabledWithMetrics.fpsLabel, '—', 'showFps=false hides target FPS');
+  assertEqual(togglesDisabledWithMetrics.bitrateLabel, '—', 'showBitrate=false hides actual bitrate');
+
   // --- A2.5 P2.1 Media Replacement Lock Enforcement ---
   const baseImgElem: StudioElement = {
     ...createStudioElementFromSource('image', []),

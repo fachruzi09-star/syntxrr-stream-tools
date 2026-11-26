@@ -56,7 +56,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class ModeBStreamService extends Service implements ConnectChecker {
     public interface Listener {
-        void onModeBStreamState(String status, String message, boolean streaming, long bitrateKbps);
+        void onModeBStreamState(ModeBStreamStatusSnapshot snapshot);
     }
 
     public interface SceneReplacementCallback {
@@ -100,10 +100,8 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
     private static volatile WeakReference<ModeBStreamService> activeInstance = new WeakReference<>(null);
     private static final ModeBSessionReadinessPolicy.Tracker READINESS_TRACKER =
             new ModeBSessionReadinessPolicy.Tracker();
-    private static volatile String lastStatus = "idle";
-    private static volatile String lastMessage = "Mode B belum dimulai.";
-    private static volatile boolean lastStreaming = false;
-    private static volatile long lastBitrateKbps = 0;
+    private static final ModeBStreamStatusSnapshot.Holder SNAPSHOT_HOLDER =
+            new ModeBStreamStatusSnapshot.Holder();
 
     private RtmpStream stream;
     private MediaProjection mediaProjection;
@@ -212,18 +210,16 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
     public static void setListener(@Nullable Listener listener) {
         listenerRef = new WeakReference<>(listener);
         if (listener != null) {
-            final String status = lastStatus;
-            final String message = lastMessage;
-            final boolean streaming = lastStreaming;
-            final long bitrate = lastBitrateKbps;
-            MAIN.post(() -> listener.onModeBStreamState(status, message, streaming, bitrate));
+            final ModeBStreamStatusSnapshot snapshot = SNAPSHOT_HOLDER.get();
+            MAIN.post(() -> listener.onModeBStreamState(snapshot));
         }
     }
 
-    public static String getLastStatus() { return lastStatus; }
-    public static String getLastMessage() { return lastMessage; }
-    public static boolean isLastStreaming() { return lastStreaming; }
-    public static long getLastBitrateKbps() { return lastBitrateKbps; }
+    public static ModeBStreamStatusSnapshot getStatusSnapshot() { return SNAPSHOT_HOLDER.get(); }
+    public static String getLastStatus() { return SNAPSHOT_HOLDER.get().status; }
+    public static String getLastMessage() { return SNAPSHOT_HOLDER.get().message; }
+    public static boolean isLastStreaming() { return SNAPSHOT_HOLDER.get().streaming; }
+    public static long getLastBitrateKbps() { return SNAPSHOT_HOLDER.get().bitrateKbps; }
     public static boolean canStartNewSession() { return READINESS_TRACKER.canStartNewSession(); }
     public static String getNewSessionBlockMessage() { return READINESS_TRACKER.getBlockedReason(); }
 
@@ -263,15 +259,11 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
     }
 
     private static void publish(String status, String message, boolean streaming, long bitrateKbps) {
-        lastStatus = status;
-        lastMessage = message == null ? "" : message;
-        lastStreaming = streaming;
-        lastBitrateKbps = Math.max(0, bitrateKbps);
+        final ModeBStreamStatusSnapshot snapshot =
+                SNAPSHOT_HOLDER.publish(status, message, streaming, bitrateKbps);
         Listener listener = listenerRef.get();
         if (listener != null) {
-            final String messageSnapshot = lastMessage;
-            final long bitrateSnapshot = lastBitrateKbps;
-            MAIN.post(() -> listener.onModeBStreamState(status, messageSnapshot, streaming, bitrateSnapshot));
+            MAIN.post(() -> listener.onModeBStreamState(snapshot));
         }
     }
 
@@ -358,6 +350,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                 publish("error", READINESS_TRACKER.getBlockedReason(), false, 0);
                 return START_NOT_STICKY;
             }
+            SNAPSHOT_HOLDER.clearEncoderOutputConfig();
             publish("starting", "Menyiapkan izin capture, audio, dan encoder.", false, 0);
             startForegroundForProjection(intent);
             startProjectionAndEncoder(intent);
@@ -439,10 +432,13 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
             throw new SecurityException("Preset Studio memerlukan izin CAMERA untuk elemen kamera.");
         }
 
-        int width = clampEven(intent.getIntExtra(EXTRA_WIDTH, 1280), 320, 2560);
-        int height = clampEven(intent.getIntExtra(EXTRA_HEIGHT, 720), 320, 2560);
+        int width = ModeBStreamStatusSnapshot.normalizeDimension(
+                intent.getIntExtra(EXTRA_WIDTH, 1280));
+        int height = ModeBStreamStatusSnapshot.normalizeDimension(
+                intent.getIntExtra(EXTRA_HEIGHT, 720));
         int videoBitrate = clamp(intent.getIntExtra(EXTRA_BITRATE, 4_000_000), 500_000, 20_000_000);
-        int fps = clamp(intent.getIntExtra(EXTRA_FPS, 30), 15, 60);
+        int fps = ModeBStreamStatusSnapshot.normalizeFps(
+                intent.getIntExtra(EXTRA_FPS, 30));
         int audioBitrate = clamp(intent.getIntExtra(EXTRA_AUDIO_BITRATE, 128_000), 64_000, 320_000);
         String audioSource = intent.getStringExtra(EXTRA_AUDIO_SOURCE);
         if (audioSource == null) audioSource = "mix";
@@ -662,6 +658,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
         attachBackgroundLayer(backgroundAssetId, width, height);
         attachScreenCaptureLayer(captureSpec, width, height);
         attachStudioOverlay(overlayJson, width, height, fps);
+        SNAPSHOT_HOLDER.setEncoderOutputConfig(width, height, fps);
 
         String startMessage = audioNotice == null
                 ? "Compositor siap; sedang menghubungkan ke server RTMP."
@@ -2331,7 +2328,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                 else hideReshareFloatingControlInternal();
                 updateStreamingNotification("LIVE · siaran aktif");
                 publish("live", changeLabel
-                        + " tanpa menghentikan koneksi RTMP atau sesi MediaProjection.", true, lastBitrateKbps);
+                        + " tanpa menghentikan koneksi RTMP atau sesi MediaProjection.", true, getLastBitrateKbps());
         }
     }
 
@@ -2494,6 +2491,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
         streamOutputWidth = 0;
         streamOutputHeight = 0;
         streamOutputFps = 30;
+        SNAPSHOT_HOLDER.clearEncoderOutputConfig();
         sceneReplacementPending = false;
         pendingSceneView = null;
         pendingSceneFilter = null;
@@ -2541,6 +2539,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
             status = "error";
             message = appendStreamTeardownFailure(message);
         }
+        SNAPSHOT_HOLDER.clearEncoderOutputConfig();
         publish(status, message, false, 0);
         try {
             stopForeground(STOP_FOREGROUND_REMOVE);
@@ -2805,8 +2804,9 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                         if (deleted) {
                             assetCleanupCompleted = true;
                             boolean becameReady = READINESS_TRACKER.markAssetCleanupSucceeded(cleanupEpoch);
-                            if (asyncReadinessNotifyReady.get() && becameReady && !lastStreaming) {
-                                publish(lastStatus, lastMessage, false, 0);
+                            ModeBStreamStatusSnapshot latestSnapshot = SNAPSHOT_HOLDER.get();
+                            if (asyncReadinessNotifyReady.get() && becameReady && !latestSnapshot.streaming) {
+                                publish(latestSnapshot.status, latestSnapshot.message, false, 0);
                             }
                             return;
                         }
@@ -2819,14 +2819,14 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
                             if (!MAIN.postDelayed(this, delayMs)) {
                                 READINESS_TRACKER.markAssetCleanupFailed(
                                         cleanupEpoch, "Gagal menjadwalkan ulang pembersihan cache aset.");
-                                if (asyncReadinessNotifyReady.get() && !lastStreaming) {
+                                if (asyncReadinessNotifyReady.get() && !isLastStreaming()) {
                                     publish("error", READINESS_TRACKER.getBlockedReason(), false, 0);
                                 }
                             }
                         } else {
                             READINESS_TRACKER.markAssetCleanupFailed(
                                     cleanupEpoch, "Cache aset Mode B gagal dibersihkan setelah batas retry.");
-                            if (asyncReadinessNotifyReady.get() && !lastStreaming) {
+                            if (asyncReadinessNotifyReady.get() && !isLastStreaming()) {
                                 publish("error", READINESS_TRACKER.getBlockedReason(), false, 0);
                             }
                         }
@@ -2879,6 +2879,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
         if (activeInstance.get() == this) activeInstance.clear();
         if (stopRequested.compareAndSet(false, true)) {
             cleanupResources();
+            SNAPSHOT_HOLDER.clearEncoderOutputConfig();
             if (streamTeardownApiCompleted) {
                 publish("stopped", "Layanan siaran dihentikan oleh sistem.", false, 0);
             } else {
@@ -2886,6 +2887,7 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
             }
         } else {
             cleanupResources();
+            SNAPSHOT_HOLDER.clearEncoderOutputConfig();
         }
         super.onDestroy();
     }
@@ -3097,11 +3099,6 @@ public final class ModeBStreamService extends Service implements ConnectChecker 
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
-    }
-
-    private static int clampEven(int value, int min, int max) {
-        int bounded = clamp(value, min, max);
-        return bounded % 2 == 0 ? bounded : bounded - 1;
     }
 
     private static String safeMessage(@Nullable Exception exception, String fallback) {

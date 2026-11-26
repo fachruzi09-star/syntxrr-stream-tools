@@ -821,6 +821,10 @@ export function resolveStickerVisualModel(stickerIdRaw: unknown, floatEffectRaw:
   };
 }
 
+function isValidLiveMetricNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && Math.round(value) > 0;
+}
+
 export function buildLiveTextRenderModel(params: {
   isModeBSelected: boolean;
   modeBStatus?: ModeBStreamSnapshot;
@@ -881,22 +885,46 @@ export function buildLiveTextRenderModel(params: {
     }
   }
 
-  const fpsLabel =
-    showFps && typeof fps === 'number' && Number.isFinite(fps) && fps > 0
-      ? `${Math.round(fps)} FPS`
-      : '—';
+  const canShowSessionMetrics = Boolean(
+    isModeBSelected &&
+      (isLive ||
+        modeBStatus?.status === 'connecting' ||
+        modeBStatus?.status === 'host_wait' ||
+        modeBStatus?.status === 'reshare_waiting' ||
+        modeBStatus?.status === 'resharing'),
+  );
 
-  const resolutionLabel =
-    typeof resolution === 'string' && resolution.trim() ? resolution.trim() : '—';
+  const hasSnapshotDimensionField =
+    modeBStatus?.outputWidth !== undefined || modeBStatus?.outputHeight !== undefined;
+  let resolutionLabel = '—';
+  if (canShowSessionMetrics) {
+    if (hasSnapshotDimensionField) {
+      if (
+        isValidLiveMetricNumber(modeBStatus?.outputWidth) &&
+        isValidLiveMetricNumber(modeBStatus?.outputHeight)
+      ) {
+        resolutionLabel = `${Math.round(modeBStatus.outputWidth)}×${Math.round(modeBStatus.outputHeight)}`;
+      }
+    } else if (typeof resolution === 'string' && resolution.trim()) {
+      resolutionLabel = resolution.trim();
+    }
+  }
+
+  const hasSnapshotFpsField = modeBStatus?.outputFps !== undefined;
+  let fpsLabel = '—';
+  if (showFps && canShowSessionMetrics) {
+    if (hasSnapshotFpsField) {
+      if (isValidLiveMetricNumber(modeBStatus?.outputFps)) {
+        fpsLabel = `${Math.round(modeBStatus.outputFps)}`;
+      }
+    } else if (isValidLiveMetricNumber(fps)) {
+      fpsLabel = `${Math.round(fps)}`;
+    }
+  }
 
   const bitrateValue = modeBStatus?.bitrateKbps;
   const bitrateLabel =
-    showBitrate &&
-    isModeBSelected &&
-    typeof bitrateValue === 'number' &&
-    Number.isFinite(bitrateValue) &&
-    bitrateValue > 0 &&
-    (isLive || modeBStatus?.status === 'host_wait' || modeBStatus?.status === 'connecting')
+    showBitrate && canShowSessionMetrics && isValidLiveMetricNumber(bitrateValue)
       ? `${Math.round(bitrateValue)} kbps`
       : '—';
 

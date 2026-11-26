@@ -3358,7 +3358,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
             <div className="flex items-center gap-2 text-zinc-300 truncate">
               <span>RES: {liveModel.resolutionLabel}</span>
-              {props.showFps !== false && <span>FPS: {liveModel.fpsLabel}</span>}
+              {props.showFps !== false && <span>TARGET FPS: {liveModel.fpsLabel}</span>}
               {props.showBitrate !== false && <span>{liveModel.bitrateLabel}</span>}
             </div>
           </div>
@@ -7077,7 +7077,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[11px] font-bold text-[var(--app-text-secondary)]">
-                                Tampilkan FPS
+                                Tampilkan Target FPS
                               </span>
                               <button
                                 type="button"
@@ -7098,7 +7098,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               </button>
                             </div>
                             <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
-                              Menampilkan atau menyembunyikan label <code className="font-mono">FPS</code> pada elemen Live Text (default: Aktif).
+                              Menampilkan atau menyembunyikan label <code className="font-mono">TARGET FPS</code> (konfigurasi target FPS output encoder Mode B, bukan FPS aktual yang terukur) pada elemen Live Text (default: Aktif).
                             </p>
                           </div>
 
@@ -7142,13 +7142,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               <span className="font-bold text-white shrink-0">{livePreview.statusLabel}</span>
                               <div className="flex items-center gap-2 truncate">
                                 <span>RES: {livePreview.resolutionLabel}</span>
-                                {showFpsEnabled && <span>FPS: {livePreview.fpsLabel}</span>}
+                                {showFpsEnabled && <span>TARGET FPS: {livePreview.fpsLabel}</span>}
                                 {showBitrateEnabled && <span>{livePreview.bitrateLabel}</span>}
                               </div>
                             </div>
 
                             <p className="text-[10px] text-[var(--app-text-muted)] leading-relaxed">
-                              Status <code className="font-mono">LIVE</code>, <code className="font-mono">CONNECTING</code>, <code className="font-mono">HOST WAIT</code>, <code className="font-mono">STOPPING</code>, <code className="font-mono">OFFLINE</code>, maupun error berasal langsung dari runtime Mode B (Mode A tampil sebagai <code className="font-mono">STANDBY</code>). Bitrate dibaca dari snapshot <code className="font-mono">modeBStatus</code> saat memenuhi kondisi helper. Nilai FPS dan resolusi saat ini belum dipasok ke <code className="font-mono">buildLiveTextRenderModel()</code> oleh pemanggil di StudioView, sehingga ketika tidak tersedia tetap ditampilkan sebagai <code className="font-mono">&mdash;</code>.
+                              Status <code className="font-mono">LIVE</code>, <code className="font-mono">CONNECTING</code>, <code className="font-mono">HOST WAIT</code>, <code className="font-mono">STOPPING</code>, <code className="font-mono">OFFLINE</code>, maupun error berasal langsung dari runtime Mode B (Mode A tampil sebagai <code className="font-mono">STANDBY</code>). Resolusi output (<code className="font-mono">RES</code>), target FPS output encoder (<code className="font-mono">TARGET FPS</code>), dan bitrate aktual dibaca dari snapshot <code className="font-mono">modeBStatus</code> selama sesi Mode B aktif, dan tampil sebagai <code className="font-mono">&mdash;</code> saat tidak tersedia, berhenti, atau Mode A.
                             </p>
                           </div>
                         </div>

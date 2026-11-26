@@ -58,6 +58,9 @@ export interface ModeBStreamSnapshot {
   message: string;
   isStreaming: boolean;
   bitrateKbps: number;
+  outputWidth?: number;
+  outputHeight?: number;
+  outputFps?: number;
   canStartNewSession?: boolean;
   timestamp?: number;
 }
@@ -201,6 +204,50 @@ const streamStateSubscribers = new Set<(snapshot: ModeBStreamSnapshot) => void>(
 let activeNativeStreamHandle: PluginListenerHandle | null = null;
 let pendingNativeStreamSubscription: Promise<PluginListenerHandle | null> | null = null;
 let streamSubscriptionGeneration = 0;
+
+const OUTPUT_CONFIG_ELIGIBLE_STATUSES = new Set<ModeBStreamStatus>([
+  'connecting',
+  'live',
+  'host_wait',
+  'reshare_waiting',
+  'resharing',
+]);
+
+function normalizePositiveMetricInt(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  const rounded = Math.round(value);
+  return rounded > 0 ? rounded : undefined;
+}
+
+export function normalizeModeBStreamSnapshot(snapshot: ModeBStreamSnapshot): ModeBStreamSnapshot {
+  const normalized: ModeBStreamSnapshot = { ...snapshot };
+  const eligible =
+    snapshot != null &&
+    typeof snapshot === 'object' &&
+    OUTPUT_CONFIG_ELIGIBLE_STATUSES.has(snapshot.status);
+
+  const width = eligible ? normalizePositiveMetricInt(snapshot.outputWidth) : undefined;
+  const height = eligible ? normalizePositiveMetricInt(snapshot.outputHeight) : undefined;
+  const fps = eligible ? normalizePositiveMetricInt(snapshot.outputFps) : undefined;
+
+  if (width !== undefined && height !== undefined) {
+    normalized.outputWidth = width;
+    normalized.outputHeight = height;
+  } else {
+    delete normalized.outputWidth;
+    delete normalized.outputHeight;
+  }
+
+  if (fps !== undefined) {
+    normalized.outputFps = fps;
+  } else {
+    delete normalized.outputFps;
+  }
+
+  return normalized;
+}
 
 function updateModeBSceneMutationLock(
   snapshot: Pick<ModeBStreamSnapshot, 'status' | 'isStreaming'> | null | undefined,
@@ -1028,7 +1075,7 @@ export async function setModeBHostWait(enabled: boolean): Promise<ModeBStreamSna
   const plugin = getNativeStreamingPlugin();
   try {
     const result = await plugin.setHostWait({ enabled });
-    const snapshot = await plugin.getStatus();
+    const snapshot = normalizeModeBStreamSnapshot(await plugin.getStatus());
     syncModeBRuntimeState(snapshot);
     return {
       status: snapshot.status || result.status || (enabled ? 'host_wait' : 'live'),
@@ -1038,6 +1085,10 @@ export async function setModeBHostWait(enabled: boolean): Promise<ModeBStreamSna
         (enabled ? 'Layar tunggu ditampilkan.' : 'Tampilan LIVE dilanjutkan.'),
       isStreaming: snapshot.isStreaming === true,
       bitrateKbps: typeof snapshot.bitrateKbps === 'number' ? snapshot.bitrateKbps : 0,
+      ...(snapshot.outputWidth !== undefined && snapshot.outputHeight !== undefined
+        ? { outputWidth: snapshot.outputWidth, outputHeight: snapshot.outputHeight }
+        : {}),
+      ...(snapshot.outputFps !== undefined ? { outputFps: snapshot.outputFps } : {}),
       ...(typeof snapshot.canStartNewSession === 'boolean'
         ? { canStartNewSession: snapshot.canStartNewSession }
         : {}),
@@ -1213,7 +1264,7 @@ export async function requestModeBScreenReshare(): Promise<ModeBStreamSnapshot> 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Gagal meminta izin layar baru.';
     try {
-      const snapshot = await plugin.getStatus();
+      const snapshot = normalizeModeBStreamSnapshot(await plugin.getStatus());
       syncModeBRuntimeState(snapshot);
       return {
         ...snapshot,
@@ -1273,7 +1324,7 @@ export async function getModeBStreamStatus(): Promise<ModeBStreamSnapshot> {
     };
   }
   try {
-    const snapshot = await getNativeStreamingPlugin().getStatus();
+    const snapshot = normalizeModeBStreamSnapshot(await getNativeStreamingPlugin().getStatus());
     syncModeBRuntimeState(snapshot);
     return snapshot;
   } catch (error) {
@@ -1298,7 +1349,8 @@ function ensureNativeStreamStateListener(): Promise<PluginListenerHandle | null>
 
   const registrationGen = ++streamSubscriptionGeneration;
   const registrationPromise = getNativeStreamingPlugin()
-    .addListener('streamState', (snapshot) => {
+    .addListener('streamState', (rawSnapshot) => {
+      const snapshot = normalizeModeBStreamSnapshot(rawSnapshot);
       syncModeBRuntimeState(snapshot);
       for (const subscriber of Array.from(streamStateSubscribers)) {
         try {
