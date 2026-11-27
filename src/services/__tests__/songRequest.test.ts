@@ -2,7 +2,14 @@
 // Dijalankan via: bun run src/services/__tests__/songRequest.test.ts
 
 import { streamEventBus } from '../eventBus';
-import { SongRequestEngine, songRequestEngine, isPlayableSongRequestItem, type SongRequestItem } from '../songRequestEngine';
+import {
+  SongRequestEngine,
+  songRequestEngine,
+  isPlayableSongRequestItem,
+  isAuthorizedPlaybackAudioUrl,
+  isPersistentAuthorizedAudioUrl,
+  type SongRequestItem,
+} from '../songRequestEngine';
 import { audioEngine } from '../localAudioEngine';
 import type { StreamEvent } from '../../types';
 
@@ -48,6 +55,10 @@ class MockHtmlAudio {
   async play(): Promise<void> {
     if (!this.src) {
       throw new Error('No src set');
+    }
+    if (this.src.includes('fail_') || this.src.includes('broken_')) {
+      this.paused = true;
+      throw new Error(`Decoded playback error for ${this.src}`);
     }
     this.paused = false;
     this.emit('playing');
@@ -96,11 +107,11 @@ async function runSongRequestTests(): Promise<void> {
 
   const originalAudio = (globalThis as { Audio?: unknown }).Audio;
   const originalFetch = globalThis.fetch;
-  let lastMockAudio: MockHtmlAudio | null = null;
+  const mockAudioRef: { current: MockHtmlAudio | null } = { current: null };
   (globalThis as { Audio?: unknown }).Audio = class extends MockHtmlAudio {
     constructor() {
       super();
-      lastMockAudio = this;
+      mockAudioRef.current = this;
     }
   };
 
@@ -647,7 +658,181 @@ async function runSongRequestTests(): Promise<void> {
       'Overflow error reports maxQueueSize=20'
     );
 
-    // 10. LocalAudioEngine remains independently functional and unaffected by SongRequestEngine
+    // 10. Regression Finding 1: Stronger playback URL validation (reject ordinary web pages, allow genuine audio/stream sources)
+    const rejectedWebUrls = [
+      'https://example.com/',
+      'https://example.com/about',
+      'https://example.com/song.html',
+      'https://news.example.com/music/article',
+      'https://cdn.example.com/tracks/123',
+      'https://music.apple.com/us/album/123',
+      'https://soundcloud.com/artist/track',
+      'https://music.youtube.com/watch?v=abc',
+      'https://www.youtube.com/watch?v=abc',
+      'https://open.spotify.com/track/xyz',
+    ];
+    for (const badUrl of rejectedWebUrls) {
+      assertEqual(isAuthorizedPlaybackAudioUrl(badUrl), false, `Rejects ordinary web/catalog URL: ${badUrl}`);
+      assertEqual(isAuthorizedPlaybackAudioUrl(badUrl, 'audio/mpeg'), badUrl === 'https://cdn.example.com/tracks/123', `Spoofed webpage mime handling for ${badUrl}`);
+      assertEqual(isPersistentAuthorizedAudioUrl(badUrl), false, `Persistent validator rejects web URL: ${badUrl}`);
+      const spoofedWebTrack = makeAuthorizedTrack('bad_web', 'Web Page', 'Artist', 'viewer', badUrl);
+      assertEqual(isPlayableSongRequestItem(spoofedWebTrack), false, `isPlayableSongRequestItem rejects ${badUrl}`);
+      assertEqual(await engine.enqueueAndPlayItem(spoofedWebTrack), false, `enqueueAndPlayItem rejects ${badUrl}`);
+    }
+    // Root "/" must still be rejected even with mimeType metadata unless audio query/format params exist
+    assertEqual(isAuthorizedPlaybackAudioUrl('https://example.com/', 'audio/mpeg'), false, 'Root "/" rejected even with audio mimeType');
+    // YouTube Music watch page rejected even with audio mimeType
+    assertEqual(
+      isAuthorizedPlaybackAudioUrl('https://music.youtube.com/watch?v=abc', 'audio/mpeg'),
+      false,
+      'Catalog portal watch URL rejected even with audio mimeType'
+    );
+
+    const acceptedAudioUrls: Array<{ url: string; mimeType?: string; persistent: boolean }> = [
+      { url: 'https://cdn.example.com/audio/neon_horizon.mp3', persistent: true },
+      { url: 'https://actions.google.com/sounds/v1/ambiences/daytime_forest_bonfire.ogg', persistent: true },
+      { url: 'https://cdn.example.com/live/stream.m3u8?quality=high', persistent: true },
+      { url: 'https://cdn.example.com/tracks/stream/123', mimeType: 'audio/mpeg', persistent: true },
+      { url: 'https://cdn.example.com/audio?format=aac', persistent: true },
+      { url: 'https://cdn.example.com/audio/signed.mp3?token=temp123', persistent: false },
+    ];
+    for (const good of acceptedAudioUrls) {
+      assertEqual(
+        isAuthorizedPlaybackAudioUrl(good.url, good.mimeType),
+        true,
+        `Accepts supported audio URL: ${good.url}`
+      );
+      assertEqual(
+        isPersistentAuthorizedAudioUrl(good.url, good.mimeType),
+        good.persistent,
+        `Persistent check matches expectation for ${good.url}`
+      );
+    }
+
+    // 11. Regression Finding 2: resume() skips metadata-only / legacy non-playable currentTrack safely
+    await engine.stop();
+    engine.clearQueue();
+    (engine as unknown as { state: { currentTrack: SongRequestItem | null; queue: SongRequestItem[]; playbackStatus: string } }).state.currentTrack = ytmMetadataStub;
+    (engine as unknown as { state: { currentTrack: SongRequestItem | null; queue: SongRequestItem[]; playbackStatus: string } }).state.playbackStatus = 'paused';
+    (engine as unknown as { state: { queue: SongRequestItem[] } }).state.queue = [spMetadataStub, authTrack2];
+    await engine.resume();
+    await flushMicrotasks();
+    state = engine.getState();
+    assertEqual(state.currentTrack?.id, 'auth_2', 'resume() skips non-playable currentTrack and starts Midnight Drive');
+    assertEqual(state.isPlaying, true, 'resume() sets isPlaying=true when advancing to next playable track');
+    assertEqual(state.playbackStatus, 'playing', 'resume() sets playbackStatus=playing');
+    assertEqual(state.queue.length, 0, 'resume() consumed metadata queue item and Midnight Drive');
+
+    // resume() when currentTrack is non-playable and queue is empty settles cleanly to pending_source
+    await engine.stop();
+    engine.clearQueue();
+    const legacyNonPlayableTrack = makeAuthorizedTrack(
+      'legacy_webpage_1',
+      'Legacy Webpage Audio',
+      'Unknown',
+      'viewer_legacy',
+      'https://example.com/about'
+    );
+    legacyNonPlayableTrack.externalUrl = 'https://music.youtube.com/watch?v=legacy_ref_1';
+    (engine as unknown as { state: { currentTrack: SongRequestItem | null; playbackStatus: string } }).state.currentTrack = legacyNonPlayableTrack;
+    (engine as unknown as { state: { playbackStatus: string } }).state.playbackStatus = 'paused';
+    await engine.resume();
+    state = engine.getState();
+    assertEqual(state.currentTrack, null, 'resume() clears non-playable currentTrack when queue is empty');
+    assertEqual(state.isPlaying, false, 'resume() ensures isPlaying=false when no playable track exists');
+    assertEqual(state.playbackStatus, 'idle', 'resume() settles playbackStatus=idle when queue is empty');
+    assertEqual(state.audioPlaybackMode, 'pending_source', 'resume() marks pending_source for metadata/non-playable track');
+    assertEqual(state.audioSourceResolved, false, 'resume() resets audioSourceResolved=false');
+    assertEqual(state.audioRoutedToStream, false, 'resume() resets audioRoutedToStream=false');
+    assertEqual(
+      state.lastCatalogReference?.externalUrl,
+      'https://music.youtube.com/watch?v=legacy_ref_1',
+      'resume() preserves externalUrl in lastCatalogReference'
+    );
+
+    // 12. Regression Finding 3: Consecutive playback failures keep queue, currentTrack, history, and status flags consistent
+    await engine.stop();
+    engine.clearQueue();
+    const broken1 = makeAuthorizedTrack('broken_1', 'Broken Stream 1', 'Artist 1', 'u1', 'https://cdn.example.com/audio/broken_1.mp3');
+    const broken2 = makeAuthorizedTrack('broken_2', 'Broken Stream 2', 'Artist 2', 'u2', 'https://cdn.example.com/audio/broken_2.mp3');
+
+    // Case 12a: Active track finishes -> 2 consecutive failing streams -> recovers on 3rd valid stream
+    await engine.enqueueAndPlayItem(authTrack1);
+    const historyCountBeforeConsecutive = engine.getState().history.length;
+    engine.setQueue([broken1, broken2, authTrack3]);
+    await engine.handleTrackEnded();
+    await flushMicrotasks();
+    state = engine.getState();
+    assertEqual(state.currentTrack?.id, 'auth_3', 'Recovers after consecutive failures and plays Sunset Echo');
+    assertEqual(state.isPlaying, true, 'isPlaying=true after consecutive failure recovery');
+    assertEqual(state.playbackStatus, 'playing', 'playbackStatus=playing after consecutive failure recovery');
+    assertEqual(state.audioPlaybackMode, 'real_html5_audio', 'audioPlaybackMode restored to real_html5_audio');
+    assertEqual(state.audioSourceResolved, true, 'audioSourceResolved=true on recovered track');
+    assertEqual(state.audioRoutedToStream, true, 'audioRoutedToStream=true on recovered track');
+    assertEqual(state.queue.length, 0, 'Queue empty after skipping 2 broken tracks and playing 3rd');
+    assertEqual(state.lastError, null, 'lastError cleared once recovered track plays cleanly');
+    assertEqual(
+      state.history.filter((h) => h.status === 'playing').length,
+      1,
+      'Only 1 active playing entry exists in history (no zombie playing entries from broken tracks)'
+    );
+    assertEqual(
+      state.history.filter((h) => h.trackId === 'broken_1' || h.trackId === 'broken_2').length,
+      0,
+      'Broken tracks that never started playing do not create bogus history entries'
+    );
+    assert(state.history.length >= historyCountBeforeConsecutive, 'Previous completed track history preserved');
+
+    // Case 12b: skipTrack() when ALL remaining queued tracks fail consecutively
+    engine.setQueue([broken1, broken2]);
+    const skipAllFail = await engine.skipTrack('Streamer');
+    await flushMicrotasks();
+    assertEqual(skipAllFail, false, 'skipTrack() returns false when all remaining tracks fail');
+    state = engine.getState();
+    assertEqual(state.queue.length, 0, 'Queue completely drained after all consecutive failures');
+    assertEqual(state.currentTrack, null, 'currentTrack cleared to null after consecutive queue exhaustion');
+    assertEqual(state.isPlaying, false, 'isPlaying=false after consecutive failures');
+    assertEqual(state.playbackStatus, 'error', 'playbackStatus=error after consecutive failures');
+    assertEqual(state.audioPlaybackMode, 'idle', 'audioPlaybackMode=idle after consecutive failures');
+    assertEqual(state.audioSourceResolved, false, 'audioSourceResolved=false after consecutive failures');
+    assertEqual(state.audioRoutedToStream, false, 'audioRoutedToStream=false after consecutive failures');
+    assert(
+      (state.lastError || '').includes('2 lagu berikutnya gagal diputar beruntun'),
+      'lastError summarizes consecutive failure count honestly'
+    );
+    assertEqual(
+      state.history.filter((h) => h.status === 'playing').length,
+      0,
+      'No history entry left in playing state after consecutive failures'
+    );
+
+    // Case 12c: Engine remains healthy and accepts a fresh playable track after consecutive failure exhaustion
+    const recoveredAfterExhaustion = await engine.enqueueAndPlayItem(authTrack2);
+    assertEqual(recoveredAfterExhaustion, true, 'Engine cleanly starts fresh playable track after consecutive error state');
+    assertEqual(engine.getState().currentTrack?.id, 'auth_2', 'Fresh track active after prior error recovery');
+    assertEqual(engine.getState().playbackStatus, 'playing', 'playbackStatus=playing after error recovery');
+
+    // Case 12d: HTML5 resume() rejection skips failing resume & broken queue track cleanly into healthy queued track
+    await engine.pause();
+    if (mockAudioRef.current) {
+      mockAudioRef.current.src = 'https://cdn.example.com/audio/fail_resume.mp3';
+    }
+    engine.setQueue([broken1, authTrack3]);
+    await engine.resume();
+    await flushMicrotasks();
+    state = engine.getState();
+    assertEqual(state.currentTrack?.id, 'auth_3', 'resume() error advances past broken_1 to Sunset Echo');
+    assertEqual(state.isPlaying, true, 'isPlaying=true after resume() failure recovery');
+    assertEqual(state.playbackStatus, 'playing', 'playbackStatus=playing after resume() failure recovery');
+    assertEqual(state.queue.length, 0, 'Queue drained cleanly after resume() failure recovery');
+    assertEqual(state.lastError, null, 'lastError cleared once recovered track plays');
+    assertEqual(
+      state.history.filter((h) => h.status === 'playing').length,
+      1,
+      'Only recovered Sunset Echo remains playing in history after resume() failure recovery'
+    );
+
+    // 13. LocalAudioEngine remains independently functional and unaffected by SongRequestEngine
     let observedLocalState = audioEngine.getState();
     const unsubLocal = audioEngine.subscribe((s) => {
       observedLocalState = s;
@@ -656,7 +841,7 @@ async function runSongRequestTests(): Promise<void> {
     assertEqual(observedLocalState.volume, 0.85, 'LocalAudioEngine default volume remains intact');
     unsubLocal();
 
-    assert(lastMockAudio !== null, 'Mock HTMLAudio instance exercised');
+    assert(mockAudioRef.current !== null, 'Mock HTMLAudio instance exercised');
   } finally {
     engine.destroy();
     (globalThis as { Audio?: unknown }).Audio = originalAudio;

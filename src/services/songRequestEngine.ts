@@ -222,14 +222,41 @@ export function normalizeSongRequestSourceType(
   return 'remote_url';
 }
 
-export function isPersistentAuthorizedAudioUrl(url: unknown): url is string {
-  if (typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  if (!trimmed) return false;
-  if (/^(blob|data):/i.test(trimmed)) return false;
+const NON_AUDIO_CATALOG_PAGE_HOSTS = [
+  'youtube.com',
+  'youtu.be',
+  'music.youtube.com',
+  'open.spotify.com',
+  'music.apple.com',
+  'music.amazon.com',
+  'soundcloud.com',
+  'tiktok.com',
+  'instagram.com',
+  'facebook.com',
+  'x.com',
+  'twitter.com',
+  'wikipedia.org',
+];
+
+const SUPPORTED_AUDIO_PATH_EXT_PATTERN =
+  /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|webm|weba|m3u8|mpd|caf|aif|aiff)$/i;
+
+const NON_AUDIO_WEBPAGE_EXT_PATTERN =
+  /\.(html?|xhtml|php|aspx?|jsp|cgi|txt|md|json|xml|rss|atom|pdf|svg|png|jpe?g|webp|gif|ico|css|m?js|woff2?|ttf)$/i;
+
+const NON_AUDIO_WEBPAGE_PATH_PATTERN =
+  /(^|\/)(watch|embed|playlist|album|artist|channel|shorts|wiki|article|blog|about|home|index)(\/|$)/i;
+
+const SUPPORTED_AUDIO_MIME_PATTERN =
+  /^(audio\/[a-z0-9.+-]+|application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml|ogg))(\s*;.*)?$/i;
+
+const SUPPORTED_AUDIO_FORMAT_QUERY_PATTERN =
+  /^(mp3|m4a|aac|ogg|oga|opus|wav|flac|webm|weba|m3u8|mpd|caf|aif|aiff)$/i;
+
+export function isPersistentAuthorizedAudioUrl(url: unknown, mimeType?: unknown): url is string {
+  if (!isAuthorizedPlaybackAudioUrl(url, mimeType)) return false;
   try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    const parsed = new URL(url.trim());
     if (parsed.username || parsed.password) return false;
     for (const [paramKey] of parsed.searchParams.entries()) {
       if (SENSITIVE_URL_PARAM_PATTERN.test(paramKey)) {
@@ -242,20 +269,75 @@ export function isPersistentAuthorizedAudioUrl(url: unknown): url is string {
   }
 }
 
-const NON_AUDIO_CATALOG_PAGE_HOSTS = [
-  'youtube.com',
-  'youtu.be',
-  'music.youtube.com',
-  'open.spotify.com',
-];
-
-export function isAuthorizedPlaybackAudioUrl(url: unknown): url is string {
+export function isAuthorizedPlaybackAudioUrl(url: unknown, mimeType?: unknown): url is string {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (!trimmed || /^(blob|data):/i.test(trimmed)) return false;
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    if (parsed.username || parsed.password) return false;
+
+    const host = parsed.hostname.toLowerCase();
+    if (NON_AUDIO_CATALOG_PAGE_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`))) {
+      return false;
+    }
+
+    const pathname = (parsed.pathname || '').toLowerCase();
+    if (NON_AUDIO_WEBPAGE_EXT_PATTERN.test(pathname)) {
+      return false;
+    }
+
+    const hasAudioExtension = SUPPORTED_AUDIO_PATH_EXT_PATTERN.test(pathname);
+    if (!hasAudioExtension && NON_AUDIO_WEBPAGE_PATH_PATTERN.test(pathname)) {
+      return false;
+    }
+
+    if (hasAudioExtension) {
+      return true;
+    }
+
+    if (pathname === '' || pathname === '/') {
+      const formatParam =
+        parsed.searchParams.get('format') ||
+        parsed.searchParams.get('ext') ||
+        parsed.searchParams.get('codec') ||
+        '';
+      const mimeParam =
+        parsed.searchParams.get('mime') ||
+        parsed.searchParams.get('mime_type') ||
+        parsed.searchParams.get('content_type') ||
+        '';
+      return (
+        SUPPORTED_AUDIO_FORMAT_QUERY_PATTERN.test(formatParam.trim()) ||
+        SUPPORTED_AUDIO_MIME_PATTERN.test(mimeParam.trim())
+      );
+    }
+
+    if (typeof mimeType === 'string' && SUPPORTED_AUDIO_MIME_PATTERN.test(mimeType.trim())) {
+      return true;
+    }
+
+    const mimeParam =
+      parsed.searchParams.get('mime') ||
+      parsed.searchParams.get('mime_type') ||
+      parsed.searchParams.get('content_type') ||
+      parsed.searchParams.get('type') ||
+      '';
+    if (SUPPORTED_AUDIO_MIME_PATTERN.test(mimeParam.trim())) {
+      return true;
+    }
+
+    const formatParam =
+      parsed.searchParams.get('format') ||
+      parsed.searchParams.get('ext') ||
+      parsed.searchParams.get('codec') ||
+      '';
+    if (SUPPORTED_AUDIO_FORMAT_QUERY_PATTERN.test(formatParam.trim())) {
+      return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -267,16 +349,7 @@ export function isPlayableSongRequestItem(
   if (!item || typeof item !== 'object') return false;
   if (item.playable !== true) return false;
   if (item.sourceType !== 'remote_url') return false;
-  if (!isAuthorizedPlaybackAudioUrl(item.audioUrl)) return false;
-  try {
-    const host = new URL(item.audioUrl.trim()).hostname.toLowerCase();
-    if (NON_AUDIO_CATALOG_PAGE_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`))) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  return true;
+  return isAuthorizedPlaybackAudioUrl(item.audioUrl, item.mimeType);
 }
 
 export function formatCatalogPlatformLabel(item: Partial<SongRequestItem>): string {
@@ -335,7 +408,7 @@ export function sanitizeHistoryTrackSnapshot(
     !isLegacyRemovedAudius &&
     sourceType === 'remote_url' &&
     item.playable === true &&
-    isPersistentAuthorizedAudioUrl(item.audioUrl)
+    isPersistentAuthorizedAudioUrl(item.audioUrl, item.mimeType)
       ? item.audioUrl.trim()
       : undefined;
   const safeExternalUrl = sanitizeReferenceUrl(item.externalUrl);
@@ -525,6 +598,7 @@ export class SongRequestEngine {
   private requeueCounter = 0;
   private handlingTrackEnd = false;
   private lastEndedPlaybackGen = -1;
+  private suppressAudioEvents = false;
   private busUnsubscribe: (() => void) | null = null;
 
   // Context supplied by App.tsx
@@ -551,7 +625,7 @@ export class SongRequestEngine {
       audio.volume = this.effectiveVolumeUnit();
 
       audio.addEventListener('playing', () => {
-        if (!this.state.currentTrack) return;
+        if (this.suppressAudioEvents || !this.state.currentTrack) return;
         const duration =
           Number.isFinite(audio.duration) && audio.duration > 0
             ? Math.round(audio.duration)
@@ -569,12 +643,14 @@ export class SongRequestEngine {
           playbackStatus: 'playing',
           durationSec: duration,
           audioPlaybackMode: 'real_html5_audio',
+          audioSourceResolved: true,
           audioRoutedToStream: true,
           lastError: null,
         });
       });
 
       audio.addEventListener('pause', () => {
+        if (this.suppressAudioEvents) return;
         if (this.state.playbackStatus === 'stopped' || this.state.playbackStatus === 'idle' || this.state.playbackStatus === 'completed') {
           return;
         }
@@ -587,7 +663,7 @@ export class SongRequestEngine {
       });
 
       audio.addEventListener('timeupdate', () => {
-        if (!this.state.currentTrack) return;
+        if (this.suppressAudioEvents || !this.state.currentTrack) return;
         const nextSec = Math.floor(audio.currentTime || 0);
         const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? Math.round(audio.duration) : this.state.durationSec;
         if (nextSec !== this.state.currentTimeSec || dur !== this.state.durationSec) {
@@ -599,16 +675,26 @@ export class SongRequestEngine {
       });
 
       audio.addEventListener('durationchange', () => {
+        if (this.suppressAudioEvents) return;
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           this.updateState({ durationSec: Math.round(audio.duration) });
         }
       });
 
       audio.addEventListener('ended', () => {
+        if (this.suppressAudioEvents) return;
         void this.handleTrackEnded();
       });
 
       audio.addEventListener('error', () => {
+        if (this.suppressAudioEvents) return;
+        if (
+          !this.activePlaybackSessionId &&
+          this.state.playbackStatus !== 'preparing' &&
+          this.state.playbackStatus !== 'playing'
+        ) {
+          return;
+        }
         const mediaErr = audio.error;
         const msg = mediaErr
           ? `Gagal memutar audio (kode ${mediaErr.code}). Format atau sumber tidak didukung.`
@@ -625,7 +711,9 @@ export class SongRequestEngine {
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
+          currentTimeSec: 0,
           audioPlaybackMode: 'idle',
+          audioSourceResolved: false,
           audioRoutedToStream: false,
           lastError: msg,
         });
@@ -732,7 +820,9 @@ export class SongRequestEngine {
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
+          currentTimeSec: 0,
           audioPlaybackMode: 'idle',
+          audioSourceResolved: false,
           audioRoutedToStream: false,
           lastError: errMsg,
         });
@@ -1147,12 +1237,14 @@ export class SongRequestEngine {
     if (isIdle) {
       const started = await this.playItem(item);
       this.updateState({
-        audioSourceResolved: true,
+        audioSourceResolved: started,
         lastCatalogReference: null,
         lastTestPipelineResult: this.buildPipelineResult(cleanQuery, username, isSimulation, policyCheck, {
-          resolved: true,
-          resolveSummary: `Sumber playback berizin ditemukan: "${item.title}"`,
-          resolveDetail: `Provider: ${item.provider} | SourceType: ${item.sourceType} | Playable: true`,
+          resolved: started || this.state.audioSourceResolved,
+          resolveSummary: started
+            ? `Sumber playback berizin ditemukan: "${item.title}"`
+            : this.state.lastError || `Sumber audio "${item.title}" gagal diputar.`,
+          resolveDetail: `Provider: ${item.provider} | SourceType: ${item.sourceType} | Playable: ${started}`,
           playbackStarted: started,
           playbackSummary: started
             ? `Pemutaran dimulai melalui ${nativeAudioBridge.isNativeAndroid() ? 'NativeMusicPlayer (MediaPlayer)' : 'HTML5 Audio'}`
@@ -1233,8 +1325,13 @@ export class SongRequestEngine {
 
   public async playItem(item: SongRequestItem): Promise<boolean> {
     const gen = ++this.playbackGeneration;
+    const prevTrack = this.state.currentTrack;
+    const prevSessionId = this.activePlaybackSessionId;
     this.activePlaybackSessionId = null;
     await this.stopActivePlaybackOnly();
+    if (prevTrack && prevSessionId) {
+      this.recordSessionHistory(prevTrack, 'skipped', undefined, prevSessionId);
+    }
     if (gen !== this.playbackGeneration) return false;
 
     if (!isPlayableSongRequestItem(item)) {
@@ -1260,9 +1357,11 @@ export class SongRequestEngine {
     }
 
     const activeItem = item;
-    const authorizedUrl = isAuthorizedPlaybackAudioUrl(activeItem.audioUrl) ? activeItem.audioUrl.trim() : '';
+    const authorizedUrl = isAuthorizedPlaybackAudioUrl(activeItem.audioUrl, activeItem.mimeType)
+      ? activeItem.audioUrl.trim()
+      : '';
 
-    if (!authorizedUrl || !isAuthorizedPlaybackAudioUrl(authorizedUrl)) {
+    if (!authorizedUrl || !isAuthorizedPlaybackAudioUrl(authorizedUrl, activeItem.mimeType)) {
       const msg = `Sumber playback berizin untuk "${activeItem.title}" belum tersedia.`;
       this.updateState({
         currentTrack: activeItem,
@@ -1311,7 +1410,9 @@ export class SongRequestEngine {
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
+          currentTimeSec: 0,
           audioPlaybackMode: 'idle',
+          audioSourceResolved: false,
           audioRoutedToStream: false,
           lastError: msg,
         });
@@ -1330,7 +1431,10 @@ export class SongRequestEngine {
         currentTrack: activeItem,
         isPlaying: false,
         playbackStatus: 'error',
+        currentTimeSec: 0,
         audioPlaybackMode: 'idle',
+        audioSourceResolved: false,
+        audioRoutedToStream: false,
         lastError: msg,
       });
       return false;
@@ -1366,7 +1470,9 @@ export class SongRequestEngine {
         playbackStatus: 'playing',
         durationSec: actualDur,
         audioPlaybackMode: 'real_html5_audio',
+        audioSourceResolved: true,
         audioRoutedToStream: true,
+        lastCatalogReference: null,
         lastError: null,
       });
       return true;
@@ -1377,10 +1483,14 @@ export class SongRequestEngine {
       if (this.activePlaybackSessionId === sessionId) {
         this.activePlaybackSessionId = null;
       }
+      await this.stopActivePlaybackOnly();
+      if (gen !== this.playbackGeneration) return false;
       this.updateState({
         isPlaying: false,
         playbackStatus: 'error',
+        currentTimeSec: 0,
         audioPlaybackMode: 'idle',
+        audioSourceResolved: false,
         audioRoutedToStream: false,
         lastError: msg,
       });
@@ -1394,12 +1504,15 @@ export class SongRequestEngine {
       await nativeAudioBridge.stopMusicTrack();
     }
     if (this.audioElement) {
+      this.suppressAudioEvents = true;
       try {
         this.audioElement.pause();
         this.audioElement.removeAttribute('src');
         this.audioElement.load();
       } catch {
         // ignore cleanup errors
+      } finally {
+        this.suppressAudioEvents = false;
       }
     }
   }
@@ -1408,10 +1521,15 @@ export class SongRequestEngine {
     started: boolean;
     playedTrack?: SongRequestItem;
     skippedInvalidCount: number;
+    failedCount: number;
     lastSkippedTitle?: string;
+    lastFailureMessage?: string;
   }> {
     let skippedInvalidCount = 0;
+    let failedCount = 0;
     let lastSkippedTitle: string | undefined;
+    let lastFailedTrack: SongRequestItem | undefined;
+    let lastFailureMessage: string | undefined;
 
     while (this.state.queue.length > 0) {
       const candidate = this.state.queue[0];
@@ -1430,19 +1548,69 @@ export class SongRequestEngine {
       const genBeforePlay = this.playbackGeneration;
       const started = await this.playItem(candidate);
       if (started) {
-        return { started: true, playedTrack: candidate, skippedInvalidCount, lastSkippedTitle };
+        return {
+          started: true,
+          playedTrack: candidate,
+          skippedInvalidCount,
+          failedCount,
+          lastSkippedTitle,
+        };
       }
       if (this.playbackGeneration !== genBeforePlay + 1) {
         // Preempted by stop() / skipTrack() / another playItem() call while preparing
-        return { started: false, skippedInvalidCount, lastSkippedTitle };
+        return {
+          started: false,
+          skippedInvalidCount,
+          failedCount,
+          lastSkippedTitle,
+          lastFailureMessage: this.state.lastError || undefined,
+        };
       }
-      // Candidate stream failed to start; continue scanning if another playable item remains
-      if (this.state.queue.length === 0) {
-        return { started: false, playedTrack: candidate, skippedInvalidCount, lastSkippedTitle };
-      }
+
+      failedCount += 1;
+      lastFailedTrack = candidate;
+      lastFailureMessage =
+        this.state.lastError || `Gagal memutar "${candidate.title}".`;
     }
 
-    return { started: false, skippedInvalidCount, lastSkippedTitle };
+    if (failedCount > 0 || skippedInvalidCount > 0) {
+      await this.stopActivePlaybackOnly();
+      const summaryMessage =
+        failedCount > 0 && skippedInvalidCount > 0
+          ? `${failedCount} lagu gagal diputar dan ${skippedInvalidCount} item non-playable dilewati (${lastFailureMessage || 'Error playback'}).`
+          : failedCount > 1
+          ? `${failedCount} lagu berikutnya gagal diputar beruntun (${lastFailureMessage || 'Error playback'}).`
+          : failedCount === 1
+          ? lastFailureMessage || `Gagal memutar "${lastFailedTrack?.title || 'lagu berikutnya'}".`
+          : `${skippedInvalidCount} item antrean tidak playable dilewati; tidak ada sumber audio berizin tersisa.`;
+      this.activePlaybackSessionId = null;
+      this.updateState({
+        currentTrack: null,
+        isPlaying: false,
+        playbackStatus: failedCount > 0 ? 'error' : 'idle',
+        currentTimeSec: 0,
+        durationSec: 0,
+        audioPlaybackMode: 'idle',
+        audioSourceResolved: false,
+        audioRoutedToStream: false,
+        lastError: summaryMessage,
+      });
+      return {
+        started: false,
+        playedTrack: lastFailedTrack,
+        skippedInvalidCount,
+        failedCount,
+        lastSkippedTitle,
+        lastFailureMessage: summaryMessage,
+      };
+    }
+
+    return {
+      started: false,
+      skippedInvalidCount,
+      failedCount,
+      lastSkippedTitle,
+    };
   }
 
   public async handleSkipCommand(username: string = 'Streamer', isSimulation: boolean = false): Promise<boolean> {
@@ -1463,6 +1631,7 @@ export class SongRequestEngine {
         currentTimeSec: 0,
         durationSec: 0,
         audioPlaybackMode: 'idle',
+        audioSourceResolved: false,
         audioRoutedToStream: false,
         lastError: null,
       });
@@ -1475,40 +1644,25 @@ export class SongRequestEngine {
     this.updateState({ lastError: null });
     const advancement = await this.playNextPlayableFromQueue();
     if (advancement.started && advancement.playedTrack) {
-      const skipNote =
-        advancement.skippedInvalidCount > 0
-          ? ` (${advancement.skippedInvalidCount} item non-playable dilewati)`
-          : '';
+      const notes: string[] = [];
+      if (advancement.skippedInvalidCount > 0) {
+        notes.push(`${advancement.skippedInvalidCount} item non-playable dilewati`);
+      }
+      if (advancement.failedCount > 0) {
+        notes.push(`${advancement.failedCount} lagu gagal dilewati`);
+      }
+      const skipNote = notes.length > 0 ? ` (${notes.join(', ')})` : '';
       this.announce(
         `⏭️ [${isSimulation ? 'SIMULASI' : 'LIVE'}] Di-skip oleh @${username}. Memutar: "${advancement.playedTrack.title}"${skipNote}.`
       );
       return true;
     }
 
-    if (this.state.queue.length === 0 && !advancement.playedTrack) {
-      const reason =
-        advancement.skippedInvalidCount > 0
-          ? `${advancement.skippedInvalidCount} item antrean tidak playable dilewati; tidak ada sumber audio berizin tersisa.`
-          : 'Antrean kosong — pemutaran dihentikan.';
-      this.updateState({
-        currentTrack: null,
-        isPlaying: false,
-        playbackStatus: 'idle',
-        currentTimeSec: 0,
-        durationSec: 0,
-        audioPlaybackMode: 'idle',
-        audioRoutedToStream: false,
-        lastError: advancement.skippedInvalidCount > 0 ? reason : null,
-      });
-      this.announce(`⚠️ [${isSimulation ? 'SIMULASI' : 'LIVE'}] @${username}: ${reason}`);
-      return false;
-    }
-
-    this.announce(
-      `⚠️ [${isSimulation ? 'SIMULASI' : 'LIVE'}] Di-skip oleh @${username}, tetapi gagal memutar "${
-        advancement.playedTrack?.title || advancement.lastSkippedTitle || 'lagu berikutnya'
-      }": ${this.state.lastError || 'Error'}`
-    );
+    const failSummary =
+      advancement.lastFailureMessage ||
+      this.state.lastError ||
+      'Tidak ada lagu playable tersisa dalam antrean.';
+    this.announce(`⚠️ [${isSimulation ? 'SIMULASI' : 'LIVE'}] @${username}: ${failSummary}`);
     return false;
   }
 
@@ -1558,9 +1712,9 @@ export class SongRequestEngine {
           );
           return;
         }
-        if (advancement.playedTrack) {
+        if (advancement.failedCount > 0 || advancement.skippedInvalidCount > 0) {
           this.announce(
-            `⚠️ Gagal memutar lagu berikutnya "${advancement.playedTrack.title}": ${this.state.lastError || 'Error'}`
+            `⚠️ ${advancement.lastFailureMessage || this.state.lastError || 'Gagal melanjutkan antrean lagu.'}`
           );
           return;
         }
@@ -1574,6 +1728,7 @@ export class SongRequestEngine {
         currentTimeSec: 0,
         durationSec: 0,
         audioPlaybackMode: 'idle',
+        audioSourceResolved: false,
         audioRoutedToStream: false,
       });
       this.announce('Antrean Song Request selesai.');
@@ -1745,7 +1900,48 @@ export class SongRequestEngine {
     }
 
     if (!isPlayableSongRequestItem(this.state.currentTrack)) {
-      await this.playItem(this.state.currentTrack);
+      const invalidCurrent = this.state.currentTrack;
+      const prevSessionId = this.activePlaybackSessionId;
+      const preservedRef: SongRequestItem | null = invalidCurrent.externalUrl
+        ? { ...invalidCurrent, playable: false, audioUrl: undefined }
+        : this.state.lastCatalogReference || null;
+      const skippedMsg = buildMetadataPlaybackUnavailableMessage(invalidCurrent);
+
+      this.activePlaybackSessionId = null;
+      this.playbackGeneration++;
+      await this.stopActivePlaybackOnly();
+      if (prevSessionId) {
+        this.recordSessionHistory(invalidCurrent, 'error', skippedMsg, prevSessionId);
+      }
+
+      this.updateState({
+        currentTrack: null,
+        isPlaying: false,
+        playbackStatus: 'idle',
+        currentTimeSec: 0,
+        durationSec: 0,
+        audioPlaybackMode: 'idle',
+        audioSourceResolved: false,
+        audioRoutedToStream: false,
+        lastCatalogReference: preservedRef,
+        lastError: skippedMsg,
+      });
+
+      if (this.state.queue.length > 0) {
+        const advancement = await this.playNextPlayableFromQueue();
+        if (advancement.started && advancement.playedTrack) {
+          this.announce(
+            `⏭️ Melewati item non-playable "${invalidCurrent.title}" dan memutar "${advancement.playedTrack.title}".`
+          );
+        } else if (advancement.lastFailureMessage) {
+          this.announce(`⚠️ ${advancement.lastFailureMessage}`);
+        }
+      } else {
+        this.updateState({
+          audioPlaybackMode: 'pending_source',
+        });
+        this.announce(`⚠️ ${skippedMsg}`);
+      }
       return;
     }
 
@@ -1756,10 +1952,14 @@ export class SongRequestEngine {
         this.updateState({
           isPlaying: true,
           playbackStatus: 'playing',
+          audioSourceResolved: true,
           lastError: null,
         });
       } else {
-        await this.playItem(this.state.currentTrack);
+        const started = await this.playItem(this.state.currentTrack);
+        if (!started && this.state.queue.length > 0) {
+          await this.playNextPlayableFromQueue();
+        }
       }
       return;
     }
@@ -1767,16 +1967,38 @@ export class SongRequestEngine {
     if (this.audioElement && this.audioElement.src) {
       try {
         await this.audioElement.play();
-        this.updateState({ isPlaying: true, playbackStatus: 'playing', lastError: null });
+        this.updateState({
+          isPlaying: true,
+          playbackStatus: 'playing',
+          audioSourceResolved: true,
+          audioRoutedToStream: true,
+          lastError: null,
+        });
       } catch (err: any) {
+        const msg = err?.message || 'Gagal melanjutkan pemutaran audio.';
+        if (this.state.currentTrack && this.activePlaybackSessionId) {
+          this.recordSessionHistory(this.state.currentTrack, 'error', msg, this.activePlaybackSessionId);
+        }
+        this.activePlaybackSessionId = null;
+        await this.stopActivePlaybackOnly();
         this.updateState({
           isPlaying: false,
           playbackStatus: 'error',
-          lastError: err?.message || 'Gagal melanjutkan pemutaran audio.',
+          currentTimeSec: 0,
+          audioPlaybackMode: 'idle',
+          audioSourceResolved: false,
+          audioRoutedToStream: false,
+          lastError: msg,
         });
+        if (this.state.queue.length > 0) {
+          await this.playNextPlayableFromQueue();
+        }
       }
     } else {
-      await this.playItem(this.state.currentTrack);
+      const started = await this.playItem(this.state.currentTrack);
+      if (!started && this.state.queue.length > 0) {
+        await this.playNextPlayableFromQueue();
+      }
     }
   }
 
@@ -1793,9 +2015,14 @@ export class SongRequestEngine {
   }
 
   public async stop(): Promise<void> {
+    const stoppedTrack = this.state.currentTrack;
+    const stoppedSessionId = this.activePlaybackSessionId;
     this.activePlaybackSessionId = null;
     this.playbackGeneration++;
     await this.stopActivePlaybackOnly();
+    if (stoppedTrack && stoppedSessionId) {
+      this.recordSessionHistory(stoppedTrack, 'skipped', undefined, stoppedSessionId);
+    }
     this.updateState({
       currentTrack: null,
       isPlaying: false,
@@ -1803,6 +2030,7 @@ export class SongRequestEngine {
       currentTimeSec: 0,
       durationSec: 0,
       audioPlaybackMode: 'idle',
+      audioSourceResolved: false,
       audioRoutedToStream: false,
       lastError: null,
     });
