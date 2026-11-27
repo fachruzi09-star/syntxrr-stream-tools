@@ -8,6 +8,7 @@
 import { streamEventBus } from './eventBus';
 import { nativeAudioBridge, type MusicStateEvent } from './nativeAudioBridge';
 import { YouTubeService } from './youtubeService';
+import { YouTubeMusicService } from './youtubeMusicService';
 import { SpotifyService } from './spotifyService';
 import { AudiusService, isPermittedAudiusLicenseLabel } from './audiusService';
 import {
@@ -949,34 +950,61 @@ export class SongRequestEngine {
 
     let anyCatalogSucceededEmpty = audiusRes.success && !audiusRes.hasMatchedTracks;
 
-    // 2. Check YouTube Data API v3 catalog (metadata only — zero audio extraction)
+    // 2. Check YouTube Music & YouTube Data API v3 catalog (metadata only — zero audio extraction)
     if (this.youtubeApiKey.trim()) {
-      const ytRes = await YouTubeService.searchCatalog(cleanQuery, this.youtubeApiKey);
-      if (ytRes.success && ytRes.results.length > 0) {
-        const first = ytRes.results[0];
+      const ytmRes = await YouTubeMusicService.searchMusicCatalog(cleanQuery, this.youtubeApiKey);
+      if (ytmRes.success && ytmRes.results.length > 0) {
+        const first = ytmRes.results[0];
         return {
           item: {
-            id: `sr_yt_${first.id}_${Date.now()}`,
+            id: `sr_ytm_${first.id}_${Date.now()}`,
             title: first.title,
-            artist: first.channelTitle || 'YouTube',
+            artist: first.artist || first.channelTitle || 'YouTube Music',
             requester,
             durationSec: 0,
             requestedAt: Date.now(),
             sourceType: 'youtube_metadata',
-            provider: 'youtube',
+            provider: 'youtube_music',
             providerTrackId: first.id,
             playable: false,
-            externalUrl: first.videoUrl,
+            externalUrl: first.musicUrl,
             thumbnailUrl: first.thumbnailUrl,
-            platform: 'YouTube',
-            notes: 'Metadata katalog YouTube (sumber playback berizin belum tersedia).',
+            platform: 'YouTube Music',
+            notes: 'Metadata katalog YouTube Music (sumber playback berizin belum tersedia).',
           },
         };
       }
-      if (ytRes.success) {
+      if (ytmRes.success) {
         anyCatalogSucceededEmpty = true;
-      } else if (ytRes.error) {
-        errors.push(`YouTube: ${ytRes.error}`);
+        const ytRes = await YouTubeService.searchCatalog(cleanQuery, this.youtubeApiKey);
+        if (ytRes.success && ytRes.results.length > 0) {
+          const first = ytRes.results[0];
+          return {
+            item: {
+              id: `sr_yt_${first.id}_${Date.now()}`,
+              title: first.title,
+              artist: first.channelTitle || 'YouTube',
+              requester,
+              durationSec: 0,
+              requestedAt: Date.now(),
+              sourceType: 'youtube_metadata',
+              provider: 'youtube',
+              providerTrackId: first.id,
+              playable: false,
+              externalUrl: first.videoUrl,
+              thumbnailUrl: first.thumbnailUrl,
+              platform: 'YouTube',
+              notes: 'Metadata katalog YouTube (sumber playback berizin belum tersedia).',
+            },
+          };
+        }
+        if (ytRes.success) {
+          anyCatalogSucceededEmpty = true;
+        } else if (ytRes.error) {
+          errors.push(`YouTube: ${ytRes.error}`);
+        }
+      } else if (ytmRes.error) {
+        errors.push(`YouTube Music: ${ytmRes.error}`);
       }
     }
 
@@ -1018,7 +1046,7 @@ export class SongRequestEngine {
 
     const hasMetadataProvider = Boolean(this.youtubeApiKey.trim() || this.spotifyAccessToken.trim());
     const baseNotFound = hasMetadataProvider
-      ? `Lagu "${cleanQuery}" tidak ditemukan di katalog Audius maupun metadata YouTube/Spotify.`
+      ? `Lagu "${cleanQuery}" tidak ditemukan di katalog Audius maupun metadata YouTube Music/YouTube/Spotify.`
       : `Lagu "${cleanQuery}" tidak ditemukan di katalog Audius.`;
     return {
       error: errors.length > 0 ? `${baseNotFound} (${errors.join(' | ')})` : baseNotFound,
@@ -1516,7 +1544,7 @@ export class SongRequestEngine {
       resolved: hasRemoteConfig,
       resolveSummary: hasRemoteConfig
         ? `Siap mencari metadata di katalog terkonfigurasi (${[
-            this.youtubeApiKey.trim() ? 'YouTube' : '',
+            this.youtubeApiKey.trim() ? 'YouTube Music & YouTube' : '',
             this.spotifyAccessToken.trim() ? 'Spotify' : '',
           ]
             .filter(Boolean)
