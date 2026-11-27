@@ -565,9 +565,19 @@ async function runSongRequestHistoryTests(): Promise<void> {
       await engineAfterRestart.playItem(activeTrack);
       const spotifyHistoryEntry = engineAfterRestart.getState().history.find((h) => h.provider === 'spotify')!;
       const spotifyBefore = JSON.stringify(spotifyHistoryEntry);
+      const playableNeonEntry = engineAfterRestart.getState().history.find((h) => h.title === 'Neon Pulse')!;
+      const neonBefore = JSON.stringify(playableNeonEntry);
 
-      const activeRequeue = engineAfterRestart.requeueFromHistory(spotifyHistoryEntry.id, 'Streamer');
-      assertEqual(activeRequeue.success, true, '7b: requeue succeeds while another song is playing');
+      const spotifyRequeueRejected = engineAfterRestart.requeueFromHistory(spotifyHistoryEntry.id, 'Streamer');
+      assertEqual(spotifyRequeueRejected.success, false, '7b0: metadata-only Spotify history entry cannot enter playback queue');
+      assertEqual(engineAfterRestart.getState().queue.length, 1, '7b1: queue remains unchanged after metadata requeue rejection');
+      assert(
+        (spotifyRequeueRejected.error || '').includes('playback otomatis belum tersedia'),
+        '7b2: metadata requeue error explains playback unavailability'
+      );
+
+      const activeRequeue = engineAfterRestart.requeueFromHistory(playableNeonEntry.id, 'Streamer');
+      assertEqual(activeRequeue.success, true, '7b: playable requeue succeeds while another song is playing');
       assertEqual(
         engineAfterRestart.getState().currentTrack?.id,
         'active_playing_track',
@@ -581,8 +591,8 @@ async function runSongRequestHistoryTests(): Promise<void> {
       );
       assertEqual(
         activeRequeue.item!.playable,
-        false,
-        '7e: requeued Spotify metadata item preserves non-playable metadata policy'
+        true,
+        '7e: requeued playable item preserves playable=true policy'
       );
       assertEqual(
         JSON.stringify(engineAfterRestart.getState().history.find((h) => h.id === sourceEntry.id)),
@@ -592,7 +602,12 @@ async function runSongRequestHistoryTests(): Promise<void> {
       assertEqual(
         JSON.stringify(engineAfterRestart.getState().history.find((h) => h.id === spotifyHistoryEntry.id)),
         spotifyBefore,
-        '9b: original Spotify history entry remains unmodified'
+        '9b: original Spotify history entry remains unmodified in history'
+      );
+      assertEqual(
+        JSON.stringify(engineAfterRestart.getState().history.find((h) => h.id === playableNeonEntry.id)),
+        neonBefore,
+        '9c: original Neon Pulse history entry remains unmodified'
       );
 
       // 10. Full queue rejects requeue cleanly without mutating queue, active track, or history

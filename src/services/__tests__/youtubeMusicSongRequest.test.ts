@@ -219,7 +219,7 @@ async function runTests(): Promise<void> {
         throw new Error(`Unexpected fetch: ${urlStr}`);
       }) as typeof fetch;
 
-      const ytmIdlePlay = await engine.handlePlayCommand('viewer_ytm', 'Starlight Echo', true);
+      const ytmIdlePlay = await engine.handlePlayCommand('viewer_ytm', 'Starlight Echo', false);
       assertEqual(ytmIdlePlay.success, false, '4d: idle YouTube Music metadata result MUST NOT claim playback started');
       assertEqual(ytmIdlePlay.item?.provider, 'youtube_music', '4e: item provider is youtube_music');
       assertEqual(ytmIdlePlay.item?.sourceType, 'youtube_metadata', '4f: sourceType is youtube_metadata');
@@ -231,10 +231,42 @@ async function runTests(): Promise<void> {
         'https://music.youtube.com/watch?v=ytm_song_202',
         '4j: externalUrl points to music.youtube.com'
       );
+      assert(
+        (ytmIdlePlay.error || '').includes('https://music.youtube.com/watch?v=ytm_song_202'),
+        '4j2: clear error preserves external deep-link for user'
+      );
       assertEqual(engine.getState().isPlaying, false, '4k: engine isPlaying stays false');
       assertEqual(engine.getState().audioPlaybackMode, 'pending_source', '4l: audioPlaybackMode is pending_source');
+      assertEqual(engine.getState().queue.length, 0, '4l2: YouTube Music metadata does not enter queue');
+      assertEqual(
+        engine.getState().lastCatalogReference?.externalUrl,
+        'https://music.youtube.com/watch?v=ytm_song_202',
+        '4l3: lastCatalogReference preserves external deep-link'
+      );
+      assertEqual(
+        engine.getState().lastTestPipelineResult?.stages.stage5_audioSourceResolved.status,
+        'failed',
+        '4l4: Stage 5 fails for metadata-only YouTube Music item'
+      );
+      assertEqual(
+        engine.getState().lastTestPipelineResult?.stages.stage6_playbackStarted.status,
+        'failed',
+        '4l5: Stage 6 fails for metadata-only YouTube Music item'
+      );
+      assertEqual(
+        engine.getState().lastTestPipelineResult?.overallSuccess,
+        false,
+        '4l6: overallSuccess is false when metadata-only item cannot auto-play'
+      );
 
-      // 4e. Enqueue while authorized track is playing stores youtube_music metadata cleanly
+      // Cooldown MUST NOT be consumed when viewer_ytm was rejected for missing playable audio source
+      const ytmSecondImmediate = await engine.handlePlayCommand('viewer_ytm', 'Starlight Echo', false);
+      assert(
+        !(ytmSecondImmediate.error || '').toLowerCase().includes('cooldown'),
+        '4l7: cooldown is NOT consumed when metadata-only request is rejected'
+      );
+
+      // 4e. Enqueue while authorized track is playing MUST reject metadata-only item and leave active track + queue untouched
       const activeAuth: SongRequestItem = {
         id: 'auth_active_1',
         title: 'Authorized Track',
@@ -249,15 +281,16 @@ async function runTests(): Promise<void> {
         platform: 'Stream',
       };
       await engine.enqueueAndPlayItem(activeAuth);
-      const ytmQueued = await engine.handlePlayCommand('viewer_q', 'Starlight Echo', true);
-      assertEqual(ytmQueued.success, true, '4m: metadata item can enter queue while active track plays');
-      assertEqual(engine.getState().queue[0]?.provider, 'youtube_music', '4n: queued item records youtube_music');
-      assertEqual(engine.getState().queue[0]?.playable, false, '4o: queued metadata item stays non-playable');
+      const ytmRejectedWhilePlaying = await engine.handlePlayCommand('viewer_q', 'Starlight Echo', false);
+      assertEqual(ytmRejectedWhilePlaying.success, false, '4m: metadata item MUST NOT enter queue while active track plays');
+      assertEqual(engine.getState().queue.length, 0, '4n: queue remains empty after metadata rejection');
+      assertEqual(engine.getState().currentTrack?.id, 'auth_active_1', '4o: active authorized playback stays undisturbed');
+      assertEqual(engine.getState().isPlaying, true, '4o2: active authorized track remains playing');
 
       await engine.stop();
       engine.clearQueue();
 
-      // 4f. Fallback to general YouTube search when videoCategoryId=10 returns empty
+      // 4f. Fallback to general YouTube search when videoCategoryId=10 returns empty -> still rejected from queue & preserves link
       globalThis.fetch = (async (input: RequestInfo | URL) => {
         const urlStr = typeof input === 'string' ? input : input.toString();
         if (urlStr.startsWith(YOUTUBE_DATA_API_SEARCH_ENDPOINT)) {
@@ -284,14 +317,16 @@ async function runTests(): Promise<void> {
       }) as typeof fetch;
 
       const ytFallbackPlay = await engine.handlePlayCommand('viewer_fb', 'Live Acoustic Session', true);
+      assertEqual(ytFallbackPlay.success, false, '4p0: general YouTube metadata rejected from playback/queue');
       assertEqual(ytFallbackPlay.item?.provider, 'youtube', '4p: falls back to youtube when category=10 is empty');
       assertEqual(
         ytFallbackPlay.item?.externalUrl,
         'https://www.youtube.com/watch?v=yt_general_303',
         '4q: fallback uses www.youtube.com watch URL'
       );
+      assertEqual(engine.getState().queue.length, 0, '4q2: general YouTube metadata does not enter queue');
 
-      // 4g. When YouTube Music errors (403 quota), skips duplicate YouTube search and falls back to Spotify
+      // 4g. When YouTube Music errors (403 quota), skips duplicate YouTube search and falls back to Spotify -> also rejected from playback/queue
       let ytCallsOnError = 0;
       globalThis.fetch = (async (input: RequestInfo | URL) => {
         const urlStr = typeof input === 'string' ? input : input.toString();
@@ -323,7 +358,14 @@ async function runTests(): Promise<void> {
 
       const spFallback = await engine.handlePlayCommand('viewer_sp', 'Fallback Song', true);
       assertEqual(ytCallsOnError, 1, '4r: does not burn duplicate YouTube quota on 403 error');
+      assertEqual(spFallback.success, false, '4s0: Spotify metadata also rejected from playback/queue');
       assertEqual(spFallback.item?.provider, 'spotify', '4s: falls back to Spotify metadata when YouTube API fails');
+      assertEqual(
+        spFallback.item?.externalUrl,
+        'https://open.spotify.com/track/sp_track_1',
+        '4t: Spotify external deep-link preserved'
+      );
+      assertEqual(engine.getState().queue.length, 0, '4u: Spotify metadata does not enter queue');
     } finally {
       engine.destroy();
     }
