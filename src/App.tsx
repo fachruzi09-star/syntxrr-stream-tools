@@ -1638,9 +1638,9 @@ export default function App() {
     duration: item.durationSec,
     requesterName: item.requester,
     platform:
-      item.platform === 'YouTube Music' || item.platform === 'Stream'
-        ? 'YouTube'
-        : item.platform || 'TikTok',
+      item.platform === 'Stream' || String(item.platform || '') === 'Audius'
+        ? 'Manual'
+        : item.platform || (item.provider === 'youtube_music' ? 'YouTube Music' : 'TikTok'),
     addedAt: item.requestedAt,
     status,
     notes: item.notes,
@@ -1667,9 +1667,10 @@ export default function App() {
         duration: srState.durationSec || srState.currentTrack.durationSec,
         requesterName: srState.currentTrack.requester,
         platform:
-          srState.currentTrack.platform === 'YouTube Music' || srState.currentTrack.platform === 'Stream'
-            ? 'YouTube'
-            : srState.currentTrack.platform || 'TikTok',
+          srState.currentTrack.platform === 'Stream' || String(srState.currentTrack.platform || '') === 'Audius'
+            ? 'Manual'
+            : srState.currentTrack.platform ||
+              (srState.currentTrack.provider === 'youtube_music' ? 'YouTube Music' : 'TikTok'),
         status: srState.isPlaying ? 'playing' : 'queued',
         requestedAt: srState.currentTrack.requestedAt,
         source:
@@ -1720,7 +1721,7 @@ export default function App() {
         if (file) {
           void audioEngine.loadAndPlayFile(activeSong.id, activeSong.title, activeSong.artist, file);
         }
-      } else if (activeSong?.externalUrl) {
+      } else if (activeSong?.externalUrl && activeSong.source === 'local') {
         void audioEngine.loadAndPlayUrl(activeSong.id, activeSong.title, activeSong.artist, activeSong.externalUrl);
       }
     }

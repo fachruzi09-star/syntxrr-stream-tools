@@ -74,7 +74,7 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
     return true;
   });
 
-  const getSourceBadge = (source: MusicSourceType) => {
+  const getSourceBadge = (source: MusicSourceType, platform?: UnifiedQueueItem['platform']) => {
     switch (source) {
       case 'local':
         return {
@@ -83,7 +83,7 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
         };
       case 'youtube':
         return {
-          label: 'YouTube',
+          label: platform === 'YouTube Music' ? 'YouTube Music' : 'YouTube',
           className: 'bg-[var(--app-error-soft)] text-[var(--app-error)] border border-rose-500/30',
         };
       case 'spotify':
@@ -184,7 +184,7 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
       ) : (
         <div className="space-y-2">
           {filteredQueue.map((item, index) => {
-            const badge = getSourceBadge(item.source);
+            const badge = getSourceBadge(item.source, item.platform);
             const isPlaying = currentlyPlayingId === item.id || item.status === 'playing';
 
             return (
@@ -348,7 +348,7 @@ export const UnifiedQueueManager: React.FC<UnifiedQueueManagerProps> = ({
       <div className="p-4 rounded-xl bg-[var(--app-surface-muted)] border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] flex items-start gap-2.5">
         <Info className="w-4 h-4 text-[var(--app-accent-text)] shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          <strong className="text-[var(--app-text)]">Audio Routing Integrity:</strong> YouTube and Spotify entries are stored as metadata cards for on-screen overlays and viewer management. Only authorized local audio files loaded into the Local Audio Engine are decoded inside the application.
+          <strong className="text-[var(--app-text)]">Audio Routing Integrity:</strong> YouTube Music, YouTube, and Spotify entries are stored as metadata cards for on-screen overlays and viewer management. Only authorized local audio files loaded into the Local Audio Engine are decoded inside the application.
         </p>
       </div>
     </div>

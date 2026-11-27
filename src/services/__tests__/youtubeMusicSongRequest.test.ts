@@ -10,7 +10,12 @@ import {
   extractYouTubeMusicArtist,
   decodeBasicHtmlEntities,
 } from '../youtubeMusicService';
-import { SongRequestEngine, songRequestEngine, type SongRequestItem } from '../songRequestEngine';
+import {
+  SongRequestEngine,
+  songRequestEngine,
+  sanitizeHistoryTrackSnapshot,
+  type SongRequestItem,
+} from '../songRequestEngine';
 
 let assertions = 0;
 
@@ -155,7 +160,31 @@ async function runTests(): Promise<void> {
     );
     assertEqual(requestedUrls.length, 1, '3l: makes exactly one official API call');
 
-    // 4. SongRequestEngine integration: Audius playable priority preserved; YouTube Music metadata fallback works cleanly
+    // 4. SongRequestEngine integration: YouTube Music is primary catalog provider (zero Audius calls)
+    const unconfiguredEngine = new SongRequestEngine();
+    try {
+      unconfiguredEngine.configureContext({
+        operatingMode: 'MODE_A_TIKTOK_COMPANION',
+        youtubeApiKey: '',
+        spotifyAccessToken: '',
+      });
+      let networkCalledWhenUnconfigured = false;
+      globalThis.fetch = (async () => {
+        networkCalledWhenUnconfigured = true;
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch;
+
+      const noKeyRes = await unconfiguredEngine.handlePlayCommand('viewer_nokey', 'Starlight Echo', true);
+      assertEqual(noKeyRes.success, false, '4a: missing YouTube API key reports failure cleanly');
+      assertEqual(networkCalledWhenUnconfigured, false, '4b: zero network calls (including no Audius) when unconfigured');
+      assert(
+        (noKeyRes.error || '').includes('YouTube Data API v3 Key'),
+        '4c: error instructs configuring YouTube Data API v3 Key for YouTube Music'
+      );
+    } finally {
+      unconfiguredEngine.destroy();
+    }
+
     const engine = new SongRequestEngine();
     try {
       engine.configureContext({
@@ -164,53 +193,9 @@ async function runTests(): Promise<void> {
         spotifyAccessToken: 'sp-token-abc',
       });
 
-      // 4a. Audius playable track STILL wins over YouTube Music
+      // 4d. YouTube Music resolves directly as primary catalog provider (metadata-only, playable: false)
       globalThis.fetch = (async (input: RequestInfo | URL) => {
         const urlStr = typeof input === 'string' ? input : input.toString();
-        if (urlStr.startsWith('https://api.audius.co/v1/tracks/search')) {
-          return new Response(
-            JSON.stringify({
-              data: [
-                {
-                  id: 'aud_100',
-                  title: 'Open Highway',
-                  duration: 195,
-                  is_available: true,
-                  is_streamable: true,
-                  is_stream_gated: false,
-                  license: 'CC BY',
-                  user: { name: 'Indie Creator' },
-                },
-              ],
-            }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-        if (urlStr.startsWith('https://api.audius.co/v1/tracks/aud_100/stream')) {
-          return new Response(null, {
-            status: 200,
-            headers: { 'content-type': 'audio/mpeg', 'content-length': '2048' },
-          });
-        }
-        throw new Error(`Unexpected fetch when Audius succeeds: ${urlStr}`);
-      }) as typeof fetch;
-
-      const audiusPlay = await engine.handlePlayCommand('viewer_aud', 'Open Highway', true);
-      assertEqual(audiusPlay.success, true, '4a: Audius playable track still succeeds and starts playback');
-      assertEqual(audiusPlay.item?.provider, 'audius', '4b: Audius provider priority preserved');
-      assertEqual(audiusPlay.item?.playable, true, '4c: Audius track remains playable=true');
-
-      await engine.stop();
-
-      // 4b. When Audius has no results, YouTube Music resolves metadata-only item (playable: false)
-      globalThis.fetch = (async (input: RequestInfo | URL) => {
-        const urlStr = typeof input === 'string' ? input : input.toString();
-        if (urlStr.startsWith('https://api.audius.co/v1/tracks/search')) {
-          return new Response(JSON.stringify({ data: [] }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
         if (urlStr.startsWith(YOUTUBE_DATA_API_SEARCH_ENDPOINT)) {
           const parsed = new URL(urlStr);
           if (parsed.searchParams.get('videoCategoryId') === YOUTUBE_MUSIC_CATEGORY_ID) {
@@ -249,7 +234,7 @@ async function runTests(): Promise<void> {
       assertEqual(engine.getState().isPlaying, false, '4k: engine isPlaying stays false');
       assertEqual(engine.getState().audioPlaybackMode, 'pending_source', '4l: audioPlaybackMode is pending_source');
 
-      // 4c. Enqueue while authorized track is playing stores youtube_music metadata cleanly
+      // 4e. Enqueue while authorized track is playing stores youtube_music metadata cleanly
       const activeAuth: SongRequestItem = {
         id: 'auth_active_1',
         title: 'Authorized Track',
@@ -272,12 +257,9 @@ async function runTests(): Promise<void> {
       await engine.stop();
       engine.clearQueue();
 
-      // 4d. Fallback to general YouTube search when videoCategoryId=10 returns empty
+      // 4f. Fallback to general YouTube search when videoCategoryId=10 returns empty
       globalThis.fetch = (async (input: RequestInfo | URL) => {
         const urlStr = typeof input === 'string' ? input : input.toString();
-        if (urlStr.startsWith('https://api.audius.co/v1/tracks/search')) {
-          return new Response(JSON.stringify({ data: [] }), { status: 200 });
-        }
         if (urlStr.startsWith(YOUTUBE_DATA_API_SEARCH_ENDPOINT)) {
           const parsed = new URL(urlStr);
           if (parsed.searchParams.get('videoCategoryId') === YOUTUBE_MUSIC_CATEGORY_ID) {
@@ -309,13 +291,10 @@ async function runTests(): Promise<void> {
         '4q: fallback uses www.youtube.com watch URL'
       );
 
-      // 4e. When YouTube Music errors (403 quota), skips duplicate YouTube search and falls back to Spotify
+      // 4g. When YouTube Music errors (403 quota), skips duplicate YouTube search and falls back to Spotify
       let ytCallsOnError = 0;
       globalThis.fetch = (async (input: RequestInfo | URL) => {
         const urlStr = typeof input === 'string' ? input : input.toString();
-        if (urlStr.startsWith('https://api.audius.co/v1/tracks/search')) {
-          return new Response(JSON.stringify({ data: [] }), { status: 200 });
-        }
         if (urlStr.startsWith(YOUTUBE_DATA_API_SEARCH_ENDPOINT)) {
           ytCallsOnError += 1;
           return new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 403 });
@@ -349,14 +328,33 @@ async function runTests(): Promise<void> {
       engine.destroy();
     }
 
-    // 5. Static compliance check: official API only, zero scraping / undocumented endpoints
+    // 5. Legacy IndexedDB Audius history snapshot sanitizes safely to non-playable metadata record
+    const legacyAudiusSnapshot = sanitizeHistoryTrackSnapshot({
+      id: 'legacy_aud_1',
+      title: 'Legacy Track',
+      artist: 'Old Creator',
+      provider: 'audius' as never,
+      sourceType: 'remote_url',
+      playable: true,
+      audioUrl: 'https://creatornode.audius.co/tracks/cidstream/QmLegacy',
+      externalUrl: 'https://audius.co/oldcreator/legacy-track',
+    });
+    assertEqual(legacyAudiusSnapshot.playable, false, '5a: legacy Audius history entry downgraded to playable=false');
+    assertEqual(legacyAudiusSnapshot.audioUrl, undefined, '5b: legacy Audius audioUrl stripped safely');
+
+    // 6. Static compliance check: official API only, zero scraping / undocumented endpoints, zero Audius code
     const ytmSource = readFileSync(join(process.cwd(), 'src', 'services', 'youtubeMusicService.ts'), 'utf8');
+    const engineSource = readFileSync(join(process.cwd(), 'src', 'services', 'songRequestEngine.ts'), 'utf8');
     assert(
       ytmSource.includes('https://www.googleapis.com/youtube/v3/search') &&
         !ytmSource.includes('youtubei') &&
         !ytmSource.includes('ytdl') &&
         !ytmSource.includes('googlevideo.com'),
-      '5a: youtubeMusicService.ts uses official YouTube Data API v3 only with zero scraping or audio extraction'
+      '6a: youtubeMusicService.ts uses official YouTube Data API v3 only with zero scraping or audio extraction'
+    );
+    assert(
+      !engineSource.includes('audiusService') && !engineSource.includes('api.audius.co'),
+      '6b: songRequestEngine.ts has zero Audius imports or endpoints'
     );
 
     console.log(`youtubeMusicSongRequest.test.ts: PASS (${assertions} assertions)`);

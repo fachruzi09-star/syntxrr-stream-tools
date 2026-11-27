@@ -1,6 +1,6 @@
 // Dedicated Mode A Song Request Engine — SYNTXRR STREAM
 // Integrates with streamEventBus (!play, !sr, !songrequest, !queue, !np, !nowplaying),
-// official YouTube Data API v3 & Spotify Web API metadata catalogs,
+// official YouTube Music & YouTube Data API v3 + Spotify Web API metadata catalogs,
 // Android NativeMusicPlayer (MediaPlayer + MediaSession inside CompanionService), and HTML5 Audio fallback on Web
 // strictly for authorized direct playback sources.
 // All Now Playing / isPlaying / progress / error states reflect actual playback engine state.
@@ -10,7 +10,6 @@ import { nativeAudioBridge, type MusicStateEvent } from './nativeAudioBridge';
 import { YouTubeService } from './youtubeService';
 import { YouTubeMusicService } from './youtubeMusicService';
 import { SpotifyService } from './spotifyService';
-import { AudiusService, isPermittedAudiusLicenseLabel } from './audiusService';
 import {
   isModeAOperatingMode,
   type OperatingMode,
@@ -18,7 +17,6 @@ import {
 } from '../types';
 
 export type SongRequestProvider =
-  | 'audius'
   | 'youtube_music'
   | 'youtube'
   | 'spotify'
@@ -45,7 +43,7 @@ export interface SongRequestItem {
   externalUrl?: string;
   thumbnailUrl?: string;
   mimeType?: string;
-  platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'YouTube Music' | 'Spotify' | 'Audius' | 'Stream' | 'Manual';
+  platform?: 'TikTok' | 'Twitch' | 'YouTube' | 'YouTube Music' | 'Spotify' | 'Stream' | 'Manual';
   rightsHolder?: string;
   licenseType?: string;
   copyrightNotice?: string;
@@ -195,7 +193,6 @@ export function normalizeSongRequestProvider(
   sourceType?: SongRequestSourceType
 ): SongRequestProvider {
   if (
-    provider === 'audius' ||
     provider === 'youtube_music' ||
     provider === 'youtube' ||
     provider === 'spotify' ||
@@ -278,6 +275,7 @@ export function sanitizeReferenceUrl(url: unknown): string | undefined {
 export function sanitizeHistoryTrackSnapshot(
   item: Partial<SongRequestItem | SongRequestHistoryTrackSnapshot>
 ): SongRequestHistoryTrackSnapshot {
+  const isLegacyRemovedAudius = String(item.provider || '').toLowerCase() === 'audius';
   const provider = normalizeSongRequestProvider(
     item.provider,
     item.sourceType === 'youtube_metadata' || item.sourceType === 'spotify_metadata' || item.sourceType === 'remote_url'
@@ -286,7 +284,10 @@ export function sanitizeHistoryTrackSnapshot(
   );
   const sourceType = normalizeSongRequestSourceType(item.sourceType, provider);
   const safeAudioUrl =
-    sourceType === 'remote_url' && item.playable === true && isPersistentAuthorizedAudioUrl(item.audioUrl)
+    !isLegacyRemovedAudius &&
+    sourceType === 'remote_url' &&
+    item.playable === true &&
+    isPersistentAuthorizedAudioUrl(item.audioUrl)
       ? item.audioUrl.trim()
       : undefined;
   const safeExternalUrl = sanitizeReferenceUrl(item.externalUrl);
@@ -303,20 +304,11 @@ export function sanitizeHistoryTrackSnapshot(
     typeof item.copyrightNotice === 'string' && item.copyrightNotice.trim()
       ? item.copyrightNotice.trim()
       : undefined;
-  const hasValidAudiusLicense =
-    Boolean(cleanLicenseType) && isPermittedAudiusLicenseLabel(cleanLicenseType).permitted;
-  const canRefreshAudiusStream =
-    provider === 'audius' &&
-    sourceType === 'remote_url' &&
-    item.playable === true &&
-    Boolean(cleanProviderTrackId) &&
-    hasValidAudiusLicense;
   const isPlayableSnapshot =
+    !isLegacyRemovedAudius &&
     sourceType === 'remote_url' &&
     item.playable === true &&
-    (provider === 'audius'
-      ? hasValidAudiusLicense && (Boolean(safeAudioUrl) || canRefreshAudiusStream)
-      : Boolean(safeAudioUrl));
+    Boolean(safeAudioUrl);
 
   return {
     id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `sr_hist_item_${Date.now()}`,
@@ -904,54 +896,20 @@ export class SongRequestEngine {
   ): Promise<{ item?: SongRequestItem; error?: string; providerNote?: string }> {
     const cleanQuery = query.trim();
     const errors: string[] = [];
+    let anyCatalogSucceededEmpty = false;
 
-    // 1. Check Audius official REST API v1 (no API key required; strict OML / open-license & streamable checks)
-    const audiusRes = await AudiusService.resolvePlayableTrack(cleanQuery);
-    if (audiusRes.success && audiusRes.candidate && audiusRes.streamUrl) {
-      const { candidate, streamUrl } = audiusRes;
-      return {
-        item: {
-          id: `sr_aud_${candidate.track.id}_${Date.now()}`,
-          title: candidate.title,
-          artist: candidate.artist,
-          requester,
-          durationSec: candidate.durationSec,
-          requestedAt: Date.now(),
-          sourceType: 'remote_url',
-          provider: 'audius',
-          providerTrackId: candidate.track.id,
-          playable: true,
-          audioUrl: streamUrl,
-          externalUrl: candidate.externalUrl,
-          thumbnailUrl: candidate.thumbnailUrl,
-          platform: 'Audius',
-          rightsHolder: candidate.attribution.rightsHolder,
-          licenseType: candidate.attribution.licenseType,
-          ...(candidate.attribution.copyrightNotice
-            ? { copyrightNotice: candidate.attribution.copyrightNotice }
-            : {}),
-          notes: `Audius (${candidate.attribution.licenseType}) · Kreator: ${candidate.attribution.rightsHolder}`,
-        },
-      };
-    }
+    const hasYoutubeKey = Boolean(this.youtubeApiKey.trim());
+    const hasSpotifyToken = Boolean(this.spotifyAccessToken.trim());
 
-    if (audiusRes.hasMatchedTracks) {
-      // Matched tracks existed on Audius, but none passed OML/open-license, stream-gate, or stream availability checks.
+    if (!hasYoutubeKey && !hasSpotifyToken) {
       return {
         error:
-          audiusRes.error ||
-          `Track Audius untuk "${cleanQuery}" tidak memenuhi izin streaming.`,
+          'YouTube Data API v3 Key belum dikonfigurasi di Settings untuk mencari katalog YouTube Music.',
       };
     }
 
-    if (audiusRes.error && !audiusRes.error.includes('tidak ditemukan')) {
-      errors.push(`Audius: ${audiusRes.error}`);
-    }
-
-    let anyCatalogSucceededEmpty = audiusRes.success && !audiusRes.hasMatchedTracks;
-
-    // 2. Check YouTube Music & YouTube Data API v3 catalog (metadata only — zero audio extraction)
-    if (this.youtubeApiKey.trim()) {
+    // 1. Primary provider: YouTube Music (official YouTube Data API v3 videoCategoryId=10 — metadata & music.youtube.com deep-link)
+    if (hasYoutubeKey) {
       const ytmRes = await YouTubeMusicService.searchMusicCatalog(cleanQuery, this.youtubeApiKey);
       if (ytmRes.success && ytmRes.results.length > 0) {
         const first = ytmRes.results[0];
@@ -976,6 +934,7 @@ export class SongRequestEngine {
       }
       if (ytmRes.success) {
         anyCatalogSucceededEmpty = true;
+        // Fallback within same API key to general YouTube Data API v3 only when Music category (10) returns empty
         const ytRes = await YouTubeService.searchCatalog(cleanQuery, this.youtubeApiKey);
         if (ytRes.success && ytRes.results.length > 0) {
           const first = ytRes.results[0];
@@ -1008,8 +967,8 @@ export class SongRequestEngine {
       }
     }
 
-    // 3. Check Spotify Web API catalog (metadata only — zero audio extraction)
-    if (this.spotifyAccessToken.trim()) {
+    // 2. Optional metadata fallback: Spotify Web API catalog (zero audio extraction)
+    if (hasSpotifyToken) {
       const spRes = await SpotifyService.searchCatalog(cleanQuery, this.spotifyAccessToken);
       if (spRes.success && spRes.results.length > 0) {
         const first = spRes.results[0];
@@ -1044,10 +1003,9 @@ export class SongRequestEngine {
       return { error: errors.join(' | ') };
     }
 
-    const hasMetadataProvider = Boolean(this.youtubeApiKey.trim() || this.spotifyAccessToken.trim());
-    const baseNotFound = hasMetadataProvider
-      ? `Lagu "${cleanQuery}" tidak ditemukan di katalog Audius maupun metadata YouTube Music/YouTube/Spotify.`
-      : `Lagu "${cleanQuery}" tidak ditemukan di katalog Audius.`;
+    const baseNotFound = `Lagu "${cleanQuery}" tidak ditemukan di katalog metadata YouTube Music${
+      hasSpotifyToken ? '/YouTube/Spotify' : '/YouTube'
+    }.`;
     return {
       error: errors.length > 0 ? `${baseNotFound} (${errors.join(' | ')})` : baseNotFound,
     };
@@ -1191,86 +1149,8 @@ export class SongRequestEngine {
       return false;
     }
 
-    let activeItem = item;
-    let authorizedUrl = isAuthorizedPlaybackAudioUrl(activeItem.audioUrl) ? activeItem.audioUrl.trim() : '';
-
-    if (activeItem.provider === 'audius') {
-      const licenseCheck = isPermittedAudiusLicenseLabel(activeItem.licenseType);
-      if (!activeItem.licenseType || !activeItem.licenseType.trim() || !licenseCheck.permitted) {
-        const msg =
-          licenseCheck.reason ||
-          `Track Audius "${activeItem.title}" ditolak karena bukti lisensi tidak tersedia atau tidak memenuhi syarat.`;
-        this.updateState({
-          currentTrack: { ...activeItem, playable: false, audioUrl: undefined },
-          isPlaying: false,
-          playbackStatus: 'error',
-          currentTimeSec: 0,
-          durationSec: activeItem.durationSec || 0,
-          audioPlaybackMode: 'pending_source',
-          audioSourceResolved: false,
-          audioRoutedToStream: false,
-          lastError: msg,
-        });
-        return false;
-      }
-
-      if (!authorizedUrl || activeItem.id.startsWith('sr_requeue_')) {
-        if (!activeItem.providerTrackId) {
-          const msg = `Sumber stream Audius untuk "${activeItem.title}" tidak tersedia.`;
-          this.updateState({
-            currentTrack: { ...activeItem, playable: false, audioUrl: undefined },
-            isPlaying: false,
-            playbackStatus: 'error',
-            currentTimeSec: 0,
-            durationSec: activeItem.durationSec || 0,
-            audioPlaybackMode: 'pending_source',
-            audioSourceResolved: false,
-            audioRoutedToStream: false,
-            lastError: msg,
-          });
-          return false;
-        }
-
-        const refreshed = await AudiusService.refreshStreamForTrackId(activeItem.providerTrackId);
-        if (gen !== this.playbackGeneration) return false;
-        if (!refreshed.success || !refreshed.streamUrl) {
-          const msg = refreshed.error || `Sumber stream Audius untuk "${activeItem.title}" tidak lagi tersedia.`;
-          this.updateState({
-            currentTrack: { ...activeItem, playable: false, audioUrl: undefined },
-            isPlaying: false,
-            playbackStatus: 'error',
-            currentTimeSec: 0,
-            durationSec: activeItem.durationSec || 0,
-            audioPlaybackMode: 'pending_source',
-            audioSourceResolved: false,
-            audioRoutedToStream: false,
-            lastError: msg,
-          });
-          return false;
-        }
-
-        authorizedUrl = refreshed.streamUrl;
-        if (refreshed.candidate) {
-          activeItem = {
-            ...activeItem,
-            title: refreshed.candidate.title,
-            artist: refreshed.candidate.artist,
-            durationSec: refreshed.candidate.durationSec || activeItem.durationSec,
-            audioUrl: authorizedUrl,
-            externalUrl: refreshed.candidate.externalUrl || activeItem.externalUrl,
-            thumbnailUrl: refreshed.candidate.thumbnailUrl || activeItem.thumbnailUrl,
-            rightsHolder: refreshed.candidate.attribution.rightsHolder,
-            licenseType: refreshed.candidate.attribution.licenseType,
-            notes: `Audius (${refreshed.candidate.attribution.licenseType}) · Kreator: ${refreshed.candidate.attribution.rightsHolder}`,
-            ...(refreshed.candidate.attribution.copyrightNotice
-              ? { copyrightNotice: refreshed.candidate.attribution.copyrightNotice }
-              : {}),
-          };
-        } else {
-          activeItem = { ...activeItem, audioUrl: authorizedUrl };
-        }
-      }
-    }
+    const activeItem = item;
+    const authorizedUrl = isAuthorizedPlaybackAudioUrl(activeItem.audioUrl) ? activeItem.audioUrl.trim() : '';
 
     if (!authorizedUrl || !isAuthorizedPlaybackAudioUrl(authorizedUrl)) {
       const msg = `Sumber playback berizin untuk "${activeItem.title}" belum tersedia.`;

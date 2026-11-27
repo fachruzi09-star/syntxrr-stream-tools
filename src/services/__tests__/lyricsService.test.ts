@@ -379,7 +379,7 @@ async function runTests(): Promise<void> {
       durationSec: 180,
       requestedAt: 1,
       sourceType: 'remote_url',
-      provider: 'audius',
+      provider: 'authorized_stream',
       playable: true,
     },
   });

@@ -169,13 +169,6 @@ async function runSongRequestTests(): Promise<void> {
       );
     }
 
-    if (urlStr.startsWith('https://api.audius.co/v1/tracks/search')) {
-      return new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
     if (urlStr.startsWith('https://api.spotify.com/v1/search')) {
       return new Response(JSON.stringify({ tracks: { items: [] } }), {
         status: 200,
@@ -217,9 +210,11 @@ async function runSongRequestTests(): Promise<void> {
       'lastError describes missing track'
     );
 
-    // 1b. Metadata-only track from YouTube catalog when idle MUST NOT fake playback success
+    // 1b. Metadata-only track from YouTube Music catalog when idle MUST NOT fake playback success
     const metadataOnlyPlay = await engine.handlePlayCommand('viewer_meta', 'Midnight Drive', true);
     assertEqual(metadataOnlyPlay.success, false, 'Metadata-only track does not claim playable success');
+    assertEqual(metadataOnlyPlay.item?.provider, 'youtube_music', 'Primary catalog provider is youtube_music');
+    assertEqual(metadataOnlyPlay.item?.platform, 'YouTube Music', 'Primary catalog platform is YouTube Music');
     assertEqual(metadataOnlyPlay.item?.playable, false, 'Metadata item keeps playable=false');
     assertEqual(engine.getState().isPlaying, false, 'Metadata-only track keeps isPlaying=false');
     assertEqual(engine.getState().audioPlaybackMode, 'pending_source', 'Metadata-only track marks pending_source');

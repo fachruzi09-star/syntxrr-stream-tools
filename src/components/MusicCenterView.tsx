@@ -68,8 +68,6 @@ type ActiveTab = 'local_audio' | 'youtube' | 'spotify' | 'queue' | 'history' | '
 
 function formatHistoryProviderLabel(provider: SongRequestProvider): string {
   switch (provider) {
-    case 'audius':
-      return 'Audius';
     case 'youtube_music':
       return 'YouTube Music';
     case 'youtube':
@@ -343,7 +341,7 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
                 : 'bg-[var(--app-surface-muted)] border-[var(--app-border)] text-[var(--app-text-muted)]'
             }`}
           >
-            YT {settings.youtubeApiKey?.trim() ? 'OK' : 'Key?'}
+            YT Music {settings.youtubeApiKey?.trim() ? 'OK' : 'Key?'}
           </span>
           <span
             className={`px-2 py-0.5 rounded-md border font-semibold ${
@@ -428,10 +426,14 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
                 />
                 <span className="truncate">
                   {isSongRequestActive
-                    ? `Song Request (${songRequestState?.playbackStatus || 'idle'})`
+                    ? `Song Request (${songRequestState?.playbackStatus || 'idle'})${
+                        songRequestState?.currentTrack?.platform
+                          ? ` · ${songRequestState.currentTrack.platform}`
+                          : ''
+                      }`
                     : isLocalEngineActive
                     ? 'Local Audio'
-                    : activeQueuePlaying?.source?.toUpperCase() || 'Standby'}
+                    : activeQueuePlaying?.platform || activeQueuePlaying?.source?.toUpperCase() || 'Standby'}
                 </span>
                 <span className="text-[var(--app-border-strong)]">·</span>
                 <span className="text-[var(--app-text-muted)]">{unifiedQueue.length} Antrean</span>
@@ -441,18 +443,33 @@ export const MusicCenterView: React.FC<MusicCenterViewProps> = ({
               </h2>
               <div className="flex items-center gap-2 text-xs text-[var(--app-text-secondary)] truncate">
                 <span className="truncate">{displayArtist}</span>
-                {activeQueuePlaying?.externalUrl && (
+                {((isSongRequestActive && songRequestState?.currentTrack?.externalUrl) ||
+                  activeQueuePlaying?.externalUrl) && (
                   <button
                     type="button"
-                    onClick={() =>
-                      window.open(activeQueuePlaying.externalUrl, '_blank', 'noopener,noreferrer')
-                    }
+                    onClick={() => {
+                      const targetUrl =
+                        (isSongRequestActive ? songRequestState?.currentTrack?.externalUrl : undefined) ||
+                        activeQueuePlaying?.externalUrl;
+                      if (targetUrl) {
+                        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
                     className="text-[11px] text-[var(--app-accent-text)] hover:underline inline-flex items-center gap-1 shrink-0"
                   >
-                    <ExternalLink className="w-3 h-3" /> Tautan
+                    <ExternalLink className="w-3 h-3" />{' '}
+                    {songRequestState?.currentTrack?.provider === 'youtube_music' ||
+                    activeQueuePlaying?.platform === 'YouTube Music'
+                      ? 'YouTube Music'
+                      : 'Tautan'}
                   </button>
                 )}
               </div>
+              {isSongRequestActive && songRequestState?.lastError && (
+                <p className="text-[11px] text-amber-300/90 truncate mt-1">
+                  {songRequestState.lastError}
+                </p>
+              )}
             </div>
           </div>
 
