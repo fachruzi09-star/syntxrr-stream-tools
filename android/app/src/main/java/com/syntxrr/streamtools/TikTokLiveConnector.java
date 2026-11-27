@@ -144,6 +144,26 @@ public final class TikTokLiveConnector {
     private Integer mDiagRoomLookupHttpStatus = null;
     private boolean mDiagHasTtwidCookie = false;
     @Nullable
+    private Integer mDiagCookieWarmUpHomepageHttpStatus = null;
+    @Nullable
+    private Boolean mDiagCookieWarmUpHomepageHasSetCookie = null;
+    @Nullable
+    private Integer mDiagCookieWarmUpHomepageCookieCount = null;
+    @Nullable
+    private Boolean mDiagCookieWarmUpHomepageHasTtwid = null;
+    @Nullable
+    private Boolean mDiagCookieWarmUpLivePageAttempted = null;
+    @Nullable
+    private Integer mDiagCookieWarmUpLivePageHttpStatus = null;
+    @Nullable
+    private Boolean mDiagCookieWarmUpLivePageHasSetCookie = null;
+    @Nullable
+    private Integer mDiagCookieWarmUpLivePageCookieCount = null;
+    @Nullable
+    private Boolean mDiagCookieWarmUpLivePageHasTtwid = null;
+    @NonNull
+    private String mDiagCookieWarmUpResult = "";
+    @Nullable
     private Integer mDiagWebsocketHttpStatus = null;
     @NonNull
     private String mDiagWebsocketAttemptHost = "";
@@ -213,6 +233,46 @@ public final class TikTokLiveConnector {
                 obj.put("roomLookupHttpStatus",
                         mDiagRoomLookupHttpStatus != null ? mDiagRoomLookupHttpStatus : JSONObject.NULL);
                 obj.put("hasTtwidCookie", mDiagHasTtwidCookie);
+                obj.put("cookieWarmUpHomepageHttpStatus",
+                        mDiagCookieWarmUpHomepageHttpStatus != null
+                                ? mDiagCookieWarmUpHomepageHttpStatus
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpHomepageHasSetCookie",
+                        mDiagCookieWarmUpHomepageHasSetCookie != null
+                                ? mDiagCookieWarmUpHomepageHasSetCookie
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpHomepageCookieCount",
+                        mDiagCookieWarmUpHomepageCookieCount != null
+                                ? mDiagCookieWarmUpHomepageCookieCount
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpHomepageHasTtwid",
+                        mDiagCookieWarmUpHomepageHasTtwid != null
+                                ? mDiagCookieWarmUpHomepageHasTtwid
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpLivePageAttempted",
+                        mDiagCookieWarmUpLivePageAttempted != null
+                                ? mDiagCookieWarmUpLivePageAttempted
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpLivePageHttpStatus",
+                        mDiagCookieWarmUpLivePageHttpStatus != null
+                                ? mDiagCookieWarmUpLivePageHttpStatus
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpLivePageHasSetCookie",
+                        mDiagCookieWarmUpLivePageHasSetCookie != null
+                                ? mDiagCookieWarmUpLivePageHasSetCookie
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpLivePageCookieCount",
+                        mDiagCookieWarmUpLivePageCookieCount != null
+                                ? mDiagCookieWarmUpLivePageCookieCount
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpLivePageHasTtwid",
+                        mDiagCookieWarmUpLivePageHasTtwid != null
+                                ? mDiagCookieWarmUpLivePageHasTtwid
+                                : JSONObject.NULL);
+                obj.put("cookieWarmUpResult",
+                        !mDiagCookieWarmUpResult.isEmpty()
+                                ? mDiagCookieWarmUpResult
+                                : JSONObject.NULL);
                 obj.put("websocketHttpStatus",
                         mDiagWebsocketHttpStatus != null ? mDiagWebsocketHttpStatus : JSONObject.NULL);
                 obj.put("websocketAttemptHost", mDiagWebsocketAttemptHost);
@@ -352,6 +412,7 @@ public final class TikTokLiveConnector {
         mDiagStage = initialStage;
         mDiagRoomLookupHttpStatus = null;
         mDiagHasTtwidCookie = false;
+        resetCookieWarmUpDiagnosticsLocked();
         resetWebSocketAttemptDiagnosticsLocked();
         mDiagLastPayloadType = "";
         mDiagLastFrameReceivedAt = null;
@@ -359,6 +420,38 @@ public final class TikTokLiveConnector {
         mDiagLastDecodedEventMethod = "";
         mDiagLastEventReceivedAt = null;
         mDiagLastTransportError = "";
+    }
+
+    private void resetCookieWarmUpDiagnosticsLocked() {
+        mDiagCookieWarmUpHomepageHttpStatus = null;
+        mDiagCookieWarmUpHomepageHasSetCookie = null;
+        mDiagCookieWarmUpHomepageCookieCount = null;
+        mDiagCookieWarmUpHomepageHasTtwid = null;
+        mDiagCookieWarmUpLivePageAttempted = null;
+        mDiagCookieWarmUpLivePageHttpStatus = null;
+        mDiagCookieWarmUpLivePageHasSetCookie = null;
+        mDiagCookieWarmUpLivePageCookieCount = null;
+        mDiagCookieWarmUpLivePageHasTtwid = null;
+        mDiagCookieWarmUpResult = "";
+    }
+
+    private void applyCookieWarmUpDiagnosticsLocked(
+            @Nullable TikTokRoomResolver.CookieWarmUpDiagnostics warmUpDiag
+    ) {
+        if (warmUpDiag == null) {
+            resetCookieWarmUpDiagnosticsLocked();
+            return;
+        }
+        mDiagCookieWarmUpHomepageHttpStatus = warmUpDiag.homepageHttpStatus;
+        mDiagCookieWarmUpHomepageHasSetCookie = warmUpDiag.homepageHasSetCookie;
+        mDiagCookieWarmUpHomepageCookieCount = warmUpDiag.homepageCookieCount;
+        mDiagCookieWarmUpHomepageHasTtwid = warmUpDiag.homepageHasTtwid;
+        mDiagCookieWarmUpLivePageAttempted = warmUpDiag.livePageAttempted;
+        mDiagCookieWarmUpLivePageHttpStatus = warmUpDiag.livePageHttpStatus;
+        mDiagCookieWarmUpLivePageHasSetCookie = warmUpDiag.livePageHasSetCookie;
+        mDiagCookieWarmUpLivePageCookieCount = warmUpDiag.livePageCookieCount;
+        mDiagCookieWarmUpLivePageHasTtwid = warmUpDiag.livePageHasTtwid;
+        mDiagCookieWarmUpResult = warmUpDiag.result;
     }
 
     private void resetWebSocketAttemptDiagnosticsLocked() {
@@ -580,6 +673,7 @@ public final class TikTokLiveConnector {
                     if (isStaleGeneration(gen)) return;
                     mDiagRoomLookupHttpStatus = res.httpStatus;
                     mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
                     mRoomStatus = "not_found";
                 }
                 failSessionIfCurrent(gen, "error", "INVALID_INPUT", res.message);
@@ -589,6 +683,7 @@ public final class TikTokLiveConnector {
                     if (isStaleGeneration(gen)) return;
                     mDiagRoomLookupHttpStatus = res.httpStatus;
                     mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
                     mRoomStatus = "not_found";
                 }
                 failSessionIfCurrent(gen, "error", "ACCOUNT_NOT_FOUND", res.message);
@@ -599,6 +694,7 @@ public final class TikTokLiveConnector {
                     if (isStaleGeneration(gen)) return;
                     mDiagRoomLookupHttpStatus = res.httpStatus;
                     mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
                     tryEuler = canAttemptEulerFallback(mAllowEulerFallback, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey)
                             || "euler".equals(mConnectionMethod);
                 }
@@ -618,6 +714,7 @@ public final class TikTokLiveConnector {
                     if (isStaleGeneration(gen)) return;
                     mDiagRoomLookupHttpStatus = res.httpStatus;
                     mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
                     mDiagLastTransportError = sanitizeDiagnosticReason(res.message, mEulerApiKey, mEulerJwtKey);
                     mRoomStatus = "unreadable";
                     mSessionCookies.putAll(res.sessionCookies);
@@ -639,6 +736,7 @@ public final class TikTokLiveConnector {
                     if (isStaleGeneration(gen)) return;
                     mDiagRoomLookupHttpStatus = res.httpStatus;
                     mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
                     mDiagLastTransportError = sanitizeDiagnosticReason(res.message, mEulerApiKey, mEulerJwtKey);
                     isEuler = "euler".equals(mConnectionMethod);
                 }
@@ -660,6 +758,7 @@ public final class TikTokLiveConnector {
                     mSessionCookies = new LinkedHashMap<>(res.sessionCookies);
                     mDiagRoomLookupHttpStatus = res.httpStatus;
                     mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
                     mDiagLastTransportError = "";
                     mDiagStage = "room_resolved";
                     if (roomChanged) {

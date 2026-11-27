@@ -10,6 +10,7 @@ import type {
   TikTokConnectionMethod,
   TikTokConnectionState,
   TikTokConnectorStatus,
+  TikTokCookieWarmUpResult,
   TikTokDiagnosticStage,
   TikTokHandshakeBodyKind,
   TikTokHandshakeResponseClass,
@@ -188,6 +189,14 @@ const ALLOWED_RESPONSE_CLASSES: ReadonlySet<TikTokHandshakeResponseClass> = new 
   'unknown',
 ]);
 
+const ALLOWED_COOKIE_WARMUP_RESULTS: ReadonlySet<TikTokCookieWarmUpResult> = new Set([
+  'TTWID_FOUND_ON_HOMEPAGE',
+  'TTWID_FOUND_ON_LIVE_PAGE',
+  'TTWID_NOT_FOUND',
+  'LIVE_PAGE_NOT_ATTEMPTED',
+  'WARMUP_FAILED',
+]);
+
 function sanitizeDiagnosticHeaderValue(raw: unknown, maxLen: number = 128): string | null {
   if (typeof raw !== 'string') return null;
   const cleaned = sanitizeDiagnosticErrorMessage(raw);
@@ -249,6 +258,16 @@ export function extractDiagnosticsFromNativePayload(
     'diagnosticStage',
     'roomLookupHttpStatus',
     'hasTtwidCookie',
+    'cookieWarmUpHomepageHttpStatus',
+    'cookieWarmUpHomepageHasSetCookie',
+    'cookieWarmUpHomepageCookieCount',
+    'cookieWarmUpHomepageHasTtwid',
+    'cookieWarmUpLivePageAttempted',
+    'cookieWarmUpLivePageHttpStatus',
+    'cookieWarmUpLivePageHasSetCookie',
+    'cookieWarmUpLivePageCookieCount',
+    'cookieWarmUpLivePageHasTtwid',
+    'cookieWarmUpResult',
     'websocketHttpStatus',
     'websocketAttemptHost',
     'websocketContentType',
@@ -288,11 +307,40 @@ export function extractDiagnosticsFromNativePayload(
   const rawBodyKind = pick('websocketBodyKind');
   const rawResponseClass = pick('websocketResponseClass');
   const rawHasAccept = pick('websocketHasAcceptHeader');
+  const rawHomepageSetCookie = pick('cookieWarmUpHomepageHasSetCookie');
+  const rawHomepageCookieCount = toFiniteIntegerOrNull(pick('cookieWarmUpHomepageCookieCount'));
+  const rawHomepageHasTtwid = pick('cookieWarmUpHomepageHasTtwid');
+  const rawLivePageAttempted = pick('cookieWarmUpLivePageAttempted');
+  const rawLivePageSetCookie = pick('cookieWarmUpLivePageHasSetCookie');
+  const rawLivePageCookieCount = toFiniteIntegerOrNull(pick('cookieWarmUpLivePageCookieCount'));
+  const rawLivePageHasTtwid = pick('cookieWarmUpLivePageHasTtwid');
+  const rawWarmUpResult = pick('cookieWarmUpResult');
 
   return {
     diagnosticStage,
     roomLookupHttpStatus: toFiniteIntegerOrNull(pick('roomLookupHttpStatus')),
     hasTtwidCookie: pick('hasTtwidCookie') === true,
+    cookieWarmUpHomepageHttpStatus: toFiniteIntegerOrNull(pick('cookieWarmUpHomepageHttpStatus')),
+    cookieWarmUpHomepageHasSetCookie:
+      typeof rawHomepageSetCookie === 'boolean' ? rawHomepageSetCookie : null,
+    cookieWarmUpHomepageCookieCount:
+      rawHomepageCookieCount !== null ? Math.max(0, rawHomepageCookieCount) : null,
+    cookieWarmUpHomepageHasTtwid:
+      typeof rawHomepageHasTtwid === 'boolean' ? rawHomepageHasTtwid : null,
+    cookieWarmUpLivePageAttempted:
+      typeof rawLivePageAttempted === 'boolean' ? rawLivePageAttempted : null,
+    cookieWarmUpLivePageHttpStatus: toFiniteIntegerOrNull(pick('cookieWarmUpLivePageHttpStatus')),
+    cookieWarmUpLivePageHasSetCookie:
+      typeof rawLivePageSetCookie === 'boolean' ? rawLivePageSetCookie : null,
+    cookieWarmUpLivePageCookieCount:
+      rawLivePageCookieCount !== null ? Math.max(0, rawLivePageCookieCount) : null,
+    cookieWarmUpLivePageHasTtwid:
+      typeof rawLivePageHasTtwid === 'boolean' ? rawLivePageHasTtwid : null,
+    cookieWarmUpResult:
+      typeof rawWarmUpResult === 'string' &&
+      ALLOWED_COOKIE_WARMUP_RESULTS.has(rawWarmUpResult as TikTokCookieWarmUpResult)
+        ? (rawWarmUpResult as TikTokCookieWarmUpResult)
+        : null,
     websocketHttpStatus: toFiniteIntegerOrNull(pick('websocketHttpStatus')),
     websocketAttemptHost: sanitizeDiagnosticIdentifier(pick('websocketAttemptHost')),
     websocketContentType: sanitizeDiagnosticHeaderValue(pick('websocketContentType')),

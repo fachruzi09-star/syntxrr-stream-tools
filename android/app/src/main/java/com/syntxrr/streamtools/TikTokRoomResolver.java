@@ -85,6 +85,51 @@ public final class TikTokRoomResolver {
         NETWORK_ERROR
     }
 
+    public static final class CookieWarmUpDiagnostics {
+        @Nullable
+        public final Integer homepageHttpStatus;
+        public final boolean homepageHasSetCookie;
+        public final int homepageCookieCount;
+        public final boolean homepageHasTtwid;
+        public final boolean livePageAttempted;
+        @Nullable
+        public final Integer livePageHttpStatus;
+        @Nullable
+        public final Boolean livePageHasSetCookie;
+        @Nullable
+        public final Integer livePageCookieCount;
+        @Nullable
+        public final Boolean livePageHasTtwid;
+        @NonNull
+        public final String result;
+
+        public CookieWarmUpDiagnostics(
+                @Nullable Integer homepageHttpStatus,
+                boolean homepageHasSetCookie,
+                int homepageCookieCount,
+                boolean homepageHasTtwid,
+                boolean livePageAttempted,
+                @Nullable Integer livePageHttpStatus,
+                @Nullable Boolean livePageHasSetCookie,
+                @Nullable Integer livePageCookieCount,
+                @Nullable Boolean livePageHasTtwid,
+                @NonNull String result
+        ) {
+            this.homepageHttpStatus = homepageHttpStatus;
+            this.homepageHasSetCookie = homepageHasSetCookie;
+            this.homepageCookieCount = Math.max(0, homepageCookieCount);
+            this.homepageHasTtwid = homepageHasTtwid;
+            this.livePageAttempted = livePageAttempted;
+            this.livePageHttpStatus = livePageHttpStatus;
+            this.livePageHasSetCookie = livePageHasSetCookie;
+            this.livePageCookieCount = livePageCookieCount != null
+                    ? Math.max(0, livePageCookieCount)
+                    : null;
+            this.livePageHasTtwid = livePageHasTtwid;
+            this.result = result;
+        }
+    }
+
     public static final class Result {
         @NonNull
         public final Status status;
@@ -101,6 +146,8 @@ public final class TikTokRoomResolver {
         public final String message;
         @NonNull
         public final Map<String, String> sessionCookies;
+        @Nullable
+        public final CookieWarmUpDiagnostics cookieWarmUpDiagnostics;
 
         public Result(
                 @NonNull Status status,
@@ -112,6 +159,30 @@ public final class TikTokRoomResolver {
                 @NonNull String message,
                 @Nullable Map<String, String> sessionCookies
         ) {
+            this(
+                    status,
+                    normalizedUsername,
+                    roomId,
+                    roomTitle,
+                    liveRoomStatus,
+                    httpStatus,
+                    message,
+                    sessionCookies,
+                    null
+            );
+        }
+
+        public Result(
+                @NonNull Status status,
+                @NonNull String normalizedUsername,
+                @NonNull String roomId,
+                @NonNull String roomTitle,
+                @Nullable Integer liveRoomStatus,
+                int httpStatus,
+                @NonNull String message,
+                @Nullable Map<String, String> sessionCookies,
+                @Nullable CookieWarmUpDiagnostics cookieWarmUpDiagnostics
+        ) {
             this.status = status;
             this.normalizedUsername = normalizedUsername;
             this.roomId = roomId;
@@ -122,6 +193,7 @@ public final class TikTokRoomResolver {
             this.sessionCookies = sessionCookies != null
                     ? Collections.unmodifiableMap(new LinkedHashMap<>(sessionCookies))
                     : Collections.emptyMap();
+            this.cookieWarmUpDiagnostics = cookieWarmUpDiagnostics;
         }
     }
 
@@ -158,6 +230,16 @@ public final class TikTokRoomResolver {
     interface LiveHtmlFallback {
         @Nullable
         Result resolve(@NonNull String normalizedUsername, @NonNull Map<String, String> cookies);
+    }
+
+    interface CookieWarmUpRequester {
+        @NonNull
+        HttpTextResponse executeGet(
+                @NonNull String url,
+                @NonNull String acceptHeader,
+                @NonNull Map<String, String> cookies,
+                int maxBytes
+        ) throws IOException;
     }
 
     private TikTokRoomResolver() {}
@@ -356,15 +438,59 @@ public final class TikTokRoomResolver {
         }
     }
 
-    private static final class HttpTextResponse {
+    static final class HttpTextResponse {
         final int httpStatus;
         @NonNull
         final String body;
+        final boolean hadSetCookieHeader;
+        final int receivedCookieCount;
 
         HttpTextResponse(int httpStatus, @NonNull String body) {
+            this(httpStatus, body, false, 0);
+        }
+
+        HttpTextResponse(
+                int httpStatus,
+                @NonNull String body,
+                boolean hadSetCookieHeader,
+                int receivedCookieCount
+        ) {
             this.httpStatus = httpStatus;
             this.body = body;
+            this.hadSetCookieHeader = hadSetCookieHeader;
+            this.receivedCookieCount = Math.max(0, receivedCookieCount);
         }
+    }
+
+    static final class CookieWarmUpOutcome {
+        @NonNull
+        final Map<String, String> cookies;
+        @NonNull
+        final CookieWarmUpDiagnostics diagnostics;
+
+        CookieWarmUpOutcome(
+                @NonNull Map<String, String> cookies,
+                @NonNull CookieWarmUpDiagnostics diagnostics
+        ) {
+            this.cookies = cookies;
+            this.diagnostics = diagnostics;
+        }
+    }
+
+    private static boolean hasSetCookieHeader(@Nullable Map<String, List<String>> headers) {
+        if (headers == null || headers.isEmpty()) return false;
+        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || !"set-cookie".equalsIgnoreCase(key)) continue;
+            List<String> values = entry.getValue();
+            if (values == null) continue;
+            for (String v : values) {
+                if (v != null && !v.trim().isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @NonNull
@@ -375,6 +501,9 @@ public final class TikTokRoomResolver {
             int maxBytes
     ) throws IOException {
         String currentUrl = initialUrl;
+        boolean sawSetCookieHeader = false;
+        Map<String, String> stageReceivedCookies = new LinkedHashMap<>();
+
         for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
             HttpURLConnection conn = null;
             try {
@@ -390,17 +519,35 @@ public final class TikTokRoomResolver {
                 applyBrowserHeaders(conn, acceptHeader, cookies);
 
                 int httpCode = conn.getResponseCode();
-                cookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
+                Map<String, List<String>> headerFields = conn.getHeaderFields();
+                if (hasSetCookieHeader(headerFields)) {
+                    sawSetCookieHeader = true;
+                }
+                Map<String, String> parsed = parseSetCookieHeaders(headerFields);
+                if (!parsed.isEmpty()) {
+                    stageReceivedCookies.putAll(parsed);
+                    cookies.putAll(parsed);
+                }
 
                 if (isRedirectStatus(httpCode) && redirect < MAX_REDIRECTS) {
                     String location = conn.getHeaderField("Location");
                     drainStreamQuietly(httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream());
                     if (location == null || location.trim().isEmpty()) {
-                        return new HttpTextResponse(httpCode, "");
+                        return new HttpTextResponse(
+                                httpCode,
+                                "",
+                                sawSetCookieHeader || !stageReceivedCookies.isEmpty(),
+                                stageReceivedCookies.size()
+                        );
                     }
                     URL nextUrl = new URL(url, location.trim());
                     if (!"https".equalsIgnoreCase(nextUrl.getProtocol())) {
-                        return new HttpTextResponse(httpCode, "");
+                        return new HttpTextResponse(
+                                httpCode,
+                                "",
+                                sawSetCookieHeader || !stageReceivedCookies.isEmpty(),
+                                stageReceivedCookies.size()
+                        );
                     }
                     currentUrl = nextUrl.toString();
                     continue;
@@ -408,7 +555,12 @@ public final class TikTokRoomResolver {
 
                 InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
                 String body = stream != null ? readBoundedUtf8(stream, maxBytes) : "";
-                return new HttpTextResponse(httpCode, body);
+                return new HttpTextResponse(
+                        httpCode,
+                        body,
+                        sawSetCookieHeader || !stageReceivedCookies.isEmpty(),
+                        stageReceivedCookies.size()
+                );
             } finally {
                 if (conn != null) {
                     conn.disconnect();
@@ -438,38 +590,110 @@ public final class TikTokRoomResolver {
      * no TikTok-app session cookies are read, logged, or persisted.
      */
     @NonNull
-    private static Map<String, String> fetchAnonymousDeviceCookies(
+    static CookieWarmUpOutcome fetchAnonymousDeviceCookiesWithDiagnostics(
             @NonNull String normalizedUsername,
-            @NonNull String deviceId
+            @NonNull String deviceId,
+            @NonNull CookieWarmUpRequester requester
     ) {
         final String htmlAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
         final int warmUpMaxBytes = 64 * 1024;
         Map<String, String> cookies = new LinkedHashMap<>();
+
+        Integer homepageHttpStatus = 0;
+        boolean homepageHasSetCookie = false;
+        int homepageCookieCount = 0;
         try {
-            executeGetWithCookieCapture(
+            HttpTextResponse homepageResp = requester.executeGet(
                     "https://www.tiktok.com/",
                     htmlAccept,
                     cookies,
                     warmUpMaxBytes
             );
+            homepageHttpStatus = homepageResp.httpStatus;
+            homepageHasSetCookie = homepageResp.hadSetCookieHeader || homepageResp.receivedCookieCount > 0;
+            homepageCookieCount = homepageResp.receivedCookieCount;
         } catch (Exception ignored) {
             // Cookie warm-up is opportunistic; room resolution still proceeds without it.
         }
+        boolean homepageHasTtwid = hasTtwidCookie(cookies);
 
-        if (!hasTtwidCookie(cookies) && !normalizedUsername.isEmpty()) {
+        boolean livePageAttempted = false;
+        Integer livePageHttpStatus = null;
+        Boolean livePageHasSetCookie = null;
+        Integer livePageCookieCount = null;
+        Boolean livePageHasTtwid = null;
+
+        if (!homepageHasTtwid && !normalizedUsername.isEmpty()) {
+            livePageAttempted = true;
+            livePageHttpStatus = 0;
+            livePageHasSetCookie = false;
+            livePageCookieCount = 0;
             try {
                 String livePageUrl = buildLivePageUrl(normalizedUsername, deviceId);
-                executeGetWithCookieCapture(
+                HttpTextResponse livePageResp = requester.executeGet(
                         livePageUrl,
                         htmlAccept,
                         cookies,
                         warmUpMaxBytes
                 );
+                livePageHttpStatus = livePageResp.httpStatus;
+                livePageHasSetCookie = livePageResp.hadSetCookieHeader || livePageResp.receivedCookieCount > 0;
+                livePageCookieCount = livePageResp.receivedCookieCount;
             } catch (Exception ignored) {
                 // Single LIVE page warm-up is opportunistic; room resolution still proceeds without it.
             }
+            livePageHasTtwid = hasTtwidCookie(cookies);
         }
-        return cookies;
+
+        String finalResult = determineCookieWarmUpResult(
+                homepageHttpStatus,
+                homepageHasTtwid,
+                livePageAttempted,
+                livePageHttpStatus,
+                livePageHasTtwid
+        );
+        CookieWarmUpDiagnostics diagnostics = new CookieWarmUpDiagnostics(
+                homepageHttpStatus,
+                homepageHasSetCookie,
+                homepageCookieCount,
+                homepageHasTtwid,
+                livePageAttempted,
+                livePageHttpStatus,
+                livePageHasSetCookie,
+                livePageCookieCount,
+                livePageHasTtwid,
+                finalResult
+        );
+        return new CookieWarmUpOutcome(cookies, diagnostics);
+    }
+
+    @NonNull
+    static String determineCookieWarmUpResult(
+            @Nullable Integer homepageHttpStatus,
+            boolean homepageHasTtwid,
+            boolean livePageAttempted,
+            @Nullable Integer livePageHttpStatus,
+            @Nullable Boolean livePageHasTtwid
+    ) {
+        if (homepageHasTtwid) {
+            return "TTWID_FOUND_ON_HOMEPAGE";
+        }
+        boolean homepageSucceeded = homepageHttpStatus != null
+                && homepageHttpStatus >= 200
+                && homepageHttpStatus < 300;
+        if (!livePageAttempted) {
+            return homepageSucceeded ? "LIVE_PAGE_NOT_ATTEMPTED" : "WARMUP_FAILED";
+        }
+        if (Boolean.TRUE.equals(livePageHasTtwid)) {
+            return "TTWID_FOUND_ON_LIVE_PAGE";
+        }
+        boolean livePageSucceeded = livePageHttpStatus != null
+                && livePageHttpStatus >= 200
+                && livePageHttpStatus < 300;
+        if (!livePageSucceeded) {
+            return "WARMUP_FAILED";
+        }
+        return "TTWID_NOT_FOUND";
     }
 
     private static boolean hasTtwidCookie(@Nullable Map<String, String> cookies) {
@@ -481,6 +705,24 @@ public final class TikTokRoomResolver {
             }
         }
         return false;
+    }
+
+    @NonNull
+    private static Result withWarmUpDiagnostics(
+            @NonNull Result result,
+            @NonNull CookieWarmUpDiagnostics diagnostics
+    ) {
+        return new Result(
+                result.status,
+                result.normalizedUsername,
+                result.roomId,
+                result.roomTitle,
+                result.liveRoomStatus,
+                result.httpStatus,
+                result.message,
+                result.sessionCookies,
+                diagnostics
+        );
     }
 
     @NonNull
@@ -500,12 +742,28 @@ public final class TikTokRoomResolver {
         }
 
         String sessionDeviceId = generateRandomDeviceId();
-        Map<String, String> cookies = new LinkedHashMap<>(
-                fetchAnonymousDeviceCookies(normalized, sessionDeviceId)
+        CookieWarmUpOutcome warmUp = fetchAnonymousDeviceCookiesWithDiagnostics(
+                normalized,
+                sessionDeviceId,
+                TikTokRoomResolver::executeGetWithCookieCapture
         );
+        Map<String, String> cookies = new LinkedHashMap<>(warmUp.cookies);
         LiveHtmlFallback htmlFallbackRunner = (user, cookieJar) ->
                 resolveViaLiveHtmlPage(user, cookieJar, sessionDeviceId);
 
+        return withWarmUpDiagnostics(
+                resolveRoomLookupWithCookies(normalized, sessionDeviceId, cookies, htmlFallbackRunner),
+                warmUp.diagnostics
+        );
+    }
+
+    @NonNull
+    private static Result resolveRoomLookupWithCookies(
+            @NonNull String normalized,
+            @NonNull String sessionDeviceId,
+            @NonNull Map<String, String> cookies,
+            @NonNull LiveHtmlFallback htmlFallbackRunner
+    ) {
         try {
             String urlStr = buildRoomLookupUrl(normalized, sessionDeviceId);
             HttpTextResponse response = executeGetWithCookieCapture(

@@ -354,10 +354,27 @@ export type TikTokHandshakeResponseClass =
   | 'protocol_rejected'
   | 'unknown';
 
+export type TikTokCookieWarmUpResult =
+  | 'TTWID_FOUND_ON_HOMEPAGE'
+  | 'TTWID_FOUND_ON_LIVE_PAGE'
+  | 'TTWID_NOT_FOUND'
+  | 'LIVE_PAGE_NOT_ATTEMPTED'
+  | 'WARMUP_FAILED';
+
 export interface TikTokConnectionDiagnostics {
   diagnosticStage: TikTokDiagnosticStage;
   roomLookupHttpStatus: number | null;
   hasTtwidCookie: boolean;
+  cookieWarmUpHomepageHttpStatus?: number | null;
+  cookieWarmUpHomepageHasSetCookie?: boolean | null;
+  cookieWarmUpHomepageCookieCount?: number | null;
+  cookieWarmUpHomepageHasTtwid?: boolean | null;
+  cookieWarmUpLivePageAttempted?: boolean | null;
+  cookieWarmUpLivePageHttpStatus?: number | null;
+  cookieWarmUpLivePageHasSetCookie?: boolean | null;
+  cookieWarmUpLivePageCookieCount?: number | null;
+  cookieWarmUpLivePageHasTtwid?: boolean | null;
+  cookieWarmUpResult?: TikTokCookieWarmUpResult | null;
   websocketHttpStatus: number | null;
   websocketAttemptHost?: string | null;
   websocketContentType?: string | null;

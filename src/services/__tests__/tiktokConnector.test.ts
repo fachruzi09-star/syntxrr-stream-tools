@@ -1107,15 +1107,111 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
     'Redirect sanitizer drops userinfo, query, and fragment'
   );
 
+  // 8b. Anonymous cookie warm-up diagnostics extraction & allowlist checks
+  hooks.stateCb?.({
+    state: 'connecting_direct',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Connecting direct',
+    diagnosticStage: 'room_resolved',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: true,
+    cookieWarmUpHomepageHttpStatus: 200,
+    cookieWarmUpHomepageHasSetCookie: true,
+    cookieWarmUpHomepageCookieCount: 2,
+    cookieWarmUpHomepageHasTtwid: true,
+    cookieWarmUpLivePageAttempted: false,
+    cookieWarmUpLivePageHttpStatus: null,
+    cookieWarmUpLivePageHasSetCookie: null,
+    cookieWarmUpLivePageCookieCount: null,
+    cookieWarmUpLivePageHasTtwid: null,
+    cookieWarmUpResult: 'TTWID_FOUND_ON_HOMEPAGE',
+    roomEntryFrameSent: false,
+    roomEntryConfirmed: false,
+    decodedEventCount: 0,
+  });
+  const homepageWarmUpDiag = connector.getStatus().diagnostics;
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpHomepageHttpStatus, 200, 'Homepage HTTP 200 forwarded');
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpHomepageHasSetCookie, true, 'Homepage Set-Cookie boolean forwarded');
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpHomepageCookieCount, 2, 'Homepage cookie count forwarded');
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpHomepageHasTtwid, true, 'Homepage ttwid boolean forwarded');
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpLivePageAttempted, false, 'LIVE page not attempted forwarded');
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpLivePageHttpStatus, null, 'LIVE page HTTP stays null when skipped');
+  assertEqual(homepageWarmUpDiag?.cookieWarmUpResult, 'TTWID_FOUND_ON_HOMEPAGE', 'Homepage warm-up result forwarded');
+
+  hooks.stateCb?.({
+    state: 'reconnecting',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Reconnecting',
+    diagnosticStage: 'reconnecting',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: false,
+    cookieWarmUpHomepageHttpStatus: 200,
+    cookieWarmUpHomepageHasSetCookie: true,
+    cookieWarmUpHomepageCookieCount: 1,
+    cookieWarmUpHomepageHasTtwid: false,
+    cookieWarmUpLivePageAttempted: true,
+    cookieWarmUpLivePageHttpStatus: 200,
+    cookieWarmUpLivePageHasSetCookie: false,
+    cookieWarmUpLivePageCookieCount: 0,
+    cookieWarmUpLivePageHasTtwid: false,
+    cookieWarmUpResult: 'TTWID_NOT_FOUND',
+  });
+  const liveWarmUpDiag = connector.getStatus().diagnostics;
+  assertEqual(liveWarmUpDiag?.cookieWarmUpLivePageAttempted, true, 'LIVE page attempted forwarded');
+  assertEqual(liveWarmUpDiag?.cookieWarmUpLivePageHttpStatus, 200, 'LIVE page HTTP forwarded');
+  assertEqual(liveWarmUpDiag?.cookieWarmUpLivePageHasSetCookie, false, 'LIVE page Set-Cookie forwarded');
+  assertEqual(liveWarmUpDiag?.cookieWarmUpLivePageCookieCount, 0, 'LIVE page cookie count forwarded');
+  assertEqual(liveWarmUpDiag?.cookieWarmUpLivePageHasTtwid, false, 'LIVE page ttwid forwarded');
+  assertEqual(liveWarmUpDiag?.cookieWarmUpResult, 'TTWID_NOT_FOUND', 'TTWID_NOT_FOUND forwarded');
+
+  hooks.stateCb?.({
+    state: 'reconnecting',
+    transport: 'direct_ws',
+    username: 'diag_streamer',
+    roomId: '777888',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Reconnecting',
+    diagnosticStage: 'reconnecting',
+    cookieWarmUpResult: 'ttwid=secret_cookie_should_never_pass' as any,
+  });
+  assertEqual(
+    connector.getStatus().diagnostics?.cookieWarmUpResult,
+    null,
+    'Unexpected non-allowlisted cookieWarmUpResult must be rejected as null'
+  );
+
   // 9. Native Java & IntegrationsView static diagnostic contract checks
   const javaSrc = readFileSync(
     resolve(process.cwd(), 'android/app/src/main/java/com/syntxrr/streamtools/TikTokLiveConnector.java'),
+    'utf8'
+  );
+  const resolverSrc = readFileSync(
+    resolve(process.cwd(), 'android/app/src/main/java/com/syntxrr/streamtools/TikTokRoomResolver.java'),
     'utf8'
   );
   const requiredJavaKeys = [
     '"diagnosticStage"',
     '"roomLookupHttpStatus"',
     '"hasTtwidCookie"',
+    '"cookieWarmUpHomepageHttpStatus"',
+    '"cookieWarmUpHomepageHasSetCookie"',
+    '"cookieWarmUpHomepageCookieCount"',
+    '"cookieWarmUpHomepageHasTtwid"',
+    '"cookieWarmUpLivePageAttempted"',
+    '"cookieWarmUpLivePageHttpStatus"',
+    '"cookieWarmUpLivePageHasSetCookie"',
+    '"cookieWarmUpLivePageCookieCount"',
+    '"cookieWarmUpLivePageHasTtwid"',
+    '"cookieWarmUpResult"',
     '"websocketHttpStatus"',
     '"websocketAttemptHost"',
     '"websocketContentType"',
@@ -1139,6 +1235,16 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
   ];
   for (const key of requiredJavaKeys) {
     assert(javaSrc.includes(key), `TikTokLiveConnector.java must emit ${key}`);
+  }
+  const requiredWarmUpResults = [
+    '"TTWID_FOUND_ON_HOMEPAGE"',
+    '"TTWID_FOUND_ON_LIVE_PAGE"',
+    '"TTWID_NOT_FOUND"',
+    '"LIVE_PAGE_NOT_ATTEMPTED"',
+    '"WARMUP_FAILED"',
+  ];
+  for (const resCode of requiredWarmUpResults) {
+    assert(resolverSrc.includes(resCode), `TikTokRoomResolver.java must support ${resCode}`);
   }
   const requiredStages = [
     '"idle"',
@@ -1171,6 +1277,25 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
     integrationsSrc.includes('Diagnostik Handshake WebSocket'),
     'IntegrationsView must include Diagnostik Handshake WebSocket section'
   );
+  assert(
+    integrationsSrc.includes('Diagnostik Cookie Warm-up'),
+    'IntegrationsView must include Diagnostik Cookie Warm-up section'
+  );
+  const requiredCookieWarmUpLabels = [
+    'Homepage HTTP',
+    'Homepage Set-Cookie',
+    'Homepage Cookie Count',
+    'Homepage ttwid',
+    'LIVE Page HTTP',
+    'LIVE Page Set-Cookie',
+    'LIVE Page Cookie Count',
+    'LIVE Page ttwid',
+    'Cookie Warm-up Result',
+    'Not attempted',
+  ];
+  for (const label of requiredCookieWarmUpLabels) {
+    assert(integrationsSrc.includes(label), `IntegrationsView must include ${label}`);
+  }
   assert(
     integrationsSrc.includes('Host percobaan'),
     'IntegrationsView must include Host percobaan'

@@ -11,6 +11,7 @@ import type {
   TikTokConnectionDiagnostics,
   TikTokConnectionMethod,
   TikTokConnectionState,
+  TikTokCookieWarmUpResult,
   TikTokDiagnosticStage,
   TikTokHandshakeBodyKind,
   TikTokHandshakeResponseClass,
@@ -155,6 +156,16 @@ export interface NativeTikTokStatePayload {
   diagnosticStage?: TikTokDiagnosticStage;
   roomLookupHttpStatus?: number | null;
   hasTtwidCookie?: boolean;
+  cookieWarmUpHomepageHttpStatus?: number | null;
+  cookieWarmUpHomepageHasSetCookie?: boolean | null;
+  cookieWarmUpHomepageCookieCount?: number | null;
+  cookieWarmUpHomepageHasTtwid?: boolean | null;
+  cookieWarmUpLivePageAttempted?: boolean | null;
+  cookieWarmUpLivePageHttpStatus?: number | null;
+  cookieWarmUpLivePageHasSetCookie?: boolean | null;
+  cookieWarmUpLivePageCookieCount?: number | null;
+  cookieWarmUpLivePageHasTtwid?: boolean | null;
+  cookieWarmUpResult?: TikTokCookieWarmUpResult | null;
   websocketHttpStatus?: number | null;
   websocketAttemptHost?: string | null;
   websocketContentType?: string | null;

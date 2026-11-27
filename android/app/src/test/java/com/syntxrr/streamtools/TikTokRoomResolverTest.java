@@ -2,11 +2,14 @@ package com.syntxrr.streamtools;
 
 import org.junit.Test;
 
+import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -287,6 +290,139 @@ public class TikTokRoomResolverTest {
         assertFalse(errorResult.message.contains("msToken"));
         assertFalse(errorResult.message.contains("secret_ms_token_4321"));
         assertEquals("1%7Csecret_ttwid_token_98765", errorResult.sessionCookies.get("ttwid"));
+    }
+
+    @Test
+    public void cookieWarmUpDiagnosticsReportTtwidFoundOnHomepageWithoutLivePageCall() {
+        List<String> requestedUrls = new ArrayList<>();
+        TikTokRoomResolver.CookieWarmUpOutcome outcome =
+                TikTokRoomResolver.fetchAnonymousDeviceCookiesWithDiagnostics(
+                        ".jejeangela",
+                        "7345678901234567890",
+                        (url, accept, cookies, maxBytes) -> {
+                            requestedUrls.add(url);
+                            cookies.put("ttwid", "1%7Chomepage_secret_ttwid");
+                            cookies.put("tt_csrf_token", "csrf_secret");
+                            return new TikTokRoomResolver.HttpTextResponse(200, "<html></html>", true, 2);
+                        }
+                );
+
+        assertEquals(1, requestedUrls.size());
+        assertEquals("https://www.tiktok.com/", requestedUrls.get(0));
+        assertEquals(Integer.valueOf(200), outcome.diagnostics.homepageHttpStatus);
+        assertTrue(outcome.diagnostics.homepageHasSetCookie);
+        assertEquals(2, outcome.diagnostics.homepageCookieCount);
+        assertTrue(outcome.diagnostics.homepageHasTtwid);
+        assertFalse(outcome.diagnostics.livePageAttempted);
+        assertNull(outcome.diagnostics.livePageHttpStatus);
+        assertNull(outcome.diagnostics.livePageHasSetCookie);
+        assertNull(outcome.diagnostics.livePageCookieCount);
+        assertNull(outcome.diagnostics.livePageHasTtwid);
+        assertEquals("TTWID_FOUND_ON_HOMEPAGE", outcome.diagnostics.result);
+    }
+
+    @Test
+    public void cookieWarmUpDiagnosticsFallbackOnceToLivePageAndMergeCookieJar() {
+        List<String> requestedUrls = new ArrayList<>();
+        List<Boolean> livePageSawHomepageCookie = new ArrayList<>();
+        TikTokRoomResolver.CookieWarmUpOutcome outcome =
+                TikTokRoomResolver.fetchAnonymousDeviceCookiesWithDiagnostics(
+                        ".jejeangela",
+                        "7345678901234567890",
+                        (url, accept, cookies, maxBytes) -> {
+                            requestedUrls.add(url);
+                            if ("https://www.tiktok.com/".equals(url)) {
+                                cookies.put("msToken", "home_ms_secret");
+                                return new TikTokRoomResolver.HttpTextResponse(200, "<html></html>", true, 1);
+                            }
+                            livePageSawHomepageCookie.add(cookies.containsKey("msToken"));
+                            cookies.put("ttwid", "1%7Clive_page_secret_ttwid");
+                            return new TikTokRoomResolver.HttpTextResponse(200, "<html></html>", true, 1);
+                        }
+                );
+
+        assertEquals(2, requestedUrls.size());
+        assertEquals("https://www.tiktok.com/", requestedUrls.get(0));
+        assertTrue(requestedUrls.get(1).startsWith("https://www.tiktok.com/@.jejeangela/live?"));
+        assertEquals(1, livePageSawHomepageCookie.size());
+        assertTrue(livePageSawHomepageCookie.get(0));
+
+        assertEquals(Integer.valueOf(200), outcome.diagnostics.homepageHttpStatus);
+        assertTrue(outcome.diagnostics.homepageHasSetCookie);
+        assertEquals(1, outcome.diagnostics.homepageCookieCount);
+        assertFalse(outcome.diagnostics.homepageHasTtwid);
+
+        assertTrue(outcome.diagnostics.livePageAttempted);
+        assertEquals(Integer.valueOf(200), outcome.diagnostics.livePageHttpStatus);
+        assertEquals(Boolean.TRUE, outcome.diagnostics.livePageHasSetCookie);
+        assertEquals(Integer.valueOf(1), outcome.diagnostics.livePageCookieCount);
+        assertEquals(Boolean.TRUE, outcome.diagnostics.livePageHasTtwid);
+        assertEquals("TTWID_FOUND_ON_LIVE_PAGE", outcome.diagnostics.result);
+        assertEquals("home_ms_secret", outcome.cookies.get("msToken"));
+        assertEquals("1%7Clive_page_secret_ttwid", outcome.cookies.get("ttwid"));
+    }
+
+    @Test
+    public void cookieWarmUpDiagnosticsReportTtwidNotFoundWhenBothPagesReturn200WithoutTtwid() {
+        List<String> requestedUrls = new ArrayList<>();
+        TikTokRoomResolver.CookieWarmUpOutcome outcome =
+                TikTokRoomResolver.fetchAnonymousDeviceCookiesWithDiagnostics(
+                        ".jejeangela",
+                        "7345678901234567890",
+                        (url, accept, cookies, maxBytes) -> {
+                            requestedUrls.add(url);
+                            if ("https://www.tiktok.com/".equals(url)) {
+                                cookies.put("tt_csrf_token", "csrf_1");
+                                return new TikTokRoomResolver.HttpTextResponse(200, "<html></html>", true, 1);
+                            }
+                            return new TikTokRoomResolver.HttpTextResponse(200, "<html></html>", false, 0);
+                        }
+                );
+
+        assertEquals(2, requestedUrls.size());
+        assertEquals(Integer.valueOf(200), outcome.diagnostics.homepageHttpStatus);
+        assertTrue(outcome.diagnostics.homepageHasSetCookie);
+        assertEquals(1, outcome.diagnostics.homepageCookieCount);
+        assertFalse(outcome.diagnostics.homepageHasTtwid);
+        assertTrue(outcome.diagnostics.livePageAttempted);
+        assertEquals(Integer.valueOf(200), outcome.diagnostics.livePageHttpStatus);
+        assertEquals(Boolean.FALSE, outcome.diagnostics.livePageHasSetCookie);
+        assertEquals(Integer.valueOf(0), outcome.diagnostics.livePageCookieCount);
+        assertEquals(Boolean.FALSE, outcome.diagnostics.livePageHasTtwid);
+        assertEquals("TTWID_NOT_FOUND", outcome.diagnostics.result);
+    }
+
+    @Test
+    public void cookieWarmUpDiagnosticsHandleLivePageNotAttemptedAndWarmupFailedTruthfully() {
+        TikTokRoomResolver.CookieWarmUpOutcome notAttempted =
+                TikTokRoomResolver.fetchAnonymousDeviceCookiesWithDiagnostics(
+                        "",
+                        "7345678901234567890",
+                        (url, accept, cookies, maxBytes) ->
+                                new TikTokRoomResolver.HttpTextResponse(200, "<html></html>", false, 0)
+                );
+        assertFalse(notAttempted.diagnostics.livePageAttempted);
+        assertNull(notAttempted.diagnostics.livePageHttpStatus);
+        assertEquals("LIVE_PAGE_NOT_ATTEMPTED", notAttempted.diagnostics.result);
+
+        TikTokRoomResolver.CookieWarmUpOutcome failed =
+                TikTokRoomResolver.fetchAnonymousDeviceCookiesWithDiagnostics(
+                        ".jejeangela",
+                        "7345678901234567890",
+                        (url, accept, cookies, maxBytes) -> {
+                            throw new IOException("network timeout");
+                        }
+                );
+        assertEquals(Integer.valueOf(0), failed.diagnostics.homepageHttpStatus);
+        assertFalse(failed.diagnostics.homepageHasSetCookie);
+        assertEquals(0, failed.diagnostics.homepageCookieCount);
+        assertFalse(failed.diagnostics.homepageHasTtwid);
+        assertTrue(failed.diagnostics.livePageAttempted);
+        assertEquals(Integer.valueOf(0), failed.diagnostics.livePageHttpStatus);
+        assertEquals(Boolean.FALSE, failed.diagnostics.livePageHasSetCookie);
+        assertEquals(Integer.valueOf(0), failed.diagnostics.livePageCookieCount);
+        assertEquals(Boolean.FALSE, failed.diagnostics.livePageHasTtwid);
+        assertEquals("WARMUP_FAILED", failed.diagnostics.result);
     }
 
     private static Map<String, String> parseQuery(String rawQuery) throws Exception {

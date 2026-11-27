@@ -203,6 +203,62 @@ const TikTokDiagnosticsCollapsible: React.FC<TikTokDiagnosticsPanelProps> = ({
     : 'Belum tersedia';
   const handshakeRejectionReasonText =
     sanitizeDiagnosticErrorMessage(diagnostics?.websocketRejectionReason) || 'Belum tersedia';
+  const homepageHttpText =
+    typeof diagnostics?.cookieWarmUpHomepageHttpStatus === 'number'
+      ? diagnostics.cookieWarmUpHomepageHttpStatus === 0
+        ? '0 (Gagal jaringan)'
+        : `HTTP ${diagnostics.cookieWarmUpHomepageHttpStatus}`
+      : 'Belum tersedia';
+  const homepageSetCookieText =
+    typeof diagnostics?.cookieWarmUpHomepageHasSetCookie === 'boolean'
+      ? diagnostics.cookieWarmUpHomepageHasSetCookie
+        ? 'Ya'
+        : 'Tidak'
+      : 'Belum tersedia';
+  const homepageCookieCountText =
+    typeof diagnostics?.cookieWarmUpHomepageCookieCount === 'number'
+      ? String(diagnostics.cookieWarmUpHomepageCookieCount)
+      : 'Belum tersedia';
+  const homepageTtwidText =
+    typeof diagnostics?.cookieWarmUpHomepageHasTtwid === 'boolean'
+      ? diagnostics.cookieWarmUpHomepageHasTtwid
+        ? 'Ditemukan'
+        : 'Tidak ditemukan'
+      : 'Belum tersedia';
+  const livePageAttempted = diagnostics?.cookieWarmUpLivePageAttempted;
+  const livePageHttpText =
+    livePageAttempted === false
+      ? 'Not attempted'
+      : livePageAttempted === true
+      ? typeof diagnostics?.cookieWarmUpLivePageHttpStatus === 'number'
+        ? diagnostics.cookieWarmUpLivePageHttpStatus === 0
+          ? '0 (Gagal jaringan)'
+          : `HTTP ${diagnostics.cookieWarmUpLivePageHttpStatus}`
+        : 'Belum tersedia'
+      : 'Belum tersedia';
+  const livePageSetCookieText =
+    livePageAttempted === false
+      ? 'Not attempted'
+      : livePageAttempted === true && typeof diagnostics?.cookieWarmUpLivePageHasSetCookie === 'boolean'
+      ? diagnostics.cookieWarmUpLivePageHasSetCookie
+        ? 'Ya'
+        : 'Tidak'
+      : 'Belum tersedia';
+  const livePageCookieCountText =
+    livePageAttempted === false
+      ? 'Not attempted'
+      : livePageAttempted === true && typeof diagnostics?.cookieWarmUpLivePageCookieCount === 'number'
+      ? String(diagnostics.cookieWarmUpLivePageCookieCount)
+      : 'Belum tersedia';
+  const livePageTtwidText =
+    livePageAttempted === false
+      ? 'Not attempted'
+      : livePageAttempted === true && typeof diagnostics?.cookieWarmUpLivePageHasTtwid === 'boolean'
+      ? diagnostics.cookieWarmUpLivePageHasTtwid
+        ? 'Ditemukan'
+        : 'Tidak ditemukan'
+      : 'Belum tersedia';
+  const cookieWarmUpResultText = diagnostics?.cookieWarmUpResult || 'Belum tersedia';
 
   return (
     <div className="border-t border-[var(--app-border)] bg-[var(--app-surface)]">
@@ -348,6 +404,76 @@ const TikTokDiagnosticsCollapsible: React.FC<TikTokDiagnosticsPanelProps> = ({
                 <div className="text-[10px] text-[var(--app-text-muted)]">Alasan handshake ditolak</div>
                 <div className="font-medium text-[var(--app-text-secondary)] mt-0.5 break-words">
                   {handshakeRejectionReasonText}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-2.5 border-t border-[var(--app-border)]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--app-text-muted)] mb-2">
+              Diagnostik Cookie Warm-up
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Homepage HTTP</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                  {homepageHttpText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Homepage Set-Cookie</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                  {homepageSetCookieText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Homepage Cookie Count</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                  {homepageCookieCountText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Homepage ttwid</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                  {homepageTtwidText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">LIVE Page HTTP</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                  {livePageHttpText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">LIVE Page Set-Cookie</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                  {livePageSetCookieText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">LIVE Page Cookie Count</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 tabular-metrics">
+                  {livePageCookieCountText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0">
+                <div className="text-[10px] text-[var(--app-text-muted)]">LIVE Page ttwid</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5">
+                  {livePageTtwidText}
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] px-3 py-2 min-w-0 sm:col-span-2">
+                <div className="text-[10px] text-[var(--app-text-muted)]">Cookie Warm-up Result</div>
+                <div className="font-semibold text-[var(--app-text)] mt-0.5 break-words tabular-metrics">
+                  {cookieWarmUpResultText}
                 </div>
               </div>
             </div>
