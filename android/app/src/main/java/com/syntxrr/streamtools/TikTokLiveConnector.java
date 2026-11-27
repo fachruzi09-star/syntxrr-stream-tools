@@ -46,6 +46,8 @@ public final class TikTokLiveConnector {
 
     private static final String TAG = "TikTokLiveConnector";
     private static final int MAX_RECONNECT_ATTEMPTS = 10;
+    private static final int MAX_DETERMINISTIC_DIRECT_RETRIES = 2;
+    private static final long DETERMINISTIC_RETRY_DELAY_MS = 3_000L;
     private static final long[] RECONNECT_DELAYS_MS = {
             1_000L, 2_000L, 4_000L, 8_000L, 16_000L,
             30_000L, 30_000L, 30_000L, 30_000L, 30_000L
@@ -108,6 +110,15 @@ public final class TikTokLiveConnector {
     @NonNull
     private String mRoomId = "";
     @NonNull
+    private String mDeviceId = "";
+    @NonNull
+    private String mResolvedPushServerUrl = "";
+    private boolean mLastImFetchOk = false;
+    private long mDirectHeartbeatMs = 10_000L;
+    private long mLastImFetchRttMs = 0L;
+    @NonNull
+    private Map<String, String> mRouteParams = new LinkedHashMap<>();
+    @NonNull
     private String mEulerApiKey = "";
     @NonNull
     private String mEulerJwtKey = "";
@@ -127,6 +138,7 @@ public final class TikTokLiveConnector {
     @NonNull
     private String mErrorCode = "";
     private int mReconnectAttempt = 0;
+    private int mDeterministicRejectCount = 0;
     private int mWaitingLiveAttempt = 0;
     private long mTransportConnectedAtMs = 0L;
 
@@ -383,6 +395,63 @@ public final class TikTokLiveConnector {
         return false;
     }
 
+    static boolean isDeterministicDirectHandshakeRejection(
+            int httpStatus,
+            @Nullable String responseClass
+    ) {
+        if (httpStatus == 401 || httpStatus == 403) {
+            return true;
+        }
+        if ("redirect".equals(responseClass)) {
+            return true;
+        }
+        if (httpStatus >= 200 && httpStatus < 300) {
+            return "upgrade_missing".equals(responseClass)
+                    || "edge_html".equals(responseClass)
+                    || "api_json".equals(responseClass);
+        }
+        return false;
+    }
+
+    @NonNull
+    static String sanitizeDirectPushServerUrl(@Nullable String rawPushServer) {
+        if (rawPushServer == null) return "";
+        String cleaned = rawPushServer.trim();
+        if (cleaned.isEmpty()) return "";
+        try {
+            java.net.URI uri = java.net.URI.create(cleaned);
+            String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.US) : "";
+            if (!"wss".equals(scheme) && !"https".equals(scheme)) {
+                return "";
+            }
+            if (uri.getRawUserInfo() != null && !uri.getRawUserInfo().isEmpty()) {
+                return "";
+            }
+            String host = uri.getHost() != null ? uri.getHost().trim().toLowerCase(Locale.US) : "";
+            if (host.isEmpty()) return "";
+            boolean allowedHost = host.endsWith(".tiktok.com")
+                    || host.endsWith(".tiktokv.com")
+                    || "tiktok.com".equals(host)
+                    || "tiktokv.com".equals(host);
+            if (!allowedHost) {
+                return "";
+            }
+            int port = uri.getPort();
+            String path = uri.getRawPath();
+            String safePath = (path != null && !path.isEmpty())
+                    ? path
+                    : "/webcast/im/ws_proxy/ws_reuse_supplement/";
+            StringBuilder out = new StringBuilder("wss://").append(host);
+            if (port > 0 && port != 443) {
+                out.append(':').append(port);
+            }
+            out.append(safePath);
+            return out.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     @NonNull
     static String sanitizeDiagnosticReason(
             @Nullable String raw,
@@ -592,12 +661,19 @@ public final class TikTokLiveConnector {
             mConnectionMethod = method;
             mRoomStatus = "unknown";
             mRoomId = "";
+            mDeviceId = "";
+            mResolvedPushServerUrl = "";
+            mLastImFetchOk = false;
+            mDirectHeartbeatMs = 10_000L;
+            mLastImFetchRttMs = 0L;
+            mRouteParams.clear();
             mCursor = "";
             mInternalExt = "";
             mSessionCookies.clear();
             mViewerCount = 0L;
             mTotalLikeCount = 0L;
             mReconnectAttempt = 0;
+            mDeterministicRejectCount = 0;
             mWaitingLiveAttempt = 0;
             mTransportConnectedAtMs = 0L;
             mTransportMode = "none";
@@ -630,9 +706,16 @@ public final class TikTokLiveConnector {
             mEulerApiKey = "";
             mEulerJwtKey = "";
             mSessionCookies.clear();
+            mDeviceId = "";
+            mResolvedPushServerUrl = "";
+            mLastImFetchOk = false;
+            mDirectHeartbeatMs = 10_000L;
+            mLastImFetchRttMs = 0L;
+            mRouteParams.clear();
             mCursor = "";
             mInternalExt = "";
             mReconnectAttempt = 0;
+            mDeterministicRejectCount = 0;
             mWaitingLiveAttempt = 0;
             mTransportConnectedAtMs = 0L;
             if ("disconnected".equals(terminalState)) {
@@ -755,19 +838,33 @@ public final class TikTokLiveConnector {
                     boolean roomChanged = !res.roomId.equals(mRoomId);
                     mRoomId = res.roomId;
                     mRoomStatus = "live";
-                    mSessionCookies = new LinkedHashMap<>(res.sessionCookies);
-                    mDiagRoomLookupHttpStatus = res.httpStatus;
-                    mDiagHasTtwidCookie = hasTtwidCookie(res.sessionCookies);
-                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
-                    mDiagLastTransportError = "";
-                    mDiagStage = "room_resolved";
+                    if (mDeviceId.isEmpty() && !res.deviceId.isEmpty()) {
+                        mDeviceId = res.deviceId;
+                    }
                     if (roomChanged) {
                         // A creator can start a new LIVE with a different room ID. Never
                         // carry a cursor/internalExt or retry budget from the previous room.
+                        mSessionCookies = new LinkedHashMap<>(res.sessionCookies);
+                        if (!res.deviceId.isEmpty()) {
+                            mDeviceId = res.deviceId;
+                        }
                         mCursor = "";
                         mInternalExt = "";
+                        mRouteParams.clear();
+                        mResolvedPushServerUrl = "";
+                        mLastImFetchOk = false;
+                        mDirectHeartbeatMs = 10_000L;
+                        mLastImFetchRttMs = 0L;
                         mReconnectAttempt = 0;
+                        mDeterministicRejectCount = 0;
+                    } else {
+                        mSessionCookies.putAll(res.sessionCookies);
                     }
+                    mDiagRoomLookupHttpStatus = res.httpStatus;
+                    mDiagHasTtwidCookie = hasTtwidCookie(mSessionCookies);
+                    applyCookieWarmUpDiagnosticsLocked(res.cookieWarmUpDiagnostics);
+                    mDiagLastTransportError = "";
+                    mDiagStage = "room_resolved";
                     mWaitingLiveAttempt = 0;
                     method = mConnectionMethod;
                     emitCurrentState();
@@ -864,9 +961,14 @@ public final class TikTokLiveConnector {
 
     private void startDirectWebSocket(long gen) {
         final String roomId;
-        final String existingCursor;
-        final String existingExt;
-        final Map<String, String> baseCookies;
+        final String deviceId;
+        String cursor;
+        String internalExt;
+        Map<String, String> routeParams;
+        String resolvedPushServerUrl;
+        long heartbeatMs;
+        long lastRttMs;
+        final Map<String, String> cookies;
         final boolean allowEuler;
         final boolean useAlternateDirectHost;
         final String username;
@@ -874,9 +976,14 @@ public final class TikTokLiveConnector {
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
             roomId = mRoomId;
-            existingCursor = mCursor;
-            existingExt = mInternalExt;
-            baseCookies = new LinkedHashMap<>(mSessionCookies);
+            deviceId = mDeviceId;
+            cursor = mCursor;
+            internalExt = mInternalExt;
+            routeParams = mRouteParams.isEmpty() ? null : new LinkedHashMap<>(mRouteParams);
+            resolvedPushServerUrl = mResolvedPushServerUrl;
+            heartbeatMs = mDirectHeartbeatMs > 0L ? mDirectHeartbeatMs : 10_000L;
+            lastRttMs = mLastImFetchRttMs;
+            cookies = new LinkedHashMap<>(mSessionCookies);
             allowEuler = mAllowEulerFallback;
             useAlternateDirectHost = mUseAlternateDirectWsHost;
             username = mUsername;
@@ -890,20 +997,64 @@ public final class TikTokLiveConnector {
             );
         }
 
-        // Direct mode deliberately skips /webcast/im/fetch: TikTok signs that HTTP
-        // request for its browser runtime (X-Bogus/X-Gnarly), while the public Webcast
-        // WebSocket itself accepts the anonymous device cookie and explicit im_enter_room.
-        // Skipping the signed bootstrap avoids a 401/403 delay and still lets the decoder
-        // retain cursor/internalExt returned by subsequent WebSocket frames for reconnects.
+        if (!useAlternateDirectHost) {
+            if (!hasTtwidCookie(cookies)) {
+                TikTokRoomResolver.tryFetchTtwidFromCheckEndpoint(cookies, deviceId);
+                if (isStaleGeneration(gen)) return;
+                synchronized (mLock) {
+                    if (isStaleGeneration(gen)) return;
+                    mSessionCookies.putAll(cookies);
+                    mDiagHasTtwidCookie = hasTtwidCookie(mSessionCookies);
+                }
+            }
+
+            TikTokRoomResolver.InitialFetchResult fetchRes =
+                    TikTokRoomResolver.fetchInitialWebcastResponse(roomId, deviceId, cookies);
+            if (isStaleGeneration(gen)) return;
+
+            synchronized (mLock) {
+                if (isStaleGeneration(gen)) return;
+                mSessionCookies.putAll(fetchRes.mergedCookies);
+                cookies.clear();
+                cookies.putAll(mSessionCookies);
+                mDiagHasTtwidCookie = hasTtwidCookie(mSessionCookies);
+                mLastImFetchOk = fetchRes.ok;
+                if (fetchRes.rttMs > 0L) {
+                    mLastImFetchRttMs = fetchRes.rttMs;
+                    lastRttMs = fetchRes.rttMs;
+                }
+                if (fetchRes.ok && fetchRes.decoded != null) {
+                    TikTokWebcastDecoder.DecodedResponse decodedFetch = fetchRes.decoded;
+                    if (!decodedFetch.cursor.isEmpty()) {
+                        mCursor = decodedFetch.cursor;
+                        cursor = decodedFetch.cursor;
+                    }
+                    if (!decodedFetch.internalExt.isEmpty()) {
+                        mInternalExt = decodedFetch.internalExt;
+                        internalExt = decodedFetch.internalExt;
+                    }
+                    if (!decodedFetch.routeParams.isEmpty()) {
+                        mRouteParams.putAll(decodedFetch.routeParams);
+                        routeParams = new LinkedHashMap<>(mRouteParams);
+                    }
+                    if (decodedFetch.heartbeatDurationMs > 0L) {
+                        mDirectHeartbeatMs = decodedFetch.heartbeatDurationMs;
+                        heartbeatMs = decodedFetch.heartbeatDurationMs;
+                    }
+                    String safePush = sanitizeDirectPushServerUrl(decodedFetch.pushServer);
+                    if (!safePush.isEmpty()) {
+                        mResolvedPushServerUrl = safePush;
+                        resolvedPushServerUrl = safePush;
+                    }
+                }
+            }
+        }
+
         String targetWsBase = useAlternateDirectHost
                 ? TikTokWebSocketTransport.DIRECT_WS_FALLBACK_BASE_URL
-                : TikTokWebSocketTransport.DIRECT_WS_BASE_URL;
-        String cursor = existingCursor;
-        String internalExt = existingExt;
-        Map<String, String> routeParams = null;
-        Map<String, String> cookies = baseCookies;
-        long heartbeatMs = 10_000L;
-        long lastRttMs = 0L;
+                : (!resolvedPushServerUrl.isEmpty()
+                        ? resolvedPushServerUrl
+                        : TikTokWebSocketTransport.DIRECT_WS_BASE_URL);
 
         final String wsBaseForAttempt = targetWsBase;
         String wsUrl = TikTokWebSocketTransport.buildWebSocketUrl(
@@ -915,7 +1066,8 @@ public final class TikTokLiveConnector {
                 lastRttMs,
                 cursor,
                 internalExt,
-                routeParams
+                routeParams,
+                deviceId
         );
 
         TikTokWebSocketTransport ws = new TikTokWebSocketTransport();
@@ -1025,29 +1177,33 @@ public final class TikTokLiveConnector {
                         + ", host=" + diagnostics.attemptedHost
                         + ", class=" + diagnostics.responseClass
                         + ", body=" + diagnostics.bodyKind + ")");
-                boolean fallbackAvailable;
-                boolean retryOnAlternateHost = false;
+                final boolean fallbackAvailable;
+                final boolean retryOnAlternateHost;
+                final boolean hasTtwid;
+                final boolean imFetchOk;
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
                     applyHandshakeDiagnosticsLocked(diagnostics);
                     fallbackAvailable = canAttemptEulerFallback(allowEuler, mEulerFallbackUnavailable, mEulerApiKey, mEulerJwtKey);
                     mTransportConnectedAtMs = 0L;
+                    hasTtwid = mDiagHasTtwidCookie;
+                    imFetchOk = mLastImFetchOk;
                     if (!mUseAlternateDirectWsHost
-                            && wsBaseForAttempt.contains("webcast-ws.tiktok.com")
-                            && !wsBaseForAttempt.contains("webcast-ws.us.tiktok.com")) {
+                            && !wsBaseForAttempt.equals(TikTokWebSocketTransport.DIRECT_WS_FALLBACK_BASE_URL)) {
                         mUseAlternateDirectWsHost = true;
                         retryOnAlternateHost = true;
-                    } else if (mUseAlternateDirectWsHost) {
-                        // Alternate the two public Webcast hosts after a rejected handshake;
-                        // a transient edge/CDN rejection must not permanently stop Direct mode.
+                    } else {
                         mUseAlternateDirectWsHost = false;
+                        retryOnAlternateHost = false;
                     }
                 }
                 if (retryOnAlternateHost) {
-                    Log.w(TAG, "Host Webcast utama menolak koneksi; mencoba host alternatif TikTok.");
-                    startDirectWebSocket(gen);
+                    Log.w(TAG, "Host Webcast utama menolak koneksi; menjadwalkan host alternatif TikTok.");
+                    mWorker.execute(() -> startDirectWebSocket(gen));
                 } else if (fallbackAvailable) {
                     startEulerFallback(gen, "Koneksi langsung ditolak (" + reason + "); mencoba fallback EulerStream...");
+                } else if (isDeterministicDirectHandshakeRejection(httpStatus, diagnostics.responseClass)) {
+                    scheduleDeterministicDirectFailureOrRetry(gen, reason, hasTtwid, imFetchOk);
                 } else {
                     scheduleReconnectOrFail(
                             gen,
@@ -1524,6 +1680,8 @@ public final class TikTokLiveConnector {
                     && "connecting_direct".equals(mState)) {
                 mRoomStatus = "live";
                 mReconnectAttempt = 0;
+                mDeterministicRejectCount = 0;
+                mUseAlternateDirectWsHost = false;
                 mTransportConnectedAtMs = frameReceivedAt;
                 mDiagLastTransportError = "";
                 mDiagStage = hasNonEndWebcastData ? "receiving_events" : "connected";
@@ -1675,6 +1833,55 @@ public final class TikTokLiveConnector {
         }
     }
 
+    private void scheduleDeterministicDirectFailureOrRetry(
+            long gen,
+            @NonNull String reason,
+            boolean hasTtwid,
+            boolean imFetchOk
+    ) {
+        final int attempt;
+        synchronized (mLock) {
+            if (isStaleGeneration(gen)) return;
+            closeActiveWsLocked();
+            cancelPendingTaskLocked();
+            mDeterministicRejectCount++;
+            attempt = mDeterministicRejectCount;
+
+            if (attempt < MAX_DETERMINISTIC_DIRECT_RETRIES) {
+                String retryCode = !hasTtwid ? "DIRECT_TTWID_REQUIRED" : "DIRECT_WS_HANDSHAKE_REJECTED";
+                mErrorCode = retryCode;
+                mDiagStage = "reconnecting";
+                mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
+                setStateLocked(
+                        "reconnecting",
+                        "direct_ws",
+                        "Verifikasi ulang Direct (" + attempt + "/" + MAX_DETERMINISTIC_DIRECT_RETRIES + "): " + reason
+                );
+                mPendingTask = mScheduler.schedule(() -> {
+                    if (isStaleGeneration(gen)) return;
+                    synchronized (mLock) {
+                        if (isStaleGeneration(gen)) return;
+                        mPendingTask = null;
+                    }
+                    mWorker.execute(() -> startDirectWebSocket(gen));
+                }, DETERMINISTIC_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+                return;
+            }
+        }
+
+        String terminalCode = !hasTtwid ? "DIRECT_TTWID_REQUIRED" : "DIRECT_WS_HANDSHAKE_REJECTED";
+        StringBuilder msg = new StringBuilder(reason);
+        if (!hasTtwid) {
+            msg.append(" TikTok tidak menerbitkan cookie ttwid anonim untuk sesi Direct ini.");
+        } else if (!imFetchOk) {
+            msg.append(" Server TikTok menolak bootstrap/upgrade WebSocket untuk sesi Direct tanpa tanda tangan.");
+        } else {
+            msg.append(" Server TikTok menolak upgrade WebSocket Direct.");
+        }
+        msg.append(" Gunakan EulerStream API Key/JWT jika tersedia, atau coba sambung lagi.");
+        failSessionIfCurrent(gen, "error", terminalCode, msg.toString());
+    }
+
     private void scheduleReconnectOrFail(
             long gen,
             @NonNull String errorCode,
@@ -1684,6 +1891,7 @@ public final class TikTokLiveConnector {
         final int attemptIdx;
         final long delayMs;
         final String targetUsername;
+        final boolean reuseResolvedRoom;
 
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
@@ -1695,48 +1903,46 @@ public final class TikTokLiveConnector {
                     startEulerFallback(gen, "Koneksi langsung gagal setelah beberapa percobaan; beralih ke EulerStream...");
                     return;
                 }
-                // Do not abandon a valid LIVE target after a temporary outage. Enter a
-                // long cooldown, resolve the room again, then resume the Direct state machine.
-                mReconnectAttempt = 0;
+                // Fall through outside lock to fail cleanly instead of looping infinitely.
+                attemptIdx = mReconnectAttempt;
+                delayMs = -1L;
                 targetUsername = mUsername;
+                reuseResolvedRoom = false;
+            } else {
+                attemptIdx = mReconnectAttempt;
+                mReconnectAttempt++;
+                if (useEuler) {
+                    int shift = Math.min(attemptIdx, 4);
+                    delayMs = Math.min(30_000L, 2_000L * (1L << shift));
+                } else {
+                    delayMs = RECONNECT_DELAYS_MS[Math.min(attemptIdx, RECONNECT_DELAYS_MS.length - 1)];
+                }
+                targetUsername = mUsername;
+                reuseResolvedRoom = !useEuler
+                        && attemptIdx < 2
+                        && !mRoomId.isEmpty()
+                        && !"WS_CLOSED".equals(errorCode);
                 mErrorCode = errorCode;
                 mDiagStage = "reconnecting";
                 mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
-                setStateLocked("reconnecting", "direct_ws",
-                        reason + " Pemulihan akan dicoba kembali otomatis setelah jeda.");
-                mPendingTask = mScheduler.schedule(() -> {
-                    if (isStaleGeneration(gen)) return;
-                    synchronized (mLock) {
-                        if (isStaleGeneration(gen)) return;
-                        mPendingTask = null;
-                        mDiagStage = "resolving_room";
-                        setStateLocked("resolving_room", "none",
-                                "Memeriksa ulang room LIVE @" + targetUsername + " sebelum menyambung kembali...");
-                    }
-                    mWorker.execute(() -> runRoomResolution(gen, targetUsername));
-                }, WAITING_LIVE_MAX_INTERVAL_MS, TimeUnit.MILLISECONDS);
-                return;
+                setStateLocked(
+                        "reconnecting",
+                        mTransportMode,
+                        useEuler
+                                ? "Memulihkan koneksi EulerStream (percobaan " + (attemptIdx + 1) + "): " + reason
+                                : "Menyambung ulang (" + (attemptIdx + 1) + "/" + MAX_RECONNECT_ATTEMPTS + "): " + reason
+                );
             }
+        }
 
-            attemptIdx = mReconnectAttempt;
-            mReconnectAttempt++;
-            if (useEuler) {
-                int shift = Math.min(attemptIdx, 4);
-                delayMs = Math.min(30_000L, 2_000L * (1L << shift));
-            } else {
-                delayMs = RECONNECT_DELAYS_MS[Math.min(attemptIdx, RECONNECT_DELAYS_MS.length - 1)];
-            }
-            targetUsername = mUsername;
-            mErrorCode = errorCode;
-            mDiagStage = "reconnecting";
-            mDiagLastTransportError = sanitizeDiagnosticReason(reason, mEulerApiKey, mEulerJwtKey);
-            setStateLocked(
-                    "reconnecting",
-                    mTransportMode,
-                    useEuler
-                            ? "Memulihkan koneksi EulerStream (percobaan " + (attemptIdx + 1) + "): " + reason
-                            : "Menyambung ulang (" + (attemptIdx + 1) + "/" + MAX_RECONNECT_ATTEMPTS + "): " + reason
+        if (delayMs < 0L) {
+            failSessionIfCurrent(
+                    gen,
+                    "error",
+                    errorCode,
+                    reason + " Batas percobaan penyambungan ulang tercapai."
             );
+            return;
         }
 
         synchronized (mLock) {
@@ -1745,9 +1951,16 @@ public final class TikTokLiveConnector {
                 if (isStaleGeneration(gen)) return;
                 if (useEuler) {
                     startEulerFallback(gen, "Menyambung ulang via EulerStream...");
+                } else if (reuseResolvedRoom) {
+                    synchronized (mLock) {
+                        if (isStaleGeneration(gen)) return;
+                        mPendingTask = null;
+                    }
+                    mWorker.execute(() -> startDirectWebSocket(gen));
                 } else {
                     synchronized (mLock) {
                         if (isStaleGeneration(gen)) return;
+                        mPendingTask = null;
                         mDiagStage = "resolving_room";
                         setStateLocked("resolving_room", "none",
                                 "Memeriksa ulang room LIVE @" + targetUsername + " sebelum menyambung kembali...");
@@ -1774,6 +1987,13 @@ public final class TikTokLiveConnector {
             mEulerApiKey = "";
             mEulerJwtKey = "";
             mSessionCookies.clear();
+            mDeviceId = "";
+            mResolvedPushServerUrl = "";
+            mLastImFetchOk = false;
+            mDirectHeartbeatMs = 10_000L;
+            mLastImFetchRttMs = 0L;
+            mRouteParams.clear();
+            mDeterministicRejectCount = 0;
             mErrorCode = errorCode;
             setStateLocked(state, "none", message);
         }

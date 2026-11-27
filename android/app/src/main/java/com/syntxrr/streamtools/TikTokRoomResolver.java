@@ -44,6 +44,7 @@ public final class TikTokRoomResolver {
 
     public static final String ROOM_LOOKUP_ENDPOINT = "https://www.tiktok.com/api-live/user/room/";
     public static final String LIVE_PAGE_BASE_URL = "https://www.tiktok.com/@";
+    public static final String TTWID_CHECK_ENDPOINT = "https://www.tiktok.com/ttwid/check/";
     public static final String WEBCAST_IM_FETCH_ENDPOINT = "https://webcast.tiktok.com/webcast/im/fetch/";
     public static final String MOBILE_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
@@ -51,7 +52,7 @@ public final class TikTokRoomResolver {
 
     private static final String CLIENT_BROWSER_NAME = "Mozilla";
     private static final String CLIENT_BROWSER_PLATFORM = "Linux aarch64";
-    private static final String CLIENT_BROWSER_VERSION =
+    static final String CLIENT_BROWSER_VERSION =
             "5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
     private static final String CLIENT_DEVICE_PLATFORM = "web_mobile";
@@ -148,6 +149,8 @@ public final class TikTokRoomResolver {
         public final Map<String, String> sessionCookies;
         @Nullable
         public final CookieWarmUpDiagnostics cookieWarmUpDiagnostics;
+        @NonNull
+        public final String deviceId;
 
         public Result(
                 @NonNull Status status,
@@ -168,7 +171,8 @@ public final class TikTokRoomResolver {
                     httpStatus,
                     message,
                     sessionCookies,
-                    null
+                    null,
+                    ""
             );
         }
 
@@ -183,6 +187,32 @@ public final class TikTokRoomResolver {
                 @Nullable Map<String, String> sessionCookies,
                 @Nullable CookieWarmUpDiagnostics cookieWarmUpDiagnostics
         ) {
+            this(
+                    status,
+                    normalizedUsername,
+                    roomId,
+                    roomTitle,
+                    liveRoomStatus,
+                    httpStatus,
+                    message,
+                    sessionCookies,
+                    cookieWarmUpDiagnostics,
+                    ""
+            );
+        }
+
+        public Result(
+                @NonNull Status status,
+                @NonNull String normalizedUsername,
+                @NonNull String roomId,
+                @NonNull String roomTitle,
+                @Nullable Integer liveRoomStatus,
+                int httpStatus,
+                @NonNull String message,
+                @Nullable Map<String, String> sessionCookies,
+                @Nullable CookieWarmUpDiagnostics cookieWarmUpDiagnostics,
+                @Nullable String deviceId
+        ) {
             this.status = status;
             this.normalizedUsername = normalizedUsername;
             this.roomId = roomId;
@@ -194,6 +224,7 @@ public final class TikTokRoomResolver {
                     ? Collections.unmodifiableMap(new LinkedHashMap<>(sessionCookies))
                     : Collections.emptyMap();
             this.cookieWarmUpDiagnostics = cookieWarmUpDiagnostics;
+            this.deviceId = deviceId != null ? deviceId.trim() : "";
         }
     }
 
@@ -237,6 +268,16 @@ public final class TikTokRoomResolver {
         HttpTextResponse executeGet(
                 @NonNull String url,
                 @NonNull String acceptHeader,
+                @NonNull Map<String, String> cookies,
+                int maxBytes
+        ) throws IOException;
+    }
+
+    interface TtwidPostRequester {
+        @NonNull
+        HttpTextResponse executePostJson(
+                @NonNull String url,
+                @NonNull String jsonPayload,
                 @NonNull Map<String, String> cookies,
                 int maxBytes
         ) throws IOException;
@@ -382,8 +423,18 @@ public final class TikTokRoomResolver {
     @NonNull
     public static Map<String, String> parseSetCookieHeaders(@Nullable Map<String, List<String>> headers) {
         Map<String, String> cookies = new LinkedHashMap<>();
+        parseSetCookieHeadersInto(headers, cookies);
+        return cookies;
+    }
+
+    @NonNull
+    static Map<String, String> parseSetCookieHeadersInto(
+            @Nullable Map<String, List<String>> headers,
+            @NonNull Map<String, String> targetJar
+    ) {
+        Map<String, String> delta = new LinkedHashMap<>();
         if (headers == null || headers.isEmpty()) {
-            return cookies;
+            return delta;
         }
         for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
             String key = entry.getKey();
@@ -391,23 +442,36 @@ public final class TikTokRoomResolver {
             List<String> values = entry.getValue();
             if (values == null) continue;
             for (String rawCookie : values) {
-                parseSingleSetCookie(rawCookie, cookies);
+                parseSingleSetCookie(rawCookie, delta);
+                parseSingleSetCookie(rawCookie, targetJar);
             }
         }
-        return cookies;
+        return delta;
     }
 
     public static void parseSingleSetCookie(@Nullable String headerValue, @NonNull Map<String, String> out) {
         if (headerValue == null || headerValue.isEmpty()) return;
-        int semiIdx = headerValue.indexOf(';');
-        String pair = semiIdx >= 0 ? headerValue.substring(0, semiIdx) : headerValue;
+        String[] segments = headerValue.split(";");
+        String pair = segments[0];
         int eqIdx = pair.indexOf('=');
         if (eqIdx <= 0) return;
         String name = pair.substring(0, eqIdx).trim();
         String value = pair.substring(eqIdx + 1).trim();
-        if (!name.isEmpty() && !value.isEmpty()) {
-            out.put(name, value);
+        if (name.isEmpty()) return;
+
+        boolean expired = false;
+        for (int i = 1; i < segments.length; i++) {
+            String attr = segments[i].trim().toLowerCase(Locale.US);
+            if ("max-age=0".equals(attr) || attr.startsWith("max-age=-")) {
+                expired = true;
+                break;
+            }
         }
+        if (expired || value.isEmpty() || "deleted".equalsIgnoreCase(value)) {
+            out.remove(name);
+            return;
+        }
+        out.put(name, value);
     }
 
     @NonNull
@@ -523,10 +587,9 @@ public final class TikTokRoomResolver {
                 if (hasSetCookieHeader(headerFields)) {
                     sawSetCookieHeader = true;
                 }
-                Map<String, String> parsed = parseSetCookieHeaders(headerFields);
+                Map<String, String> parsed = parseSetCookieHeadersInto(headerFields, cookies);
                 if (!parsed.isEmpty()) {
                     stageReceivedCookies.putAll(parsed);
-                    cookies.putAll(parsed);
                 }
 
                 if (isRedirectStatus(httpCode) && redirect < MAX_REDIRECTS) {
@@ -707,10 +770,96 @@ public final class TikTokRoomResolver {
         return false;
     }
 
+    /**
+     * Upaya oportunistik tambahan untuk memperoleh cookie anonim ttwid dari endpoint
+     * publik https://www.tiktok.com/ttwid/check/ apabila warm-up halaman HTML belum
+     * mengembalikan ttwid. Cookie hanya disimpan di memori sesi ini.
+     */
+    public static boolean tryFetchTtwidFromCheckEndpoint(
+            @NonNull Map<String, String> cookies,
+            @Nullable String deviceId
+    ) {
+        return tryFetchTtwidFromCheckEndpoint(cookies, deviceId, TikTokRoomResolver::executePostJsonWithCookieCapture);
+    }
+
+    static boolean tryFetchTtwidFromCheckEndpoint(
+            @NonNull Map<String, String> cookies,
+            @Nullable String deviceId,
+            @NonNull TtwidPostRequester requester
+    ) {
+        if (hasTtwidCookie(cookies)) {
+            return true;
+        }
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("region", "US");
+            payload.put("aid", 1988);
+            payload.put("service", "tiktok");
+            payload.put("cb_url_prefix", "https://www.tiktok.com");
+            payload.put("unionDomain", true);
+            payload.put("need_sign_in_status", true);
+            if (deviceId != null && DEVICE_ID_PATTERN.matcher(deviceId.trim()).matches()) {
+                payload.put("did", deviceId.trim());
+            }
+            requester.executePostJson(TTWID_CHECK_ENDPOINT, payload.toString(), cookies, 16 * 1024);
+        } catch (Exception ignored) {
+            // Opportunistic check; failure does not crash session.
+        }
+        return hasTtwidCookie(cookies);
+    }
+
     @NonNull
-    private static Result withWarmUpDiagnostics(
+    private static HttpTextResponse executePostJsonWithCookieCapture(
+            @NonNull String targetUrl,
+            @NonNull String jsonPayload,
+            @NonNull Map<String, String> cookies,
+            int maxBytes
+    ) throws IOException {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(targetUrl);
+            if (!"https".equalsIgnoreCase(url.getProtocol())) {
+                throw new IOException("Protokol HTTP tidak didukung; hanya HTTPS yang diizinkan.");
+            }
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
+            conn.setInstanceFollowRedirects(false);
+            applyBrowserHeaders(conn, "application/json, text/plain, */*", cookies);
+            conn.setRequestProperty("Content-Type", "application/json");
+            byte[] bodyBytes = jsonPayload.getBytes(StandardCharsets.UTF_8);
+            conn.setFixedLengthStreamingMode(bodyBytes.length);
+            try (java.io.OutputStream os = conn.getOutputStream()) {
+                os.write(bodyBytes);
+                os.flush();
+            }
+
+            int httpCode = conn.getResponseCode();
+            Map<String, List<String>> headerFields = conn.getHeaderFields();
+            boolean sawSetCookie = hasSetCookieHeader(headerFields);
+            Map<String, String> parsed = parseSetCookieHeadersInto(headerFields, cookies);
+            InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            String body = stream != null ? readBoundedUtf8(stream, maxBytes) : "";
+            return new HttpTextResponse(
+                    httpCode,
+                    body,
+                    sawSetCookie || !parsed.isEmpty(),
+                    parsed.size()
+            );
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    @NonNull
+    private static Result withWarmUpDiagnosticsAndDeviceId(
             @NonNull Result result,
-            @NonNull CookieWarmUpDiagnostics diagnostics
+            @NonNull CookieWarmUpDiagnostics diagnostics,
+            @NonNull String deviceId
     ) {
         return new Result(
                 result.status,
@@ -721,7 +870,8 @@ public final class TikTokRoomResolver {
                 result.httpStatus,
                 result.message,
                 result.sessionCookies,
-                diagnostics
+                diagnostics,
+                deviceId
         );
     }
 
@@ -751,9 +901,10 @@ public final class TikTokRoomResolver {
         LiveHtmlFallback htmlFallbackRunner = (user, cookieJar) ->
                 resolveViaLiveHtmlPage(user, cookieJar, sessionDeviceId);
 
-        return withWarmUpDiagnostics(
+        return withWarmUpDiagnosticsAndDeviceId(
                 resolveRoomLookupWithCookies(normalized, sessionDeviceId, cookies, htmlFallbackRunner),
-                warmUp.diagnostics
+                warmUp.diagnostics,
+                sessionDeviceId
         );
     }
 
@@ -1310,6 +1461,15 @@ public final class TikTokRoomResolver {
             @NonNull String roomId,
             @Nullable Map<String, String> existingCookies
     ) {
+        return fetchInitialWebcastResponse(roomId, null, existingCookies);
+    }
+
+    @NonNull
+    public static InitialFetchResult fetchInitialWebcastResponse(
+            @NonNull String roomId,
+            @Nullable String deviceId,
+            @Nullable Map<String, String> existingCookies
+    ) {
         String cleanRoomId = roomId.trim();
         Map<String, String> mergedCookies = existingCookies != null
                 ? new LinkedHashMap<>(existingCookies)
@@ -1328,24 +1488,32 @@ public final class TikTokRoomResolver {
         HttpURLConnection conn = null;
         long startMs = System.currentTimeMillis();
         try {
+            String effectiveDeviceId = (deviceId != null && DEVICE_ID_PATTERN.matcher(deviceId.trim()).matches())
+                    ? deviceId.trim()
+                    : "";
             String encodedRoom = URLEncoder.encode(cleanRoomId, StandardCharsets.UTF_8.name());
             StringBuilder urlSb = new StringBuilder(WEBCAST_IM_FETCH_ENDPOINT);
             urlSb.append("?aid=1988");
             urlSb.append("&app_language=en");
             urlSb.append("&app_name=tiktok_web");
-            urlSb.append("&browser_language=en");
-            urlSb.append("&browser_name=Mozilla");
-            urlSb.append("&browser_platform=Linux%20aarch64");
-            urlSb.append("&browser_version=5.0");
+            urlSb.append("&browser_language=en-US");
+            urlSb.append("&browser_name=").append(urlEncodeRfc3986(CLIENT_BROWSER_NAME));
+            urlSb.append("&browser_platform=").append(urlEncodeRfc3986(CLIENT_BROWSER_PLATFORM));
+            urlSb.append("&browser_version=").append(urlEncodeRfc3986(CLIENT_BROWSER_VERSION));
             urlSb.append("&cookie_enabled=true");
             urlSb.append("&cursor=");
-            urlSb.append("&device_platform=web_mobile");
+            if (!effectiveDeviceId.isEmpty()) {
+                urlSb.append("&device_id=").append(effectiveDeviceId);
+                urlSb.append("&did=").append(effectiveDeviceId);
+            }
+            urlSb.append("&device_platform=").append(CLIENT_DEVICE_PLATFORM);
             urlSb.append("&did_rule=3");
             urlSb.append("&fetch_rule=1");
             urlSb.append("&identity=audience");
             urlSb.append("&internal_ext=");
             urlSb.append("&last_rtt=0");
             urlSb.append("&live_id=12");
+            urlSb.append("&os=").append(CLIENT_OS);
             urlSb.append("&resp_content_type=protobuf");
             urlSb.append("&room_id=").append(encodedRoom);
             urlSb.append("&screen_height=800");
@@ -1367,7 +1535,7 @@ public final class TikTokRoomResolver {
 
             int httpCode = conn.getResponseCode();
             long rttMs = Math.max(1L, System.currentTimeMillis() - startMs);
-            mergedCookies.putAll(parseSetCookieHeaders(conn.getHeaderFields()));
+            parseSetCookieHeadersInto(conn.getHeaderFields(), mergedCookies);
 
             InputStream stream = httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
             byte[] body = stream != null ? readBoundedBytes(stream, MAX_BODY_BYTES) : new byte[0];

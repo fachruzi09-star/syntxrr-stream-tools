@@ -258,4 +258,29 @@ public class TikTokWebSocketHandshakeDiagnosticsTest {
         assertEquals("/challenge/step1",
                 TikTokWebSocketTransport.sanitizeRedirectLocation("/challenge/step1?token=secret#hash"));
     }
+
+    @Test
+    public void capturesSanitizedHandshakeStatusAndMessageOnHttp200Rejection() throws Exception {
+        String raw = "HTTP/1.1 200 OK\r\n"
+                + "Content-Length: 0\r\n"
+                + "Handshake-Status: 1004\r\n"
+                + "Handshake-Msg: missing_ttwid token=super_secret_val\r\n"
+                + "\r\n";
+
+        TikTokWebSocketTransport.HandshakeEvaluation eval =
+                TikTokWebSocketTransport.readAndEvaluateHandshake(
+                        "webcast-ws.us.tiktok.com",
+                        new ByteArrayInputStream(raw.getBytes(StandardCharsets.ISO_8859_1)),
+                        TEST_WS_KEY
+                );
+
+        assertFalse(eval.accepted);
+        assertEquals(200, eval.diagnostics.httpStatus);
+        assertEquals("upgrade_missing", eval.diagnostics.responseClass);
+        assertEquals("empty", eval.diagnostics.bodyKind);
+        assertEquals(0, eval.diagnostics.bodyBytes);
+        assertTrue(eval.diagnostics.rejectionReason.contains("handshake-status=1004"));
+        assertTrue(eval.diagnostics.rejectionReason.contains("missing_ttwid"));
+        assertFalse(eval.diagnostics.rejectionReason.contains("super_secret_val"));
+    }
 }

@@ -273,6 +273,72 @@ public class TikTokTransportProtocolTest {
                 "direct", "direct", true, true, "", "", "jwt-1", ""));
     }
 
+    @Test
+    public void webSocketUrlWithDeviceIdUnifiesBrowserFingerprintAndDoesNotOverrideSignedParams() throws Exception {
+        String url = TikTokWebSocketTransport.buildWebSocketUrl(
+                TikTokWebSocketTransport.DIRECT_WS_BASE_URL,
+                "7712777833754118933",
+                true,
+                10_000L,
+                true,
+                12L,
+                null,
+                null,
+                null,
+                "7345678901234567890"
+        );
+
+        Map<String, String> params = parseQuery(url.substring(url.indexOf('?') + 1));
+        assertEquals("7345678901234567890", params.get("device_id"));
+        assertEquals("7345678901234567890", params.get("did"));
+        assertEquals("en-US", params.get("browser_language"));
+        assertEquals(TikTokRoomResolver.CLIENT_BROWSER_VERSION, params.get("browser_version"));
+        assertEquals("android", params.get("os"));
+        assertEquals("800", params.get("screen_height"));
+        assertEquals("360", params.get("screen_width"));
+        assertEquals("en", params.get("webcast_language"));
+
+        String signedUrl = TikTokWebSocketTransport.buildWebSocketUrl(
+                "wss://webcast-ws.tiktok.com/ws/?device_id=signed_dev&did=signed_did",
+                "7712777833754118933",
+                true,
+                10_000L,
+                true,
+                0L,
+                null,
+                null,
+                null,
+                "7345678901234567890"
+        );
+        Map<String, String> signedParams = parseQuery(signedUrl.substring(signedUrl.indexOf('?') + 1));
+        assertEquals("signed_dev", signedParams.get("device_id"));
+        assertEquals("signed_did", signedParams.get("did"));
+    }
+
+    @Test
+    public void classifiesDeterministicVsTransientDirectHandshakeRejectionsAndSanitizesPushServer() {
+        assertTrue(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(200, "upgrade_missing"));
+        assertTrue(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(200, "edge_html"));
+        assertTrue(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(200, "api_json"));
+        assertTrue(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(403, "protocol_rejected"));
+        assertTrue(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(401, "protocol_rejected"));
+        assertTrue(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(302, "redirect"));
+
+        assertFalse(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(0, "unknown"));
+        assertFalse(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(429, "protocol_rejected"));
+        assertFalse(TikTokLiveConnector.isDeterministicDirectHandshakeRejection(503, "protocol_rejected"));
+
+        assertEquals(
+                "wss://webcast16-ws-sg.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/",
+                TikTokLiveConnector.sanitizeDirectPushServerUrl(
+                        "https://webcast16-ws-sg.tiktok.com/webcast/im/ws_proxy/ws_reuse_supplement/?ignored=1"
+                )
+        );
+        assertEquals("", TikTokLiveConnector.sanitizeDirectPushServerUrl("ws://webcast-ws.tiktok.com/ws/"));
+        assertEquals("", TikTokLiveConnector.sanitizeDirectPushServerUrl("wss://evil.example.com/ws/"));
+        assertEquals("", TikTokLiveConnector.sanitizeDirectPushServerUrl("wss://user:pass@webcast-ws.tiktok.com/ws/"));
+    }
+
     private static void assertIllegalArgument(ThrowingRunnable action) {
         try {
             action.run();

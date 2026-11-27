@@ -425,6 +425,85 @@ public class TikTokRoomResolverTest {
         assertEquals("WARMUP_FAILED", failed.diagnostics.result);
     }
 
+    @Test
+    public void parseSetCookieHeadersIntoRemovesExpiredAndDeletedCookiesFromExistingJar() {
+        Map<String, String> jar = new LinkedHashMap<>();
+        jar.put("ttwid", "1%7Cexisting_ttwid");
+        jar.put("msToken", "keep_me");
+
+        Map<String, List<String>> headers = new LinkedHashMap<>();
+        List<String> setCookies = new ArrayList<>();
+        setCookies.add("ttwid=deleted; Path=/; Max-Age=0");
+        setCookies.add("tt_csrf_token=fresh_csrf; Path=/; Secure");
+        headers.put("Set-Cookie", setCookies);
+
+        Map<String, String> delta = TikTokRoomResolver.parseSetCookieHeadersInto(headers, jar);
+        assertFalse(jar.containsKey("ttwid"));
+        assertFalse(delta.containsKey("ttwid"));
+        assertEquals("keep_me", jar.get("msToken"));
+        assertEquals("fresh_csrf", jar.get("tt_csrf_token"));
+    }
+
+    @Test
+    public void ttwidCheckEndpointSetsTtwidOpportunisticallyAndToleratesFailure() {
+        Map<String, String> cookies = new LinkedHashMap<>();
+        List<String> sentBodies = new ArrayList<>();
+        boolean ok = TikTokRoomResolver.tryFetchTtwidFromCheckEndpoint(
+                cookies,
+                "7345678901234567890",
+                (url, jsonBody, cookieJar, maxBytes) -> {
+                    sentBodies.add(jsonBody);
+                    cookieJar.put("ttwid", "1%7Ccheck_ttwid");
+                    return new TikTokRoomResolver.HttpTextResponse(200, "{\"status_code\":0}", true, 1);
+                }
+        );
+
+        assertTrue(ok);
+        assertEquals("1%7Ccheck_ttwid", cookies.get("ttwid"));
+        assertEquals(1, sentBodies.size());
+        assertTrue(sentBodies.get(0).contains("\"did\":\"7345678901234567890\""));
+
+        Map<String, String> emptyCookies = new LinkedHashMap<>();
+        boolean failedOk = TikTokRoomResolver.tryFetchTtwidFromCheckEndpoint(
+                emptyCookies,
+                "7345678901234567890",
+                (url, jsonBody, cookieJar, maxBytes) -> {
+                    throw new IOException("connection reset");
+                }
+        );
+        assertFalse(failedOk);
+        assertFalse(emptyCookies.containsKey("ttwid"));
+    }
+
+    @Test
+    public void resultExposesDeviceIdSafelyAcrossOverloads() {
+        TikTokRoomResolver.Result legacy = new TikTokRoomResolver.Result(
+                TikTokRoomResolver.Status.RESOLVED_LIVE,
+                ".jejeangela",
+                "7712777833754118933",
+                "Title",
+                2,
+                200,
+                "OK",
+                null
+        );
+        assertEquals("", legacy.deviceId);
+
+        TikTokRoomResolver.Result withDeviceId = new TikTokRoomResolver.Result(
+                TikTokRoomResolver.Status.RESOLVED_LIVE,
+                ".jejeangela",
+                "7712777833754118933",
+                "Title",
+                2,
+                200,
+                "OK",
+                null,
+                null,
+                " 7345678901234567890 "
+        );
+        assertEquals("7345678901234567890", withDeviceId.deviceId);
+    }
+
     private static Map<String, String> parseQuery(String rawQuery) throws Exception {
         Map<String, String> result = new HashMap<>();
         for (String pair : rawQuery.split("&")) {

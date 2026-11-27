@@ -178,6 +178,33 @@ public final class TikTokWebSocketTransport {
             @Nullable String internalExt,
             @Nullable Map<String, String> routeParams
     ) {
+        return buildWebSocketUrl(
+                baseUrl,
+                roomId,
+                wsDirect,
+                heartbeatDurationMs,
+                clientEnter,
+                lastRttMs,
+                cursor,
+                internalExt,
+                routeParams,
+                null
+        );
+    }
+
+    @NonNull
+    public static String buildWebSocketUrl(
+            @NonNull String baseUrl,
+            @NonNull String roomId,
+            boolean wsDirect,
+            long heartbeatDurationMs,
+            boolean clientEnter,
+            long lastRttMs,
+            @Nullable String cursor,
+            @Nullable String internalExt,
+            @Nullable Map<String, String> routeParams,
+            @Nullable String deviceId
+    ) {
         try {
             StringBuilder sb = new StringBuilder(baseUrl);
             int queryStart = baseUrl.indexOf('?');
@@ -200,20 +227,29 @@ public final class TikTokWebSocketTransport {
             putIfMissing(params, existingKeys, "aid", "1988");
             putIfMissing(params, existingKeys, "app_language", "en");
             putIfMissing(params, existingKeys, "app_name", "tiktok_web");
-            putIfMissing(params, existingKeys, "browser_language", "en");
+            putIfMissing(params, existingKeys, "browser_language", "en-US");
             putIfMissing(params, existingKeys, "browser_name", "Mozilla");
             putIfMissing(params, existingKeys, "browser_platform", "Linux aarch64");
-            putIfMissing(params, existingKeys, "browser_version", "5.0");
+            putIfMissing(params, existingKeys, "browser_version", TikTokRoomResolver.CLIENT_BROWSER_VERSION);
             putIfMissing(params, existingKeys, "compress", "gzip");
             putIfMissing(params, existingKeys, "device_platform", "web_mobile");
             putIfMissing(params, existingKeys, "did_rule", "3");
             putIfMissing(params, existingKeys, "fetch_rule", "1");
             putIfMissing(params, existingKeys, "identity", "audience");
             putIfMissing(params, existingKeys, "live_id", "12");
+            putIfMissing(params, existingKeys, "os", "android");
+            putIfMissing(params, existingKeys, "screen_height", "800");
+            putIfMissing(params, existingKeys, "screen_width", "360");
             putIfMissing(params, existingKeys, "tz_name", "UTC");
             putIfMissing(params, existingKeys, "update_version_code", "1.3.0");
             putIfMissing(params, existingKeys, "version_code", "180800");
+            putIfMissing(params, existingKeys, "webcast_language", "en");
             putIfMissing(params, existingKeys, "webcast_sdk_version", "1.3.0");
+            if (deviceId != null && !deviceId.trim().isEmpty()) {
+                String cleanDeviceId = deviceId.trim();
+                putIfMissing(params, existingKeys, "device_id", cleanDeviceId);
+                putIfMissing(params, existingKeys, "did", cleanDeviceId);
+            }
 
             if (routeParams != null) {
                 for (Map.Entry<String, String> e : routeParams.entrySet()) {
@@ -392,7 +428,7 @@ public final class TikTokWebSocketTransport {
                 out.write(req.toString().getBytes(StandardCharsets.US_ASCII));
                 out.flush();
 
-                HandshakeEvaluation evaluation = readAndEvaluateHandshake(host, in, secWebSocketKey);
+                HandshakeEvaluation evaluation = readAndEvaluateHandshake(host, in, secWebSocketKey, socket);
                 if (!evaluation.accepted) {
                     closeQuietly(socket);
                     listener.onHandshakeRejected(evaluation.diagnostics);
@@ -680,6 +716,16 @@ public final class TikTokWebSocketTransport {
             @NonNull InputStream in,
             @NonNull String secWebSocketKey
     ) throws Exception {
+        return readAndEvaluateHandshake(attemptedHost, in, secWebSocketKey, null);
+    }
+
+    @NonNull
+    static HandshakeEvaluation readAndEvaluateHandshake(
+            @NonNull String attemptedHost,
+            @NonNull InputStream in,
+            @NonNull String secWebSocketKey,
+            @Nullable SSLSocket socket
+    ) throws Exception {
         HandshakeResponse hs = readHandshakeResponse(in);
         String expectedAccept = computeAcceptKey(secWebSocketKey);
         if (isValidSwitchingProtocols(hs, expectedAccept)) {
@@ -687,6 +733,13 @@ public final class TikTokWebSocketTransport {
                     attemptedHost, hs, new byte[0], expectedAccept, secWebSocketKey, true
             );
             return new HandshakeEvaluation(true, okDiag);
+        }
+        if (socket != null) {
+            try {
+                // Batasi read body diagnostik agar server keep-alive tanpa Content-Length tidak menahan thread 35 detik.
+                socket.setSoTimeout(2_500);
+            } catch (IOException ignored) {
+            }
         }
         byte[] bodySample = readBoundedDiagnosticBody(in, hs, MAX_DIAGNOSTIC_BODY_BYTES);
         HandshakeDiagnostics rejectedDiag = buildRejectedOrOkDiagnostics(
@@ -723,6 +776,8 @@ public final class TikTokWebSocketTransport {
         String serverHeader = sanitizeHeaderValue(hs.getHeader("server"));
         String upgradeHdr = sanitizeHeaderValue(hs.getHeader("upgrade"));
         String connHdr = sanitizeHeaderValue(hs.getHeader("connection"));
+        String handshakeStatus = sanitizeHeaderValue(hs.getHeader("handshake-status"));
+        String handshakeMsg = sanitizeHeaderValue(hs.getHeader("handshake-msg"));
         String acceptRaw = hs.getHeader("sec-websocket-accept");
         boolean hasAccept = acceptRaw != null && !acceptRaw.trim().isEmpty();
 
@@ -749,7 +804,8 @@ public final class TikTokWebSocketTransport {
         );
         String reason = buildSafeRejectionReason(
                 hs.statusCode, responseClass, bodyKind, redirectLocation,
-                upgradeHdr, connHdr, hasAccept, secWebSocketKey
+                upgradeHdr, connHdr, hasAccept, secWebSocketKey,
+                handshakeStatus, handshakeMsg
         );
 
         return new HandshakeDiagnostics(
@@ -960,7 +1016,9 @@ public final class TikTokWebSocketTransport {
             @NonNull String upgradeHdr,
             @NonNull String connHdr,
             boolean hasAccept,
-            @NonNull String secWebSocketKey
+            @NonNull String secWebSocketKey,
+            @NonNull String handshakeStatus,
+            @NonNull String handshakeMsg
     ) {
         String raw;
         if (statusCode == 101) {
@@ -987,6 +1045,19 @@ public final class TikTokWebSocketTransport {
             raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + ").";
         } else {
             raw = "Handshake WebSocket ditolak server (HTTP " + statusCode + ").";
+        }
+        if (!handshakeStatus.isEmpty() || !handshakeMsg.isEmpty()) {
+            StringBuilder extra = new StringBuilder(raw);
+            if (!handshakeStatus.isEmpty()) {
+                extra.append(" [handshake-status=").append(handshakeStatus);
+                if (!handshakeMsg.isEmpty()) {
+                    extra.append(", ").append(handshakeMsg);
+                }
+                extra.append(']');
+            } else {
+                extra.append(" [").append(handshakeMsg).append(']');
+            }
+            raw = extra.toString();
         }
         return sanitizeDiagnosticText(raw, secWebSocketKey, 220);
     }

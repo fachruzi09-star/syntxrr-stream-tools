@@ -1309,6 +1309,106 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
     'IntegrationsView must display Belum tersedia when diagnostic data is unavailable'
   );
 
+  // 10. Deterministic Direct rejection transitions cleanly to error, preserves roomStatus & diagnostics, and allows fresh retry
+  assert(
+    javaSrc.includes('DIRECT_TTWID_REQUIRED') &&
+      javaSrc.includes('DIRECT_WS_HANDSHAKE_REJECTED') &&
+      javaSrc.includes('MAX_DETERMINISTIC_DIRECT_RETRIES') &&
+      javaSrc.includes('isDeterministicDirectHandshakeRejection') &&
+      javaSrc.includes('TikTokRoomResolver.tryFetchTtwidFromCheckEndpoint') &&
+      javaSrc.includes('TikTokRoomResolver.fetchInitialWebcastResponse'),
+    'TikTokLiveConnector.java must implement im/fetch + ttwid/check bootstrap and bounded deterministic rejection handling'
+  );
+  assert(
+    !javaSrc.includes('Do not abandon a valid LIVE target after a temporary outage'),
+    'TikTokLiveConnector.java must not contain infinite mReconnectAttempt=0 loop'
+  );
+
+  let nativeConnectCalls = 0;
+  const deterministicHooks: {
+    stateCb: ((payload: NativeTikTokStatePayload) => void) | null;
+  } = { stateCb: null };
+  const deterministicConnector = new TikTokLiveConnector({
+    isSupported: () => true,
+    onState: async (cb) => {
+      deterministicHooks.stateCb = cb;
+      return {
+        remove: async () => {
+          deterministicHooks.stateCb = null;
+        },
+      };
+    },
+    onEvent: async () => ({ remove: async () => {} }),
+    getStatus: async () => null,
+    disconnect: async () => ({ success: true }),
+    connect: async () => {
+      nativeConnectCalls++;
+      return {
+        accepted: true,
+        status: {
+          state: 'resolving_room',
+          transport: 'none',
+          connectionMethod: 'direct',
+          roomStatus: 'unknown',
+          username: '.jejeangela',
+          roomId: '',
+          viewerCount: 0,
+          totalLikeCount: 0,
+          message: 'Mencari room LIVE @.jejeangela...',
+        },
+      };
+    },
+  });
+
+  await deterministicConnector.connect({ username: '@.jejeangela', connectionMethod: 'direct' });
+  assertEqual(nativeConnectCalls, 1, 'First connect reaches native adapter');
+
+  deterministicHooks.stateCb?.({
+    state: 'error',
+    transport: 'none',
+    connectionMethod: 'direct',
+    roomStatus: 'live',
+    username: '.jejeangela',
+    roomId: '7712777833754118933',
+    viewerCount: 0,
+    totalLikeCount: 0,
+    message: 'Handshake WebSocket ditolak server (HTTP 200). TikTok tidak menerbitkan cookie ttwid anonim.',
+    errorCode: 'DIRECT_TTWID_REQUIRED',
+    diagnosticStage: 'error',
+    roomLookupHttpStatus: 200,
+    hasTtwidCookie: false,
+    cookieWarmUpHomepageHttpStatus: 200,
+    cookieWarmUpHomepageHasSetCookie: true,
+    cookieWarmUpHomepageCookieCount: 1,
+    cookieWarmUpHomepageHasTtwid: false,
+    cookieWarmUpLivePageAttempted: true,
+    cookieWarmUpLivePageHttpStatus: 200,
+    cookieWarmUpLivePageHasSetCookie: true,
+    cookieWarmUpLivePageCookieCount: 1,
+    cookieWarmUpLivePageHasTtwid: false,
+    cookieWarmUpResult: 'TTWID_NOT_FOUND',
+    websocketHttpStatus: 200,
+    websocketAttemptHost: 'webcast-ws.us.tiktok.com',
+    websocketBodyBytes: 0,
+    websocketBodyKind: 'empty',
+    websocketResponseClass: 'upgrade_missing',
+    roomEntryFrameSent: false,
+    roomEntryConfirmed: false,
+    decodedEventCount: 0,
+  });
+
+  const failedStatus = deterministicConnector.getStatus();
+  assertEqual(failedStatus.state, 'error', 'Deterministic rejection lands in error state');
+  assertEqual(failedStatus.errorCode, 'DIRECT_TTWID_REQUIRED', 'Preserves DIRECT_TTWID_REQUIRED errorCode');
+  assertEqual(failedStatus.roomStatus, 'live', 'Preserves resolved LIVE roomStatus on transport error');
+  assertEqual(failedStatus.roomId, '7712777833754118933', 'Preserves resolved roomId on transport error');
+  assertEqual(failedStatus.diagnostics?.websocketResponseClass, 'upgrade_missing', 'Preserves WS diagnostics');
+  assertEqual(deterministicConnector.isActiveSession(), false, 'Error state is not treated as active session');
+
+  await deterministicConnector.connect({ username: '@.jejeangela', connectionMethod: 'direct' });
+  assertEqual(nativeConnectCalls, 2, 'Manual retry after deterministic error starts fresh native connect');
+  await deterministicConnector.destroy();
+
   await connector.disconnect();
   await connector.destroy();
 }
