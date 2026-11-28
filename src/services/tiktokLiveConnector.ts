@@ -5,6 +5,7 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 import type {
   AppSettings,
+  StreamEvent,
   StreamEventMetadataUpdate,
   TikTokAccountState,
   TikTokConnectionDiagnostics,
@@ -21,14 +22,16 @@ import { streamEventBus } from './eventBus';
 import {
   connectTikTokLiveNative,
   disconnectTikTokLiveNative,
+  getTikTokLiveEventsSinceNative,
   getTikTokLiveStatusNative,
   isNativeAndroid,
   onTikTokLiveEvent,
   onTikTokLiveState,
   type NativeTikTokRawEventPayload,
+  type NativeTikTokReplaySnapshot,
   type NativeTikTokStatePayload,
 } from './nativeCompanionBridge';
-import { TikTokEventNormalizer } from './tiktokEventNormalizer';
+import { BoundedEventDeduplicator, TikTokEventNormalizer } from './tiktokEventNormalizer';
 
 export const TIKTOK_USERNAME_REGEX = /^[A-Za-z0-9._]{1,64}$/;
 
@@ -86,6 +89,11 @@ export interface TikTokTransportAdapter {
     status?: NativeTikTokStatePayload;
   }>;
   getStatus: () => Promise<NativeTikTokStatePayload | null>;
+  getEventsSince?: (options?: {
+    sessionId?: number;
+    afterSequence?: number;
+    limit?: number;
+  }) => Promise<NativeTikTokReplaySnapshot | null>;
   onState: (cb: (payload: NativeTikTokStatePayload) => void) => Promise<PluginListenerHandle | null>;
   onEvent: (cb: (payload: NativeTikTokRawEventPayload) => void) => Promise<PluginListenerHandle | null>;
 }
@@ -95,6 +103,7 @@ const DEFAULT_NATIVE_ADAPTER: TikTokTransportAdapter = {
   connect: connectTikTokLiveNative,
   disconnect: disconnectTikTokLiveNative,
   getStatus: getTikTokLiveStatusNative,
+  getEventsSince: getTikTokLiveEventsSinceNative,
   onState: onTikTokLiveState,
   onEvent: onTikTokLiveEvent,
 };
@@ -391,11 +400,89 @@ function initialStatus(): TikTokConnectorStatus {
 
 export type TikTokStatusListener = (status: TikTokConnectorStatus) => void;
 
+export interface TikTokReplayDiagnostics {
+  nativeSessionId: number | null;
+  lastProcessedSequence: number;
+  pendingSequencedCount: number;
+  replayInFlight: boolean;
+  replayedEventCount: number;
+  detectedGapCount: number;
+  unrecoveredGapCount: number;
+  replayOverflowCount: number;
+  duplicateSequenceCount: number;
+}
+
+const MAX_PENDING_SEQUENCED_EVENTS = 256;
+const MAX_REPLAY_PAGE_LIMIT = 256;
+const MAX_REPLAY_PAGES = 16;
+const MAX_RECENT_SEQUENCE_CACHE = 512;
+const MAX_SUPERSEDED_SESSIONS = 16;
+
+interface SequencedRawEventMeta {
+  sessionId: number;
+  sequence: number;
+}
+
+type SequencedRawEvent = NativeTikTokRawEventPayload & {
+  nativeSequence: number;
+  nativeSessionId: number;
+};
+
+function isValidRawEventObject(raw: unknown): raw is NativeTikTokRawEventPayload {
+  return (
+    Boolean(raw) &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    typeof (raw as NativeTikTokRawEventPayload).method === 'string' &&
+    (raw as NativeTikTokRawEventPayload).method.trim().length > 0
+  );
+}
+
+function getSequencedMeta(raw: unknown): SequencedRawEventMeta | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+  const candidate = raw as NativeTikTokRawEventPayload;
+  if (
+    typeof candidate.nativeSequence !== 'number' ||
+    !Number.isFinite(candidate.nativeSequence) ||
+    candidate.nativeSequence <= 0
+  ) {
+    return null;
+  }
+  if (
+    typeof candidate.nativeSessionId !== 'number' ||
+    !Number.isFinite(candidate.nativeSessionId) ||
+    candidate.nativeSessionId <= 0
+  ) {
+    return null;
+  }
+  return {
+    sessionId: Math.trunc(candidate.nativeSessionId),
+    sequence: Math.trunc(candidate.nativeSequence),
+  };
+}
+
+function isValidReplaySnapshot(raw: unknown): raw is NativeTikTokReplaySnapshot {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return false;
+  }
+  const candidate = raw as NativeTikTokReplaySnapshot;
+  return (
+    Array.isArray(candidate.events) &&
+    typeof candidate.sessionId === 'number' &&
+    Number.isFinite(candidate.sessionId)
+  );
+}
+
 export class TikTokLiveConnector {
   private readonly adapter: TikTokTransportAdapter;
   private readonly normalizer = new TikTokEventNormalizer();
+  private readonly replayNormalizer = new TikTokEventNormalizer();
   private readonly emitToBus: (event: NonNullable<ReturnType<TikTokEventNormalizer['normalize']>['event']>) => void;
   private readonly updateToBus: (update: StreamEventMetadataUpdate) => void;
+  private readonly replayToBus: (event: StreamEvent) => void;
+  private readonly replayUpdateToBus: (update: StreamEventMetadataUpdate) => void;
   private readonly listeners = new Set<TikTokStatusListener>();
 
   private status: TikTokConnectorStatus = initialStatus();
@@ -412,16 +499,38 @@ export class TikTokLiveConnector {
     eulerJwtKey: string;
   } | null = null;
 
+  private nativeSessionId: number | null = null;
+  private lastProcessedSequence = 0;
+  private replayGeneration = 0;
+  private replayInFlight = false;
+  private drainPromise: Promise<void> | null = null;
+  private pendingSequencedEvents: SequencedRawEvent[] = [];
+  private pendingLegacyEvents: NativeTikTokRawEventPayload[] = [];
+  private readonly recentSequenceCache = new BoundedEventDeduplicator(MAX_RECENT_SEQUENCE_CACHE);
+  private readonly supersededSessionIds = new BoundedEventDeduplicator(MAX_SUPERSEDED_SESSIONS);
+  private replayDiagnostics = {
+    replayedEventCount: 0,
+    detectedGapCount: 0,
+    unrecoveredGapCount: 0,
+    replayOverflowCount: 0,
+    duplicateSequenceCount: 0,
+  };
+
   constructor(
     adapter: TikTokTransportAdapter = DEFAULT_NATIVE_ADAPTER,
     emitToBus: (event: NonNullable<ReturnType<TikTokEventNormalizer['normalize']>['event']>) => void = (evt) =>
       streamEventBus.emit(evt),
     updateToBus: (update: StreamEventMetadataUpdate) => void = (upd) =>
-      streamEventBus.updateEventMetadata(upd)
+      streamEventBus.updateEventMetadata(upd),
+    replayToBus: (event: StreamEvent) => void = (evt) => streamEventBus.replay(evt),
+    replayUpdateToBus: (update: StreamEventMetadataUpdate) => void = (upd) =>
+      streamEventBus.replayMetadataUpdate(upd)
   ) {
     this.adapter = adapter;
     this.emitToBus = emitToBus;
     this.updateToBus = updateToBus;
+    this.replayToBus = replayToBus;
+    this.replayUpdateToBus = replayUpdateToBus;
   }
 
   getStatus(): TikTokConnectorStatus {
@@ -429,6 +538,22 @@ export class TikTokLiveConnector {
       ...this.status,
       diagnostics: this.status.diagnostics ? { ...this.status.diagnostics } : undefined,
     };
+  }
+
+  getReplayDiagnostics(): TikTokReplayDiagnostics {
+    return {
+      nativeSessionId: this.nativeSessionId,
+      lastProcessedSequence: this.lastProcessedSequence,
+      pendingSequencedCount: this.pendingSequencedEvents.length,
+      replayInFlight: this.replayInFlight,
+      ...this.replayDiagnostics,
+    };
+  }
+
+  async waitForReplayIdle(): Promise<void> {
+    while (this.drainPromise) {
+      await this.drainPromise;
+    }
   }
 
   isConnected(): boolean {
@@ -476,6 +601,9 @@ export class TikTokLiveConnector {
           });
         }
         this.listenersAttached = true;
+        if (typeof this.adapter.getEventsSince === 'function') {
+          await this.runInitialReplaySerialized();
+        }
       } finally {
         this.attachingPromise = null;
       }
@@ -493,6 +621,7 @@ export class TikTokLiveConnector {
     if (nativeStatus) {
       this.applyNativeState(nativeStatus);
     }
+    await this.syncMissedEventsFromNative();
     return this.getStatus();
   }
 
@@ -616,6 +745,9 @@ export class TikTokLiveConnector {
         diagnostics: undefined,
       });
 
+      const sessionBeforeConnect = this.nativeSessionId;
+      const genBeforeConnect = this.replayGeneration;
+
       const res = await this.adapter.connect({
         username: cleanUser,
         eulerApiKey: cleanApiKey || undefined,
@@ -623,6 +755,12 @@ export class TikTokLiveConnector {
         allowEulerFallback,
         connectionMethod,
       });
+
+      if (res.accepted) {
+        if (this.nativeSessionId === sessionBeforeConnect && this.replayGeneration === genBeforeConnect) {
+          this.switchToNewNativeSession(null);
+        }
+      }
 
       if (res.status) {
         this.applyNativeState(res.status);
@@ -650,15 +788,19 @@ export class TikTokLiveConnector {
 
   async disconnect(): Promise<TikTokConnectorStatus> {
     this.activeConnectConfig = null;
+    this.invalidateReplayAndQueues(true);
+    this.normalizer.reset();
+
     if (this.adapter.isSupported()) {
       const res = await this.adapter.disconnect();
+      this.invalidateReplayAndQueues(true);
+      this.normalizer.reset();
       if (res.status) {
         this.applyNativeState(res.status);
         return this.getStatus();
       }
     }
 
-    this.normalizer.reset();
     this.updateStatus({
       state: 'disconnected',
       transport: 'none',
@@ -677,6 +819,7 @@ export class TikTokLiveConnector {
 
   async destroy(): Promise<void> {
     this.activeConnectConfig = null;
+    this.invalidateReplayAndQueues(true);
     if (this.stateHandle) {
       await this.stateHandle.remove().catch(() => {});
       this.stateHandle = null;
@@ -690,41 +833,649 @@ export class TikTokLiveConnector {
     this.listeners.clear();
   }
 
+  private invalidateReplayAndQueues(clearSuperseded: boolean): void {
+    this.replayGeneration++;
+    this.replayInFlight = false;
+    this.drainPromise = null;
+    this.pendingSequencedEvents = [];
+    this.pendingLegacyEvents = [];
+    this.nativeSessionId = null;
+    this.lastProcessedSequence = 0;
+    this.recentSequenceCache.clear();
+    if (clearSuperseded) {
+      this.supersededSessionIds.clear();
+    }
+    this.replayNormalizer.reset();
+  }
+
+  private switchToNewNativeSession(newSessionId: number | null): void {
+    if (this.nativeSessionId !== null && this.nativeSessionId !== newSessionId) {
+      this.supersededSessionIds.markAndCheckDuplicate(String(this.nativeSessionId));
+    }
+    this.replayGeneration++;
+    this.replayInFlight = false;
+    this.drainPromise = null;
+    this.nativeSessionId = newSessionId;
+    this.lastProcessedSequence = 0;
+    this.pendingSequencedEvents = [];
+    this.recentSequenceCache.clear();
+    this.replayNormalizer.reset();
+  }
+
   private handleIncomingRawEvent(raw: NativeTikTokRawEventPayload): void {
-    const outcome = this.normalizer.normalize(raw);
-    if (outcome.roomEnded) {
-      this.updateStatus({
-        ...this.status,
-        state: 'waiting_for_live',
-        transport: 'none',
-        roomStatus: 'not_live',
-        message: `Siaran LIVE @${this.status.username || 'streamer'} telah berakhir.`,
-        errorCode: 'LIVE_ENDED',
+    const seqMeta = getSequencedMeta(raw);
+
+    // Jalur legacy untuk event tanpa nativeSequence/nativeSessionId
+    if (!seqMeta) {
+      if (this.replayInFlight) {
+        if (this.pendingLegacyEvents.length >= MAX_PENDING_SEQUENCED_EVENTS) {
+          this.pendingLegacyEvents.shift();
+        }
+        this.pendingLegacyEvents.push(raw);
+        void this.scheduleDrain();
+        return;
+      }
+      this.tryProcessLiveRawEvent(raw);
+      return;
+    }
+
+    if (!isValidRawEventObject(raw)) {
+      return;
+    }
+
+    if (this.supersededSessionIds.has(String(seqMeta.sessionId))) {
+      this.replayDiagnostics.duplicateSequenceCount++;
+      return;
+    }
+
+    if (this.nativeSessionId !== null && seqMeta.sessionId !== this.nativeSessionId) {
+      this.switchToNewNativeSession(seqMeta.sessionId);
+    }
+
+    if (
+      this.nativeSessionId === seqMeta.sessionId &&
+      (seqMeta.sequence <= this.lastProcessedSequence ||
+        this.recentSequenceCache.has(`${seqMeta.sessionId}:${seqMeta.sequence}`))
+    ) {
+      this.replayDiagnostics.duplicateSequenceCount++;
+      return;
+    }
+
+    // Jalur cepat saat sudah sinkron (tanpa replay aktif, tanpa antrean tertunda, urutan tepat berikutnya)
+    if (!this.replayInFlight && this.pendingSequencedEvents.length === 0 && this.pendingLegacyEvents.length === 0) {
+      if (this.nativeSessionId === null) {
+        if (seqMeta.sequence === 1 || typeof this.adapter.getEventsSince !== 'function') {
+          this.nativeSessionId = seqMeta.sessionId;
+          if (this.tryProcessLiveRawEvent(raw)) {
+            this.lastProcessedSequence = seqMeta.sequence;
+            this.recentSequenceCache.markAndCheckDuplicate(`${seqMeta.sessionId}:${seqMeta.sequence}`);
+          }
+          return;
+        }
+      } else if (seqMeta.sequence === this.lastProcessedSequence + 1) {
+        if (this.tryProcessLiveRawEvent(raw)) {
+          this.lastProcessedSequence = seqMeta.sequence;
+          this.recentSequenceCache.markAndCheckDuplicate(`${seqMeta.sessionId}:${seqMeta.sequence}`);
+        }
+        return;
+      }
+    }
+
+    if (
+      !this.replayInFlight &&
+      this.pendingSequencedEvents.length === 0 &&
+      typeof this.adapter.getEventsSince === 'function'
+    ) {
+      const expectedNext = this.nativeSessionId === null ? 1 : this.lastProcessedSequence + 1;
+      if (seqMeta.sequence > expectedNext) {
+        this.replayDiagnostics.detectedGapCount++;
+      }
+    }
+
+    this.enqueuePendingSequencedEvent({
+      ...raw,
+      nativeSequence: seqMeta.sequence,
+      nativeSessionId: seqMeta.sessionId,
+    });
+    void this.scheduleDrain();
+  }
+
+  private enqueuePendingSequencedEvent(item: SequencedRawEvent): void {
+    if (
+      this.pendingSequencedEvents.some(
+        (existing) =>
+          existing.nativeSessionId === item.nativeSessionId &&
+          existing.nativeSequence === item.nativeSequence
+      )
+    ) {
+      this.replayDiagnostics.duplicateSequenceCount++;
+      return;
+    }
+
+    let inserted = false;
+    for (let i = 0; i < this.pendingSequencedEvents.length; i++) {
+      if (item.nativeSequence < this.pendingSequencedEvents[i].nativeSequence) {
+        this.pendingSequencedEvents.splice(i, 0, item);
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) {
+      this.pendingSequencedEvents.push(item);
+    }
+
+    while (this.pendingSequencedEvents.length > MAX_PENDING_SEQUENCED_EVENTS) {
+      const dropIndex = this.pendingSequencedEvents.findIndex(
+        (candidate) =>
+          candidate.method !== 'WebcastChatMessage' &&
+          candidate.method !== 'WebcastEmoteChatMessage' &&
+          candidate.method !== 'WebcastGiftMessage'
+      );
+      if (dropIndex >= 0) {
+        this.pendingSequencedEvents.splice(dropIndex, 1);
+      } else {
+        this.pendingSequencedEvents.shift();
+      }
+      this.replayDiagnostics.unrecoveredGapCount++;
+    }
+  }
+
+  private runInitialReplaySerialized(): Promise<void> {
+    if (this.drainPromise) {
+      return this.drainPromise;
+    }
+    const runGen = this.replayGeneration;
+    this.replayInFlight = true;
+    let promise: Promise<void> | null = null;
+    promise = (async () => {
+      try {
+        await this.performInitialReplay(runGen);
+        if (this.replayGeneration === runGen) {
+          await this.drainPendingQueuesLoop(runGen);
+        }
+      } finally {
+        if (this.replayGeneration === runGen) {
+          this.replayInFlight = false;
+        }
+        if (promise && this.drainPromise === promise) {
+          this.drainPromise = null;
+        }
+      }
+    })();
+    this.drainPromise = promise;
+    return promise;
+  }
+
+  private scheduleDrain(): Promise<void> {
+    if (this.drainPromise) {
+      return this.drainPromise;
+    }
+    const runGen = this.replayGeneration;
+    this.replayInFlight = true;
+    let promise: Promise<void> | null = null;
+    promise = (async () => {
+      try {
+        await this.drainPendingQueuesLoop(runGen);
+      } finally {
+        if (this.replayGeneration === runGen) {
+          this.replayInFlight = false;
+        }
+        if (promise && this.drainPromise === promise) {
+          this.drainPromise = null;
+        }
+      }
+    })();
+    this.drainPromise = promise;
+    return promise;
+  }
+
+  private async syncMissedEventsFromNative(): Promise<void> {
+    await this.waitForReplayIdle();
+    if (this.pendingSequencedEvents.length > 0) {
+      await this.scheduleDrain();
+      return;
+    }
+    if (this.nativeSessionId === null || typeof this.adapter.getEventsSince !== 'function') {
+      return;
+    }
+    const sessionId = this.nativeSessionId;
+    const runGen = this.replayGeneration;
+    this.replayInFlight = true;
+    let promise: Promise<void> | null = null;
+    promise = (async () => {
+      try {
+        await this.recoverGapForSequence(runGen, sessionId, Number.MAX_SAFE_INTEGER);
+        if (this.replayGeneration === runGen) {
+          await this.drainPendingQueuesLoop(runGen);
+        }
+      } finally {
+        if (this.replayGeneration === runGen) {
+          this.replayInFlight = false;
+        }
+        if (promise && this.drainPromise === promise) {
+          this.drainPromise = null;
+        }
+      }
+    })();
+    this.drainPromise = promise;
+    await promise;
+  }
+
+  private async performInitialReplay(gen: number): Promise<void> {
+    if (typeof this.adapter.getEventsSince !== 'function') {
+      return;
+    }
+
+    let requestedSessionId = 0;
+    let afterSequence = 0;
+    let restarts = 0;
+
+    for (let page = 0; page < MAX_REPLAY_PAGES; page++) {
+      if (gen !== this.replayGeneration) {
+        return;
+      }
+
+      let snapshot: NativeTikTokReplaySnapshot | null = null;
+      try {
+        snapshot = await this.adapter.getEventsSince({
+          sessionId: requestedSessionId,
+          afterSequence,
+          limit: MAX_REPLAY_PAGE_LIMIT,
+        });
+      } catch (err) {
+        console.warn('Gagal melakukan initial replay TikTok LIVE:', err);
+        return;
+      }
+
+      if (gen !== this.replayGeneration) {
+        return;
+      }
+      if (!isValidReplaySnapshot(snapshot)) {
+        return;
+      }
+
+      if (snapshot.overflow === true) {
+        this.replayDiagnostics.replayOverflowCount++;
+        console.warn(
+          `Native replay buffer overflow saat initial recovery (sessionId=${snapshot.sessionId}, dropped=${snapshot.droppedCount}).`
+        );
+      }
+
+      if (requestedSessionId === 0) {
+        if (snapshot.sessionId > 0) {
+          this.nativeSessionId = snapshot.sessionId;
+          requestedSessionId = snapshot.sessionId;
+        }
+        const hasMismatchedEventSession =
+          requestedSessionId > 0 &&
+          snapshot.events.some((evt) => {
+            const meta = getSequencedMeta(evt);
+            return meta !== null && meta.sessionId !== requestedSessionId;
+          });
+        if (hasMismatchedEventSession && restarts < 1) {
+          restarts++;
+          afterSequence = 0;
+          this.lastProcessedSequence = 0;
+          this.recentSequenceCache.clear();
+          this.replayNormalizer.reset();
+          continue;
+        }
+      } else if (
+        snapshot.sessionChanged === true ||
+        (snapshot.sessionId > 0 && snapshot.sessionId !== requestedSessionId)
+      ) {
+        if (restarts < 1 && snapshot.sessionId > 0) {
+          restarts++;
+          if (this.nativeSessionId !== null && this.nativeSessionId !== snapshot.sessionId) {
+            this.supersededSessionIds.markAndCheckDuplicate(String(this.nativeSessionId));
+          }
+          this.nativeSessionId = snapshot.sessionId;
+          requestedSessionId = snapshot.sessionId;
+          afterSequence = 0;
+          this.lastProcessedSequence = 0;
+          this.recentSequenceCache.clear();
+          this.replayNormalizer.reset();
+          continue;
+        }
+        return;
+      }
+
+      const targetSessionId = requestedSessionId > 0 ? requestedSessionId : snapshot.sessionId;
+      const beforeCursor = this.lastProcessedSequence;
+      const validEvents = this.extractOrderedReplayEvents(snapshot.events, targetSessionId, beforeCursor);
+
+      for (const evt of validEvents) {
+        if (gen !== this.replayGeneration) {
+          return;
+        }
+        const seq = evt.nativeSequence;
+        if (seq <= this.lastProcessedSequence || this.recentSequenceCache.has(`${targetSessionId}:${seq}`)) {
+          continue;
+        }
+        if (!this.tryProcessReplayRawEvent(evt)) {
+          return;
+        }
+        this.lastProcessedSequence = seq;
+        this.recentSequenceCache.markAndCheckDuplicate(`${targetSessionId}:${seq}`);
+      }
+
+      const madeProgress = this.lastProcessedSequence > beforeCursor;
+      if (snapshot.hasMore === true && madeProgress && targetSessionId > 0) {
+        afterSequence = this.lastProcessedSequence;
+        continue;
+      }
+      return;
+    }
+  }
+
+  private async drainPendingQueuesLoop(gen: number): Promise<void> {
+    while (gen === this.replayGeneration) {
+      while (this.pendingLegacyEvents.length > 0 && gen === this.replayGeneration) {
+        const legacyRaw = this.pendingLegacyEvents.shift()!;
+        this.tryProcessLiveRawEvent(legacyRaw);
+      }
+
+      if (this.pendingSequencedEvents.length === 0 || gen !== this.replayGeneration) {
+        return;
+      }
+
+      const head = this.pendingSequencedEvents[0];
+      const headSession = head.nativeSessionId;
+      const headSequence = head.nativeSequence;
+
+      if (this.supersededSessionIds.has(String(headSession))) {
+        this.pendingSequencedEvents.shift();
+        this.replayDiagnostics.duplicateSequenceCount++;
+        continue;
+      }
+
+      if (this.nativeSessionId !== null && headSession !== this.nativeSessionId) {
+        this.switchToNewNativeSession(headSession);
+        return;
+      }
+
+      if (this.nativeSessionId === headSession && headSequence <= this.lastProcessedSequence) {
+        this.pendingSequencedEvents.shift();
+        this.replayDiagnostics.duplicateSequenceCount++;
+        continue;
+      }
+
+      const activeSessionId = this.nativeSessionId ?? headSession;
+      const needsInitialSessionStartCheck = this.nativeSessionId === null && headSequence > 1;
+      const needsGapRecovery =
+        (this.nativeSessionId !== null && headSequence > this.lastProcessedSequence + 1) ||
+        needsInitialSessionStartCheck;
+
+      if (!needsGapRecovery || typeof this.adapter.getEventsSince !== 'function') {
+        if (this.nativeSessionId === null) {
+          this.nativeSessionId = headSession;
+        }
+        this.pendingSequencedEvents.shift();
+        if (this.tryProcessLiveRawEvent(head)) {
+          this.lastProcessedSequence = headSequence;
+          this.recentSequenceCache.markAndCheckDuplicate(`${headSession}:${headSequence}`);
+        }
+        continue;
+      }
+
+      const recoveryResult = await this.recoverGapForSequence(gen, activeSessionId, headSequence);
+      if (gen !== this.replayGeneration || recoveryResult.sessionChanged) {
+        return;
+      }
+
+      if (this.nativeSessionId === null) {
+        this.nativeSessionId = activeSessionId;
+      }
+
+      if (!recoveryResult.canProceed) {
+        const newHead = this.pendingSequencedEvents[0];
+        // Jika event berurutan yang hilang kebetulan tiba di antrean sementara replay gagal, lanjutkan drain.
+        if (
+          newHead &&
+          newHead.nativeSessionId === activeSessionId &&
+          newHead.nativeSequence === this.lastProcessedSequence + 1
+        ) {
+          continue;
+        }
+        this.replayDiagnostics.unrecoveredGapCount++;
+        return;
+      }
+
+      // Proses head jika masih menjadi urutan berikutnya (atau verifikasi awal sesi)
+      const currentHead = this.pendingSequencedEvents[0];
+      if (currentHead && currentHead.nativeSessionId === headSession && currentHead.nativeSequence === headSequence) {
+        this.pendingSequencedEvents.shift();
+        if (this.tryProcessLiveRawEvent(currentHead)) {
+          this.lastProcessedSequence = headSequence;
+          this.recentSequenceCache.markAndCheckDuplicate(`${headSession}:${headSequence}`);
+        }
+      }
+    }
+  }
+
+  private async recoverGapForSequence(
+    gen: number,
+    sessionId: number,
+    targetSequence: number
+  ): Promise<{ canProceed: boolean; sessionChanged: boolean }> {
+    if (typeof this.adapter.getEventsSince !== 'function') {
+      return { canProceed: this.lastProcessedSequence === 0, sessionChanged: false };
+    }
+
+    for (let page = 0; page < MAX_REPLAY_PAGES; page++) {
+      if (gen !== this.replayGeneration) {
+        return { canProceed: false, sessionChanged: false };
+      }
+
+      const beforeCursor = this.lastProcessedSequence;
+      let snapshot: NativeTikTokReplaySnapshot | null = null;
+      try {
+        snapshot = await this.adapter.getEventsSince({
+          sessionId,
+          afterSequence: beforeCursor,
+          limit: MAX_REPLAY_PAGE_LIMIT,
+        });
+      } catch (err) {
+        console.warn('Gagal memulihkan gap event TikTok LIVE:', err);
+        return { canProceed: false, sessionChanged: false };
+      }
+
+      if (gen !== this.replayGeneration) {
+        return { canProceed: false, sessionChanged: false };
+      }
+      if (!isValidReplaySnapshot(snapshot)) {
+        return { canProceed: false, sessionChanged: false };
+      }
+
+      if (snapshot.overflow === true) {
+        this.replayDiagnostics.replayOverflowCount++;
+        console.warn(
+          `Native replay buffer overflow saat gap recovery (sessionId=${snapshot.sessionId}, dropped=${snapshot.droppedCount}).`
+        );
+      }
+
+      if (snapshot.sessionChanged === true || (snapshot.sessionId > 0 && snapshot.sessionId !== sessionId)) {
+        const nextSessionId = snapshot.sessionId > 0 ? snapshot.sessionId : null;
+        if (this.nativeSessionId !== null && this.nativeSessionId !== nextSessionId) {
+          this.supersededSessionIds.markAndCheckDuplicate(String(this.nativeSessionId));
+        }
+        this.replayGeneration++;
+        this.nativeSessionId = nextSessionId;
+        this.lastProcessedSequence = 0;
+        this.pendingSequencedEvents = [];
+        this.recentSequenceCache.clear();
+        this.replayNormalizer.reset();
+
+        if (nextSessionId !== null) {
+          const newSessionEvents = this.extractOrderedReplayEvents(snapshot.events, nextSessionId, 0);
+          for (const evt of newSessionEvents) {
+            if (!this.tryProcessReplayRawEvent(evt)) {
+              break;
+            }
+            this.lastProcessedSequence = evt.nativeSequence;
+            this.recentSequenceCache.markAndCheckDuplicate(`${nextSessionId}:${evt.nativeSequence}`);
+          }
+        }
+        return { canProceed: false, sessionChanged: true };
+      }
+
+      const orderedCandidates = this.extractOrderedReplayEvents(
+        snapshot.events,
+        sessionId,
+        beforeCursor,
+        targetSequence
+      );
+
+      for (const evt of orderedCandidates) {
+        const seq = evt.nativeSequence;
+        if (seq <= this.lastProcessedSequence || this.recentSequenceCache.has(`${sessionId}:${seq}`)) {
+          continue;
+        }
+        if (!this.tryProcessReplayRawEvent(evt)) {
+          return { canProceed: false, sessionChanged: false };
+        }
+        this.lastProcessedSequence = seq;
+        this.recentSequenceCache.markAndCheckDuplicate(`${sessionId}:${seq}`);
+      }
+
+      if (this.nativeSessionId === null) {
+        this.nativeSessionId = sessionId;
+      }
+
+      // Awal sesi eksplisit baru terverifikasi di NativeTikTokEventBuffer (sequence global dimulai > 1)
+      if (
+        targetSequence < Number.MAX_SAFE_INTEGER &&
+        beforeCursor === 0 &&
+        snapshot.overflow !== true &&
+        typeof snapshot.oldestSequence === 'number' &&
+        snapshot.oldestSequence === targetSequence
+      ) {
+        return { canProceed: true, sessionChanged: false };
+      }
+
+      if (targetSequence < Number.MAX_SAFE_INTEGER && this.lastProcessedSequence >= targetSequence - 1) {
+        return { canProceed: true, sessionChanged: false };
+      }
+
+      const madeProgress = this.lastProcessedSequence > beforeCursor;
+      if (snapshot.hasMore === true && madeProgress) {
+        continue;
+      }
+
+      return {
+        canProceed: targetSequence === Number.MAX_SAFE_INTEGER,
+        sessionChanged: false,
+      };
+    }
+
+    return {
+      canProceed: targetSequence === Number.MAX_SAFE_INTEGER,
+      sessionChanged: false,
+    };
+  }
+
+  private extractOrderedReplayEvents(
+    rawEvents: unknown[],
+    targetSessionId: number,
+    minExclusiveSequence: number,
+    maxExclusiveSequence?: number
+  ): SequencedRawEvent[] {
+    const filtered: SequencedRawEvent[] = [];
+    for (const item of rawEvents) {
+      if (!isValidRawEventObject(item)) {
+        continue;
+      }
+      const meta = getSequencedMeta(item);
+      if (!meta || meta.sessionId !== targetSessionId) {
+        continue;
+      }
+      if (meta.sequence <= minExclusiveSequence) {
+        continue;
+      }
+      if (maxExclusiveSequence !== undefined && meta.sequence >= maxExclusiveSequence) {
+        continue;
+      }
+      filtered.push({
+        ...item,
+        nativeSequence: meta.sequence,
+        nativeSessionId: meta.sessionId,
       });
     }
+    filtered.sort((a, b) => a.nativeSequence - b.nativeSequence);
+    return filtered;
+  }
 
-    let statsChanged = false;
-    const nextStatus = { ...this.status };
-    if (typeof outcome.viewerCount === 'number' && outcome.viewerCount !== nextStatus.viewerCount) {
-      nextStatus.viewerCount = outcome.viewerCount;
-      statsChanged = true;
+  private tryProcessLiveRawEvent(raw: NativeTikTokRawEventPayload): boolean {
+    if (!isValidRawEventObject(raw)) {
+      return false;
     }
-    if (
-      typeof outcome.totalLikeCount === 'number' &&
-      outcome.totalLikeCount > nextStatus.totalLikeCount
-    ) {
-      nextStatus.totalLikeCount = outcome.totalLikeCount;
-      statsChanged = true;
-    }
-    if (statsChanged) {
-      this.updateStatus(nextStatus);
-    }
+    try {
+      const outcome = this.normalizer.normalize(raw);
+      if (outcome.ignoredReason === 'invalid_payload' || outcome.ignoredReason === 'missing_method') {
+        return false;
+      }
 
-    if (outcome.event) {
-      this.emitToBus(outcome.event);
+      if (outcome.roomEnded) {
+        this.updateStatus({
+          ...this.status,
+          state: 'waiting_for_live',
+          transport: 'none',
+          roomStatus: 'not_live',
+          message: `Siaran LIVE @${this.status.username || 'streamer'} telah berakhir.`,
+          errorCode: 'LIVE_ENDED',
+        });
+      }
+
+      let statsChanged = false;
+      const nextStatus = { ...this.status };
+      if (typeof outcome.viewerCount === 'number' && outcome.viewerCount !== nextStatus.viewerCount) {
+        nextStatus.viewerCount = outcome.viewerCount;
+        statsChanged = true;
+      }
+      if (
+        typeof outcome.totalLikeCount === 'number' &&
+        outcome.totalLikeCount > nextStatus.totalLikeCount
+      ) {
+        nextStatus.totalLikeCount = outcome.totalLikeCount;
+        statsChanged = true;
+      }
+      if (statsChanged) {
+        this.updateStatus(nextStatus);
+      }
+
+      if (outcome.event) {
+        this.emitToBus(outcome.event);
+      }
+      if (outcome.giftComboUpdate) {
+        this.updateToBus(outcome.giftComboUpdate);
+      }
+      return true;
+    } catch (err) {
+      console.warn('Gagal memproses event live TikTok:', err);
+      return false;
     }
-    if (outcome.giftComboUpdate) {
-      this.updateToBus(outcome.giftComboUpdate);
+  }
+
+  private tryProcessReplayRawEvent(raw: NativeTikTokRawEventPayload): boolean {
+    if (!isValidRawEventObject(raw)) {
+      return false;
+    }
+    try {
+      const outcome = this.replayNormalizer.normalize(raw);
+      if (outcome.ignoredReason === 'invalid_payload' || outcome.ignoredReason === 'missing_method') {
+        return false;
+      }
+      if (outcome.event) {
+        this.replayToBus(outcome.event);
+        this.replayDiagnostics.replayedEventCount++;
+      } else if (outcome.giftComboUpdate) {
+        this.replayUpdateToBus(outcome.giftComboUpdate);
+        this.replayDiagnostics.replayedEventCount++;
+      }
+      return true;
+    } catch (err) {
+      console.warn('Gagal memproses event replay TikTok:', err);
+      return false;
     }
   }
 

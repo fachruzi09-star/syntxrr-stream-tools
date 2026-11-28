@@ -9,6 +9,7 @@ import { ttsService } from '../ttsService';
 import { soundboardEngine } from '../soundboardEngine';
 import type {
   NativeTikTokRawEventPayload,
+  NativeTikTokReplaySnapshot,
   NativeTikTokStatePayload,
 } from '../nativeCompanionBridge';
 import {
@@ -1743,6 +1744,673 @@ async function runGiftComboTerminalUpdateTests(): Promise<void> {
   }
 }
 
+async function runBatch3bReplayAndIsolationTests(): Promise<void> {
+  function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (err: unknown) => void;
+  } {
+    let resolve!: (value: T) => void;
+    let reject!: (err: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  // 1. Legacy adapter without replay API still processes ordinary events
+  {
+    const emitted: StreamEvent[] = [];
+    let eventCb: ((p: NativeTikTokRawEventPayload) => void) | null = null;
+    const legacyConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async () => ({ accepted: true }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        onState: async () => ({ remove: async () => {} }),
+        onEvent: async (cb) => {
+          eventCb = cb;
+          return { remove: async () => { eventCb = null; } };
+        },
+      },
+      (evt) => emitted.push(evt)
+    );
+    await legacyConnector.ensureListenersAttached();
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'legacy_1', username: 'user_a', content: 'halo legacy' });
+    assertEqual(emitted.length, 1, 'Case 1: legacy event processed without replay API');
+    assertEqual(emitted[0].detail, 'halo legacy', 'Case 1: legacy event content preserved');
+    await legacyConnector.destroy();
+  }
+
+  // 2 & 3. Sequenced events process once and in order; duplicate and out-of-order lower sequence events are ignored
+  {
+    const liveEvents: StreamEvent[] = [];
+    const replayedEvents: StreamEvent[] = [];
+    let eventCb: ((p: NativeTikTokRawEventPayload) => void) | null = null;
+    const replayCalls: Array<{ sessionId?: number; afterSequence?: number; limit?: number }> = [];
+
+    const seqConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async () => ({ accepted: true }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        getEventsSince: async (opts) => {
+          replayCalls.push(opts ?? {});
+          return {
+            sessionId: 1,
+            events: [],
+            oldestSequence: 0,
+            latestSequence: 0,
+            overflow: false,
+            droppedCount: 0,
+            hasMore: false,
+            sessionChanged: false,
+          };
+        },
+        onState: async () => ({ remove: async () => {} }),
+        onEvent: async (cb) => {
+          eventCb = cb;
+          return { remove: async () => { eventCb = null; } };
+        },
+      },
+      (evt) => liveEvents.push(evt),
+      () => {},
+      (evt) => replayedEvents.push(evt)
+    );
+    await seqConnector.ensureListenersAttached();
+    assertEqual(replayCalls.length, 1, 'Case 2: initial replay called once on attach');
+
+    eventCb!({ method: 'WebcastChatMessage', msgId: 's1', username: 'u1', content: 'satu', nativeSessionId: 1, nativeSequence: 1 });
+    eventCb!({ method: 'WebcastChatMessage', msgId: 's2', username: 'u2', content: 'dua', nativeSessionId: 1, nativeSequence: 2 });
+    // Duplicate seq 2 & stale lower seq 1 (different msgId to verify sequence guard specifically)
+    eventCb!({ method: 'WebcastChatMessage', msgId: 's2_dup', username: 'u2', content: 'dua_dup', nativeSessionId: 1, nativeSequence: 2 });
+    eventCb!({ method: 'WebcastChatMessage', msgId: 's1_late', username: 'u1', content: 'satu_late', nativeSessionId: 1, nativeSequence: 1 });
+
+    assertEqual(liveEvents.length, 2, 'Case 2/3: exactly 2 unique sequenced events processed');
+    assertEqual(liveEvents[0].detail, 'satu', 'Case 2: seq 1 first');
+    assertEqual(liveEvents[1].detail, 'dua', 'Case 2: seq 2 second');
+    assertEqual(replayedEvents.length, 0, 'Case 2: no gap replay triggered for contiguous sequence');
+    assertEqual(seqConnector.getReplayDiagnostics().lastProcessedSequence, 2, 'Case 3: cursor stays at 2');
+    assertEqual(seqConnector.getReplayDiagnostics().duplicateSequenceCount, 2, 'Case 3: 2 duplicate/older sequences counted');
+    await seqConnector.destroy();
+  }
+
+  // 4 & 5. Missing sequence gap triggers replay before newer event; pagination with hasMore=true recovers multiple pages in order
+  {
+    const orderedLog: string[] = [];
+    let eventCb: ((p: NativeTikTokRawEventPayload) => void) | null = null;
+    const calls: Array<{ sessionId?: number; afterSequence?: number; limit?: number }> = [];
+
+    const gapConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async () => ({ accepted: true }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        getEventsSince: async (opts) => {
+          calls.push(opts ?? {});
+          if (opts?.sessionId === 0) {
+            return {
+              sessionId: 10,
+              events: [],
+              oldestSequence: 0,
+              latestSequence: 0,
+              overflow: false,
+              droppedCount: 0,
+              hasMore: false,
+              sessionChanged: true,
+            };
+          }
+          if (opts?.sessionId === 10 && opts.afterSequence === 1) {
+            return {
+              sessionId: 10,
+              events: [
+                { method: 'WebcastChatMessage', msgId: 'g2', username: 'u2', content: 'miss2', nativeSessionId: 10, nativeSequence: 2 },
+                { method: 'WebcastChatMessage', msgId: 'g3', username: 'u3', content: 'miss3', nativeSessionId: 10, nativeSequence: 3 },
+              ],
+              oldestSequence: 1,
+              latestSequence: 5,
+              overflow: false,
+              droppedCount: 0,
+              hasMore: true,
+              sessionChanged: false,
+            };
+          }
+          if (opts?.sessionId === 10 && opts.afterSequence === 3) {
+            return {
+              sessionId: 10,
+              events: [
+                { method: 'WebcastChatMessage', msgId: 'g4', username: 'u4', content: 'miss4', nativeSessionId: 10, nativeSequence: 4 },
+                { method: 'WebcastChatMessage', msgId: 'g5', username: 'u5', content: 'miss5', nativeSessionId: 10, nativeSequence: 5 },
+                // Buffer already includes incoming seq 6; replay must stop strictly before 6 so 6 processes live!
+                { method: 'WebcastChatMessage', msgId: 'g6', username: 'u6', content: 'live6', nativeSessionId: 10, nativeSequence: 6 },
+              ],
+              oldestSequence: 1,
+              latestSequence: 6,
+              overflow: false,
+              droppedCount: 0,
+              hasMore: false,
+              sessionChanged: false,
+            };
+          }
+          return null;
+        },
+        onState: async () => ({ remove: async () => {} }),
+        onEvent: async (cb) => {
+          eventCb = cb;
+          return { remove: async () => { eventCb = null; } };
+        },
+      },
+      (evt) => orderedLog.push(`live:${evt.detail}`),
+      () => {},
+      (evt) => orderedLog.push(`replay:${evt.detail}`)
+    );
+
+    await gapConnector.ensureListenersAttached();
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'g1', username: 'u1', content: 'live1', nativeSessionId: 10, nativeSequence: 1 });
+    // Jump from 1 -> 6 triggering multi-page gap recovery for 2..5
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'g6', username: 'u6', content: 'live6', nativeSessionId: 10, nativeSequence: 6 });
+    await gapConnector.waitForReplayIdle();
+
+    assertEqual(orderedLog.length, 6, 'Case 4/5: all 6 events delivered in order');
+    assertEqual(
+      orderedLog.join(','),
+      'live:live1,replay:miss2,replay:miss3,replay:miss4,replay:miss5,live:live6',
+      'Case 4/5: paginated replay recovers 2..5 before live 6'
+    );
+    assertEqual(calls.length, 3, 'Case 5: initial attach + 2 paginated gap recovery calls');
+    assertEqual(gapConnector.getReplayDiagnostics().detectedGapCount, 1, 'Case 4: gap recorded');
+    assertEqual(gapConnector.getReplayDiagnostics().replayedEventCount, 4, 'Case 5: 4 replayed events counted');
+    await gapConnector.destroy();
+  }
+
+  // 6. Replay snapshot sessionChanged / new session resets cursor safely (while Direct<->Euler reconnect does not)
+  {
+    const log: string[] = [];
+    const hooks: {
+      stateCb: ((s: NativeTikTokStatePayload) => void) | null;
+      eventCb: ((p: NativeTikTokRawEventPayload) => void) | null;
+    } = { stateCb: null, eventCb: null };
+
+    const sessionConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async () => ({ accepted: true }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        getEventsSince: async (opts) => {
+          if (opts?.sessionId === 0) {
+            return {
+              sessionId: 1,
+              events: [],
+              oldestSequence: 0,
+              latestSequence: 0,
+              overflow: false,
+              droppedCount: 0,
+              hasMore: false,
+              sessionChanged: true,
+            };
+          }
+          // Simulate native moved to session 2 while session 1 gap recovery ran
+          return {
+            sessionId: 2,
+            events: [
+              { method: 'WebcastChatMessage', msgId: 's2_1', username: 'new_u', content: 'sesi2_awal', nativeSessionId: 2, nativeSequence: 3 },
+            ],
+            oldestSequence: 3,
+            latestSequence: 3,
+            overflow: false,
+            droppedCount: 0,
+            hasMore: false,
+            sessionChanged: true,
+          };
+        },
+        onState: async (cb) => {
+          hooks.stateCb = cb;
+          return { remove: async () => { hooks.stateCb = null; } };
+        },
+        onEvent: async (cb) => {
+          hooks.eventCb = cb;
+          return { remove: async () => { hooks.eventCb = null; } };
+        },
+      },
+      (evt) => log.push(`live:${evt.detail}`),
+      () => {},
+      (evt) => log.push(`replay:${evt.detail}`)
+    );
+
+    await sessionConnector.ensureListenersAttached();
+    hooks.eventCb!({ method: 'WebcastChatMessage', msgId: 's1_1', username: 'u1', content: 'sesi1_1', nativeSessionId: 1, nativeSequence: 1 });
+
+    // Transport switch (reconnecting -> connected_euler) must NOT reset sequence cursor
+    hooks.stateCb!({
+      state: 'reconnecting',
+      transport: 'direct_ws',
+      username: 'host',
+      roomId: '1',
+      viewerCount: 1,
+      totalLikeCount: 0,
+      message: 'Reconnecting',
+    });
+    hooks.stateCb!({
+      state: 'connected_euler',
+      transport: 'euler',
+      username: 'host',
+      roomId: '1',
+      viewerCount: 2,
+      totalLikeCount: 0,
+      message: 'Euler fallback',
+    });
+    assertEqual(sessionConnector.getReplayDiagnostics().lastProcessedSequence, 1, 'Case 6: reconnect preserves sequence cursor');
+    hooks.eventCb!({ method: 'WebcastChatMessage', msgId: 's1_2', username: 'u1', content: 'sesi1_2', nativeSessionId: 1, nativeSequence: 2 });
+    assertEqual(sessionConnector.getReplayDiagnostics().lastProcessedSequence, 2, 'Case 6: sequence continues cleanly after Euler fallback');
+
+    // Trigger gap in session 1 where replay responds with sessionChanged=true for session 2
+    hooks.eventCb!({ method: 'WebcastChatMessage', msgId: 's1_5', username: 'u1', content: 'sesi1_stale', nativeSessionId: 1, nativeSequence: 5 });
+    await sessionConnector.waitForReplayIdle();
+
+    assertEqual(sessionConnector.getReplayDiagnostics().nativeSessionId, 2, 'Case 6: sessionId switched to 2');
+    assertEqual(sessionConnector.getReplayDiagnostics().lastProcessedSequence, 3, 'Case 6: cursor reset and advanced to session 2 replayed seq 3');
+    assert(!log.includes('live:sesi1_stale'), 'Case 6: stale session 1 pending event discarded on sessionChanged');
+    assert(log.includes('replay:sesi2_awal'), 'Case 6: session 2 event replayed after sessionChanged');
+    await sessionConnector.destroy();
+  }
+
+  // 7. Unrecoverable gap does not silently advance sequence cursor; subsequent sync recovers once missing events appear
+  {
+    const liveLog: string[] = [];
+    const replayLog: string[] = [];
+    let eventCb: ((p: NativeTikTokRawEventPayload) => void) | null = null;
+    let shouldFailReplay = true;
+
+    const unrecConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async () => ({ accepted: true }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        getEventsSince: async (opts) => {
+          if (opts?.sessionId === 0) {
+            return {
+              sessionId: 1,
+              events: [],
+              oldestSequence: 0,
+              latestSequence: 0,
+              overflow: false,
+              droppedCount: 0,
+              hasMore: false,
+              sessionChanged: true,
+            };
+          }
+          if (shouldFailReplay) {
+            return null;
+          }
+          return {
+            sessionId: 1,
+            events: [
+              { method: 'WebcastChatMessage', msgId: 'u2', username: 'a', content: 'msg2', nativeSessionId: 1, nativeSequence: 2 },
+              { method: 'WebcastChatMessage', msgId: 'u3', username: 'a', content: 'msg3', nativeSessionId: 1, nativeSequence: 3 },
+            ],
+            oldestSequence: 1,
+            latestSequence: 4,
+            overflow: false,
+            droppedCount: 0,
+            hasMore: false,
+            sessionChanged: false,
+          };
+        },
+        onState: async () => ({ remove: async () => {} }),
+        onEvent: async (cb) => {
+          eventCb = cb;
+          return { remove: async () => { eventCb = null; } };
+        },
+      },
+      (evt) => liveLog.push(evt.detail),
+      () => {},
+      (evt) => replayLog.push(evt.detail)
+    );
+
+    await unrecConnector.ensureListenersAttached();
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'u1', username: 'a', content: 'msg1', nativeSessionId: 1, nativeSequence: 1 });
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'u4', username: 'a', content: 'msg4', nativeSessionId: 1, nativeSequence: 4 });
+    await unrecConnector.waitForReplayIdle();
+
+    assertEqual(unrecConnector.getReplayDiagnostics().lastProcessedSequence, 1, 'Case 7: cursor must not skip forward on unrecoverable gap');
+    assertEqual(unrecConnector.getReplayDiagnostics().unrecoveredGapCount, 1, 'Case 7: unrecoveredGapCount incremented');
+    assertEqual(unrecConnector.getReplayDiagnostics().pendingSequencedCount, 1, 'Case 7: seq 4 held in pending queue');
+    assertEqual(liveLog.join(','), 'msg1', 'Case 7: seq 4 not processed ahead of missing gap');
+
+    // Explicit sync retry recovers missing 2,3 and then drains held seq 4
+    shouldFailReplay = false;
+    await unrecConnector.syncFromNative();
+    assertEqual(unrecConnector.getReplayDiagnostics().lastProcessedSequence, 4, 'Case 7: sync retry completes cursor through seq 4');
+    assertEqual(replayLog.join(','), 'msg2,msg3', 'Case 7: missing 2..3 replayed');
+    assertEqual(liveLog.join(','), 'msg1,msg4', 'Case 7: pending seq 4 processed live after recovery');
+    await unrecConnector.destroy();
+  }
+
+  // 8 & 9. Initial attachment replay restores retained events AND live events during initial replay run after replay
+  {
+    const timeline: string[] = [];
+    const hooks: { eventCb: ((p: NativeTikTokRawEventPayload) => void) | null } = { eventCb: null };
+    const initialDeferred = createDeferred<NativeTikTokReplaySnapshot | null>();
+    let getEventsCalled = false;
+
+    const initConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async () => ({ accepted: true }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        getEventsSince: async (opts) => {
+          getEventsCalled = true;
+          assertEqual(opts?.sessionId, 0, 'Case 8: initial replay passes sessionId=0');
+          assertEqual(opts?.afterSequence, 0, 'Case 8: initial replay passes afterSequence=0');
+          return initialDeferred.promise;
+        },
+        onState: async () => ({ remove: async () => {} }),
+        onEvent: async (cb) => {
+          hooks.eventCb = cb;
+          return { remove: async () => { hooks.eventCb = null; } };
+        },
+      },
+      (evt) => timeline.push(`live:${evt.detail}`),
+      () => {},
+      (evt) => timeline.push(`replay:${evt.detail}`)
+    );
+
+    const attachPromise = initConnector.ensureListenersAttached();
+    // Wait until onEvent and getEventsSince have been called
+    while (!hooks.eventCb || !getEventsCalled) {
+      await Promise.resolve();
+    }
+
+    // Live event arrives while initial replay is STILL in flight
+    hooks.eventCb({ method: 'WebcastChatMessage', msgId: 'init_3', username: 'u3', content: 'live_during_init', nativeSessionId: 7, nativeSequence: 3 });
+    assertEqual(timeline.length, 0, 'Case 9: live event queued behind active initial replay');
+
+    initialDeferred.resolve({
+      sessionId: 7,
+      events: [
+        { method: 'WebcastChatMessage', msgId: 'init_1', username: 'u1', content: 'hist_1', nativeSessionId: 7, nativeSequence: 1 },
+        { method: 'WebcastChatMessage', msgId: 'init_2', username: 'u2', content: 'hist_2', nativeSessionId: 7, nativeSequence: 2 },
+      ],
+      oldestSequence: 1,
+      latestSequence: 2,
+      overflow: false,
+      droppedCount: 0,
+      hasMore: false,
+      sessionChanged: true,
+    });
+
+    await attachPromise;
+    assertEqual(
+      timeline.join(','),
+      'replay:hist_1,replay:hist_2,live:live_during_init',
+      'Case 8/9: initial replay completes before live event arriving mid-replay'
+    );
+    await initConnector.destroy();
+  }
+
+  // 10 & 15. In-flight replay from previous session is ignored on connect/new session, and explicit disconnect invalidates queued replay
+  {
+    const liveOut: string[] = [];
+    const replayOut: string[] = [];
+    let eventCb: ((p: NativeTikTokRawEventPayload) => void) | null = null;
+    let deferredGap = createDeferred<NativeTikTokReplaySnapshot | null>();
+    let phase: 'init' | 'gap1' | 'gap2' = 'init';
+
+    const raceConnector = new TikTokLiveConnector(
+      {
+        isSupported: () => true,
+        connect: async (opts) => ({
+          accepted: true,
+          status: {
+            state: 'resolving_room',
+            transport: 'none',
+            username: opts.username,
+            roomId: '',
+            viewerCount: 0,
+            totalLikeCount: 0,
+            message: 'Connecting',
+          },
+        }),
+        disconnect: async () => ({ success: true }),
+        getStatus: async () => null,
+        getEventsSince: async () => {
+          if (phase === 'init') {
+            return {
+              sessionId: 1,
+              events: [],
+              oldestSequence: 0,
+              latestSequence: 0,
+              overflow: false,
+              droppedCount: 0,
+              hasMore: false,
+              sessionChanged: true,
+            };
+          }
+          return deferredGap.promise;
+        },
+        onState: async () => ({ remove: async () => {} }),
+        onEvent: async (cb) => {
+          eventCb = cb;
+          return { remove: async () => { eventCb = null; } };
+        },
+      },
+      (evt) => liveOut.push(evt.detail),
+      () => {},
+      (evt) => replayOut.push(evt.detail)
+    );
+
+    await raceConnector.ensureListenersAttached();
+    phase = 'gap1';
+
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'r1', username: 'a', content: 's1_e1', nativeSessionId: 1, nativeSequence: 1 });
+    // Gap triggers deferredGap
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'r3', username: 'a', content: 's1_e3', nativeSessionId: 1, nativeSequence: 3 });
+
+    // Switch to an explicit new session while session 1 replay is in-flight
+    await raceConnector.connect({ username: 'new_streamer' });
+
+    // Resolving old session 1 replay MUST be ignored
+    deferredGap.resolve({
+      sessionId: 1,
+      events: [
+        { method: 'WebcastChatMessage', msgId: 'r2', username: 'a', content: 's1_stale_replay', nativeSessionId: 1, nativeSequence: 2 },
+      ],
+      oldestSequence: 1,
+      latestSequence: 3,
+      overflow: false,
+      droppedCount: 0,
+      hasMore: false,
+      sessionChanged: false,
+    });
+    await raceConnector.waitForReplayIdle();
+    assertEqual(replayOut.length, 0, 'Case 10: stale in-flight replay from prior session ignored after connect()');
+    assert(!liveOut.includes('s1_e3'), 'Case 10: stale pending seq 3 from prior session discarded');
+
+    // Now test Case 15: explicit disconnect invalidates queued replay work
+    phase = 'gap2';
+    deferredGap = createDeferred<NativeTikTokReplaySnapshot | null>();
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'r2_1', username: 'b', content: 's2_e1', nativeSessionId: 2, nativeSequence: 1 });
+    eventCb!({ method: 'WebcastChatMessage', msgId: 'r2_3', username: 'b', content: 's2_e3', nativeSessionId: 2, nativeSequence: 3 });
+
+    await raceConnector.disconnect();
+    deferredGap.resolve({
+      sessionId: 2,
+      events: [
+        { method: 'WebcastChatMessage', msgId: 'r2_2', username: 'b', content: 's2_after_disconnect', nativeSessionId: 2, nativeSequence: 2 },
+      ],
+      oldestSequence: 1,
+      latestSequence: 3,
+      overflow: false,
+      droppedCount: 0,
+      hasMore: false,
+      sessionChanged: false,
+    });
+    await raceConnector.waitForReplayIdle();
+    assertEqual(replayOut.length, 0, 'Case 15: explicit disconnect invalidates in-flight replay');
+    assert(!liveOut.includes('s2_e3'), 'Case 15: explicit disconnect clears pending queue');
+    await raceConnector.destroy();
+  }
+
+  // 11, 12, 13, 14, 16. Real streamEventBus isolation: replay vs live TTS/SFX/FloatingAlert/Studio/LiveCenter
+  {
+    const origTtsConfig = ttsService.getConfig();
+    const origSpeak = ttsService.speak;
+    const origPlaySfx = soundboardEngine.playSynthesizedSFX;
+
+    const ttsCalls: string[] = [];
+    const sfxCalls: string[] = [];
+    const normalSubscriberEvents: StreamEvent[] = [];
+    const replaySubscriberEvents: StreamEvent[] = [];
+    const metadataUpdates: Array<{ update: StreamEventMetadataUpdate; updatedEvent?: StreamEvent }> = [];
+
+    streamEventBus.clearHistory();
+    ttsService.updateConfig({ enabled: true, readGifts: true, readComments: true });
+    (ttsService as unknown as { speak: (text: string, force?: boolean) => boolean }).speak = (text: string) => {
+      ttsCalls.push(text);
+      return true;
+    };
+    (
+      soundboardEngine as unknown as {
+        playSynthesizedSFX: (type: 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell') => Promise<{ ok: true }>;
+      }
+    ).playSynthesizedSFX = async (type) => {
+      sfxCalls.push(type);
+      return { ok: true };
+    };
+
+    const unsubNormal = streamEventBus.subscribe((ev) => normalSubscriberEvents.push(ev));
+    const unsubReplay = streamEventBus.subscribeReplay((ev) => replaySubscriberEvents.push(ev));
+    const unsubUpdates = streamEventBus.subscribeUpdates((update, updatedEvent) =>
+      metadataUpdates.push({ update, updatedEvent })
+    );
+
+    let eventCb: ((p: NativeTikTokRawEventPayload) => void) | null = null;
+    const isolationConnector = new TikTokLiveConnector({
+      isSupported: () => true,
+      connect: async () => ({ accepted: true }),
+      disconnect: async () => ({ success: true }),
+      getStatus: async () => null,
+      getEventsSince: async (opts) => {
+        if (opts?.sessionId === 0) {
+          return {
+            sessionId: 50,
+            events: [
+              // Case 11 & 13: Replayed gift (repeatEnd=0) followed by terminal update (repeatEnd=1)
+              {
+                method: 'WebcastGiftMessage',
+                msgId: 'rg_1',
+                username: 'sultan_replay',
+                giftId: '5655',
+                giftName: 'Rose',
+                repeatCount: 5,
+                repeatEnd: 0,
+                diamondCount: 1,
+                nativeSessionId: 50,
+                nativeSequence: 1,
+              },
+              {
+                method: 'WebcastGiftMessage',
+                msgId: 'rg_1',
+                username: 'sultan_replay',
+                giftId: '5655',
+                giftName: 'Rose',
+                repeatCount: 5,
+                repeatEnd: 1,
+                diamondCount: 1,
+                nativeSessionId: 50,
+                nativeSequence: 2,
+              },
+              // Case 12: Replayed chat
+              {
+                method: 'WebcastChatMessage',
+                msgId: 'rc_1',
+                username: 'viewer_replay',
+                content: '!play Neon Sky',
+                nativeSessionId: 50,
+                nativeSequence: 3,
+              },
+            ],
+            oldestSequence: 1,
+            latestSequence: 3,
+            overflow: false,
+            droppedCount: 0,
+            hasMore: false,
+            sessionChanged: true,
+          };
+        }
+        return null;
+      },
+      onState: async () => ({ remove: async () => {} }),
+      onEvent: async (cb) => {
+        eventCb = cb;
+        return { remove: async () => { eventCb = null; } };
+      },
+    });
+
+    try {
+      await isolationConnector.ensureListenersAttached();
+
+      // Case 11, 12, 13 assertions after initial replay
+      assertEqual(streamEventBus.getHistory().length, 2, 'Case 11/12/13: 2 unique items in history (gift + chat)');
+      assertEqual(normalSubscriberEvents.length, 0, 'Case 11/12: normal eventBus subscribers NOT notified on replay');
+      assertEqual(ttsCalls.length, 0, 'Case 11/12/13: TTS NOT triggered by replay');
+      assertEqual(sfxCalls.length, 0, 'Case 11/12/13: soundboard SFX NOT triggered by replay');
+      assertEqual(replaySubscriberEvents.length, 2, 'Case 12: replay subscribers notified for restored items');
+      assertEqual(metadataUpdates.length, 1, 'Case 13: replayed terminal gift metadata update delivered');
+      const replayedGiftInHistory = streamEventBus.getHistory().find((e) => e.id === 'tt_gift_rg_1_x5');
+      assert(replayedGiftInHistory !== undefined, 'Case 11: replayed gift exists in history');
+      assertEqual(replayedGiftInHistory?.repeatEnd, true, 'Case 13: replayed gift history item updated to repeatEnd=true');
+
+      // Case 14: Repeated replay of same event ID does not duplicate history or re-notify replay listeners
+      streamEventBus.replay(replaySubscriberEvents[1]);
+      assertEqual(streamEventBus.getHistory().length, 2, 'Case 14: repeated replay ID does not duplicate history');
+      assertEqual(replaySubscriberEvents.length, 2, 'Case 14: repeated replay ID does not re-emit to replay listeners');
+
+      // Case 16: Live events after replay trigger normal eventBus side effects exactly once
+      eventCb!({
+        method: 'WebcastGiftMessage',
+        msgId: 'lg_4',
+        username: 'sultan_live',
+        giftId: '5655',
+        giftName: 'Rose',
+        repeatCount: 1,
+        repeatEnd: 1,
+        diamondCount: 1,
+        nativeSessionId: 50,
+        nativeSequence: 4,
+      });
+      assertEqual(normalSubscriberEvents.length, 1, 'Case 16: live gift after replay notifies normal subscribers once');
+      assertEqual(ttsCalls.length, 1, 'Case 16: live gift triggers TTS once');
+      assertEqual(sfxCalls.length, 1, 'Case 16: live gift triggers SFX once');
+      assertEqual(streamEventBus.getHistory().length, 3, 'Case 16: history now contains 3 items');
+    } finally {
+      unsubNormal();
+      unsubReplay();
+      unsubUpdates();
+      await isolationConnector.destroy();
+      (ttsService as unknown as { speak: typeof origSpeak }).speak = origSpeak;
+      (soundboardEngine as unknown as { playSynthesizedSFX: typeof origPlaySfx }).playSynthesizedSFX = origPlaySfx;
+      ttsService.updateConfig(origTtsConfig);
+      streamEventBus.clearHistory();
+    }
+  }
+
+  // Verify LiveCenterView integrates subscribeReplay cleanly with ID deduplication and 50-item cap
+  const liveCenterSrc = readFileSync(resolve(process.cwd(), 'src/components/LiveCenterView.tsx'), 'utf8');
+  assert(
+    liveCenterSrc.includes('streamEventBus.subscribeReplay') &&
+      liveCenterSrc.includes('prev.some((item) => item.id === replayedEvent.id)'),
+    'LiveCenterView must subscribe to streamEventBus.subscribeReplay with ID deduplication'
+  );
+}
+
 async function main(): Promise<void> {
   runNormalizerTests();
   runBoundedDedupTests();
@@ -1753,6 +2421,7 @@ async function main(): Promise<void> {
   runTargetUsernameResolutionTests();
   await runConnectionDiagnosticsTests();
   await runGiftComboTerminalUpdateTests();
+  await runBatch3bReplayAndIsolationTests();
   console.log('ALL_TIKTOK_CONNECTOR_TESTS_PASSED');
 }
 

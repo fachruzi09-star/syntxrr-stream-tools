@@ -13,6 +13,7 @@ type EventMetadataUpdateListener = (
 
 class StreamEventBus {
   private listeners: Set<EventListener> = new Set();
+  private replayListeners: Set<EventListener> = new Set();
   private updateListeners: Set<EventMetadataUpdateListener> = new Set();
   private history: StreamEvent[] = [];
 
@@ -20,6 +21,13 @@ class StreamEventBus {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  subscribeReplay(listener: EventListener): () => void {
+    this.replayListeners.add(listener);
+    return () => {
+      this.replayListeners.delete(listener);
     };
   }
 
@@ -67,10 +75,45 @@ class StreamEventBus {
   }
 
   /**
+   * Memulihkan event histori hasil replay buffer native ke histori bersama dan
+   * subscriber replay UI saja, tanpa memanggil normal listeners, TTS, soundboard,
+   * floating alert, Mode B forwarding, Song Request, atau aksi Studio.
+   */
+  replay(event: StreamEvent): void {
+    if (this.history.some((item) => item.id === event.id)) {
+      return;
+    }
+    this.history.unshift(event);
+    if (this.history.length > 50) {
+      this.history.pop();
+    }
+
+    this.replayListeners.forEach((listener) => {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error('Error saat menjalankan listener replay event:', err);
+      }
+    });
+  }
+
+  /**
    * Memperbarui metadata event yang sudah terbit (mis. status terminal combo gift repeatEnd=true)
    * tanpa menambah duplikat ke histori dan tanpa memicu TTS, soundboard, atau alert ulang.
    */
   updateEventMetadata(update: StreamEventMetadataUpdate): StreamEvent | undefined {
+    return this.applyMetadataUpdate(update);
+  }
+
+  /**
+   * Jalur khusus replay untuk pembaruan metadata terminal gift combo agar terisolasi
+   * dari efek samping normal.
+   */
+  replayMetadataUpdate(update: StreamEventMetadataUpdate): StreamEvent | undefined {
+    return this.applyMetadataUpdate(update);
+  }
+
+  private applyMetadataUpdate(update: StreamEventMetadataUpdate): StreamEvent | undefined {
     let updatedEvent: StreamEvent | undefined;
     const index = this.history.findIndex((item) => item.id === update.id);
     if (index !== -1) {

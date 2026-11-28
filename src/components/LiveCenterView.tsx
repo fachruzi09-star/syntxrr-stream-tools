@@ -125,6 +125,14 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     const unsubscribe = streamEventBus.subscribe((newEvent) => {
       setEvents((prev) => [newEvent, ...prev.slice(0, 49)]);
     });
+    const unsubscribeReplay = streamEventBus.subscribeReplay((replayedEvent) => {
+      setEvents((prev) => {
+        if (prev.some((item) => item.id === replayedEvent.id)) {
+          return prev;
+        }
+        return [replayedEvent, ...prev.slice(0, 49)];
+      });
+    });
     const unsubscribeUpdates = streamEventBus.subscribeUpdates((update) => {
       setEvents((prev) =>
         prev.map((item) =>
@@ -140,6 +148,7 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     });
     return () => {
       unsubscribe();
+      unsubscribeReplay();
       unsubscribeUpdates();
     };
   }, []);
