@@ -1078,12 +1078,13 @@ public class FloatingCompanionPlugin extends Plugin {
     @Nullable
     private volatile TikTokLiveConnector mTikTokConnector;
     private final Object mBatchLock = new Object();
+    private final NativeTikTokEventBatchEpochGate mBatchEpochGate = new NativeTikTokEventBatchEpochGate();
     private final ArrayDeque<JSONObject> mPendingEventQueue = new ArrayDeque<>(EVENT_BATCH_PENDING_CAPACITY);
     private int mDroppedPendingCount = 0;
     private int mCoalescedViewerCount = 0;
     private boolean mBatchFlushScheduled = false;
     private boolean mBatchImmediateFlushScheduled = false;
-    private long mBatchSessionEpoch = 0L;
+    private long mBatchSessionEpoch = mBatchEpochGate.getCurrentEpoch();
     private final Runnable mFlushTikTokBatchRunnable = new Runnable() {
         @Override
         public void run() {
@@ -1190,13 +1191,7 @@ public class FloatingCompanionPlugin extends Plugin {
             batchEpoch = mBatchSessionEpoch;
         }
 
-        if (getBridge() == null) {
-            synchronized (mBatchLock) {
-                if (mBatchSessionEpoch == batchEpoch) {
-                    mDroppedPendingCount += dropped;
-                    mCoalescedViewerCount += coalesced;
-                }
-            }
+        if (mBatchEpochGate.getCurrentEpoch() != batchEpoch) {
             return;
         }
 
@@ -1220,8 +1215,16 @@ public class FloatingCompanionPlugin extends Plugin {
         } catch (JSONException ignored) {
         }
 
-        boolean emitted = tryEmitToJs("tiktokLiveEventBatch", toJsObject(rawBatch));
-        if (!emitted) {
+        final boolean[] emitted = { false };
+        boolean executed = mBatchEpochGate.runIfCurrent(batchEpoch, new Runnable() {
+            @Override
+            public void run() {
+                if (getBridge() != null) {
+                    emitted[0] = tryEmitToJs("tiktokLiveEventBatch", toJsObject(rawBatch));
+                }
+            }
+        });
+        if (executed && !emitted[0]) {
             synchronized (mBatchLock) {
                 if (mBatchSessionEpoch == batchEpoch) {
                     mDroppedPendingCount += dropped;
@@ -1233,7 +1236,7 @@ public class FloatingCompanionPlugin extends Plugin {
 
     private void clearPendingTikTokEventBatch() {
         synchronized (mBatchLock) {
-            mBatchSessionEpoch++;
+            mBatchSessionEpoch = mBatchEpochGate.advanceEpoch();
             mPendingEventQueue.clear();
             mDroppedPendingCount = 0;
             mCoalescedViewerCount = 0;
@@ -1312,12 +1315,12 @@ public class FloatingCompanionPlugin extends Plugin {
             }
         }
 
-        clearPendingTikTokEventBatch();
-        sEventBuffer.beginSession();
-
         attachTikTokConnectorListener();
         TikTokLiveConnector connector = getTikTokConnector();
         connector.connect(username, eulerApiKey, eulerJwtKey, allowEulerFallback, connectionMethod);
+
+        clearPendingTikTokEventBatch();
+        sEventBuffer.beginSession();
 
         JSObject ret = new JSObject();
         ret.put("accepted", true);
