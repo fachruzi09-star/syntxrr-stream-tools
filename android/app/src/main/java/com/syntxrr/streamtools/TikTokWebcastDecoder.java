@@ -30,6 +30,14 @@ import java.util.zip.GZIPInputStream;
  *   heartbeatDuration, needAck, pushServer).
  * - Mendukung encoding frame ACK & Heartbeat PushFrame untuk transport WebSocket.
  * - Payload pesan yang tidak dikenal atau tidak lengkap diabaikan dengan aman tanpa membuat event palsu.
+ *
+ * Kontrak im_enter_room_resp (terverifikasi pada schema pembanding TikTokLiveJava,
+ * TikTok-Live-Connector, dan TikTokLive):
+ * - Frame dengan payloadType = "im_enter_room_resp" adalah acknowledgment level-transport
+ *   bahwa permintaan masuk room (im_enter_room) diterima server.
+ * - Tidak ada schema field status/penolakan khusus pada payload im_enter_room_resp;
+ *   konfirmasi room tetap menerima im_enter_room_resp dan mempertahankan fallback
+ *   frame Webcast non-end nyata di TikTokLiveConnector.
  */
 public final class TikTokWebcastDecoder {
 
@@ -153,6 +161,10 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (reader.isCorrupt()) {
+            return emptyResponse(0L, "");
+        }
+
         if ("hb".equalsIgnoreCase(payloadType)
                 || "ack".equalsIgnoreCase(payloadType)
                 || "close".equalsIgnoreCase(payloadType)) {
@@ -270,6 +282,10 @@ public final class TikTokWebcastDecoder {
                     reader.skipField(wire);
                     break;
             }
+        }
+
+        if (reader.isCorrupt()) {
+            return emptyResponse(logId, payloadType);
         }
 
         return new DecodedResponse(
@@ -431,7 +447,7 @@ public final class TikTokWebcastDecoder {
     // =========================================================================
 
     @Nullable
-    private static JSONObject decodeEnvelopeMessage(@NonNull byte[] msgBytes) {
+    static JSONObject decodeEnvelopeMessage(@NonNull byte[] msgBytes) {
         String method = "";
         byte[] payload = null;
         long msgId = 0L;
@@ -461,7 +477,7 @@ public final class TikTokWebcastDecoder {
             }
         }
 
-        if (method.isEmpty() || payload == null || payload.length == 0) {
+        if (reader.isCorrupt() || method.isEmpty() || payload == null || payload.length == 0) {
             return null;
         }
         return decodeWebcastPayload(method, payload, msgId);
@@ -525,6 +541,7 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (r.isCorrupt()) return null;
         content = clampString(content, MAX_TEXT_LEN);
         if (content.isEmpty()) return null;
 
@@ -560,6 +577,7 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (r.isCorrupt()) return null;
         if (user.username.isEmpty() && user.nickname.isEmpty() && emoteId.isEmpty()) return null;
 
         JSONObject obj = baseJson(method, msgId, createTime, user);
@@ -572,11 +590,13 @@ public final class TikTokWebcastDecoder {
         long msgId = envelopeMsgId;
         long createTime = 0L;
         long giftId = 0L;
-        long repeatCount = 1L;
         long groupCount = 1L;
+        long repeatCount = 1L;
+        long comboCount = 0L;
         long repeatEnd = 0L;
         long diamondCount = 0L;
         String giftName = "";
+        String giftDescribe = "";
         String giftImage = "";
         UserInfo user = new UserInfo();
 
@@ -598,12 +618,16 @@ public final class TikTokWebcastDecoder {
                     if (wire == 0) giftId = r.readVarint();
                     else r.skipField(wire);
                     break;
+                case 4:
+                    if (wire == 0) groupCount = Math.max(1L, r.readVarint());
+                    else r.skipField(wire);
+                    break;
                 case 5:
                     if (wire == 0) repeatCount = Math.max(1L, r.readVarint());
                     else r.skipField(wire);
                     break;
                 case 6:
-                    if (wire == 0) groupCount = Math.max(1L, r.readVarint());
+                    if (wire == 0) comboCount = Math.max(0L, r.readVarint());
                     else r.skipField(wire);
                     break;
                 case 7:
@@ -624,8 +648,8 @@ public final class TikTokWebcastDecoder {
                             int gw = gtag & 0x07;
                             if (gf == 1 && gw == 2) {
                                 giftImage = parseImageUrl(gr.readBytes());
-                            } else if (gf == 2 && gw == 2 && giftName.isEmpty()) {
-                                giftName = gr.readString();
+                            } else if (gf == 2 && gw == 2) {
+                                giftDescribe = gr.readString();
                             } else if (gf == 5 && gw == 0 && giftId == 0L) {
                                 giftId = gr.readVarint();
                             } else if (gf == 12 && gw == 0) {
@@ -636,6 +660,7 @@ public final class TikTokWebcastDecoder {
                                 gr.skipField(gw);
                             }
                         }
+                        if (gr.isCorrupt()) return null;
                     } else r.skipField(wire);
                     break;
                 default:
@@ -644,13 +669,16 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (r.isCorrupt()) return null;
         if (giftId == 0L && giftName.isEmpty()) return null;
 
         JSONObject obj = baseJson(method, msgId, createTime, user);
         obj.put("giftId", String.valueOf(giftId));
         obj.put("giftName", clampString(giftName.isEmpty() ? ("Gift #" + giftId) : giftName, MAX_NAME_LEN));
+        if (!giftDescribe.isEmpty()) obj.put("giftDescribe", clampString(giftDescribe, MAX_TEXT_LEN));
         obj.put("repeatCount", repeatCount);
         obj.put("groupCount", groupCount);
+        obj.put("comboCount", comboCount);
         obj.put("repeatEnd", repeatEnd);
         obj.put("diamondCount", diamondCount);
         if (!giftImage.isEmpty()) obj.put("giftImage", giftImage);
@@ -686,6 +714,7 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (r.isCorrupt()) return null;
         if (likeCount <= 0L && totalLikeCount <= 0L) return null;
 
         JSONObject obj = baseJson(method, msgId, createTime, user);
@@ -698,6 +727,7 @@ public final class TikTokWebcastDecoder {
     private static JSONObject decodeSocialMessage(String method, byte[] payload, long envelopeMsgId) throws Exception {
         long msgId = envelopeMsgId;
         long createTime = 0L;
+        long shareType = 0L;
         long action = 0L;
         long followCount = 0L;
         String displayKey = "";
@@ -718,6 +748,8 @@ public final class TikTokWebcastDecoder {
             } else if (field == 2 && wire == 2) {
                 user = parseUser(r.readBytes());
             } else if (field == 3 && wire == 0) {
+                shareType = r.readVarint();
+            } else if (field == 4 && wire == 0) {
                 action = r.readVarint();
             } else if (field == 6 && wire == 0) {
                 followCount = r.readVarint();
@@ -726,8 +758,11 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (r.isCorrupt()) return null;
+
         JSONObject obj = baseJson(method, msgId, createTime, user);
         obj.put("action", action);
+        obj.put("shareType", shareType);
         obj.put("followCount", followCount);
         if (!displayKey.isEmpty()) obj.put("displayKey", clampString(displayKey, MAX_NAME_LEN));
         return obj;
@@ -762,6 +797,7 @@ public final class TikTokWebcastDecoder {
             }
         }
 
+        if (r.isCorrupt()) return null;
         if (user.username.isEmpty() && user.nickname.isEmpty() && memberCount <= 0L) return null;
 
         JSONObject obj = baseJson(method, msgId, createTime, user);
@@ -793,7 +829,7 @@ public final class TikTokWebcastDecoder {
             }
         }
 
-        if (totalViewers < 0L) return null;
+        if (r.isCorrupt() || totalViewers < 0L) return null;
 
         JSONObject obj = baseJson(method, msgId, createTime, new UserInfo());
         obj.put("viewerCount", totalViewers);
@@ -822,6 +858,8 @@ public final class TikTokWebcastDecoder {
                 r.skipField(wire);
             }
         }
+
+        if (r.isCorrupt()) return null;
 
         JSONObject obj = baseJson(method, msgId, createTime, new UserInfo());
         obj.put("controlAction", controlAction);
@@ -1047,7 +1085,8 @@ public final class TikTokWebcastDecoder {
     }
 
     /** Pembaca Protobuf wire-format ringan dengan pemeriksaan batas buffer ketat. */
-    private static final class ProtoReader {
+    static final class ProtoReader {
+        static final int MAX_FIELD_NUMBER = (1 << 29) - 1; // 536_870_911
         private final byte[] buf;
         private int pos;
         private boolean corrupt = false;
@@ -1061,10 +1100,24 @@ public final class TikTokWebcastDecoder {
             return !corrupt && pos < buf.length;
         }
 
+        boolean isCorrupt() {
+            return corrupt;
+        }
+
         int readTag() {
             if (!hasNext()) return 0;
             long v = readVarint();
-            if (corrupt || v <= 0L || v > Integer.MAX_VALUE) {
+            if (corrupt || v <= 0L || v > 0xFFFFFFFFL) {
+                corrupt = true;
+                return 0;
+            }
+            long fieldNumber = v >>> 3;
+            int wireType = (int) (v & 0x07L);
+            if (fieldNumber <= 0L || fieldNumber > MAX_FIELD_NUMBER) {
+                corrupt = true;
+                return 0;
+            }
+            if (wireType != 0 && wireType != 1 && wireType != 2 && wireType != 5) {
                 corrupt = true;
                 return 0;
             }

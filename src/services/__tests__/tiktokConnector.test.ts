@@ -83,7 +83,7 @@ function runNormalizerTests(): void {
   assertEqual(emoteRes.event?.type, 'chat', 'Emote chat mapped to chat');
   assertEqual(emoteRes.event?.username, 'EmoteUser', 'Fallback to nickname');
 
-  // 3. WebcastGiftMessage + combo progression vs exact duplicate
+  // 3. WebcastGiftMessage + combo progression + repeatEnd + exact/metadata duplicate guard
   const gift1 = normalizer.normalize({
     method: 'WebcastGiftMessage',
     msgId: '2001',
@@ -91,6 +91,7 @@ function runNormalizerTests(): void {
     giftId: '5655',
     giftName: 'Rose',
     repeatCount: 1,
+    repeatEnd: 0,
     diamondCount: 1,
     giftImage: 'https://example.com/rose.png',
   });
@@ -98,6 +99,7 @@ function runNormalizerTests(): void {
   assertEqual(gift1.event?.amount, 1, 'Gift coins calculation x1');
   assertEqual(gift1.event?.giftName, 'Rose', 'Gift name preserved');
   assertEqual(gift1.event?.giftImage, 'https://example.com/rose.png', 'Gift image preserved');
+  assertEqual(gift1.event?.repeatEnd, false, 'repeatEnd=0 indicates combo still active');
 
   // Same msgId with incremented repeatCount (combo streak) MUST NOT be dropped
   const giftCombo = normalizer.normalize({
@@ -107,10 +109,12 @@ function runNormalizerTests(): void {
     giftId: '5655',
     giftName: 'Rose',
     repeatCount: 5,
+    repeatEnd: 1,
     diamondCount: 1,
   });
   assert(giftCombo.event !== null, 'Incremented gift repeatCount must pass');
   assertEqual(giftCombo.event?.amount, 5, 'Gift coins calculation x5');
+  assertEqual(giftCombo.event?.repeatEnd, true, 'repeatEnd!=0 indicates combo completed');
 
   // Exact replay of (msgId, giftId, repeatCount=5) MUST be dropped
   const giftDup = normalizer.normalize({
@@ -120,10 +124,25 @@ function runNormalizerTests(): void {
     giftId: '5655',
     giftName: 'Rose',
     repeatCount: 5,
+    repeatEnd: 1,
     diamondCount: 1,
   });
   assertEqual(giftDup.event, null, 'Exact gift duplicate must be dropped');
   assertEqual(giftDup.ignoredReason, 'duplicate', 'Exact gift duplicate reason');
+
+  // Metadata-only change (repeatEnd flipped without combo progression) MUST NOT double-trigger gift
+  const giftMetadataOnlyReplay = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: '2001',
+    username: 'sultan',
+    giftId: '5655',
+    giftName: 'Rose',
+    repeatCount: 5,
+    repeatEnd: 0,
+    diamondCount: 1,
+  });
+  assertEqual(giftMetadataOnlyReplay.event, null, 'Metadata-only gift replay must not double-trigger');
+  assertEqual(giftMetadataOnlyReplay.ignoredReason, 'duplicate', 'Metadata-only replay rejected as duplicate');
 
   // 4. WebcastLikeMessage
   const likeRes = normalizer.normalize({
@@ -137,22 +156,33 @@ function runNormalizerTests(): void {
   assertEqual(likeRes.event?.likeCount, 15, 'Like delta');
   assertEqual(likeRes.totalLikeCount, 1250, 'Total like count');
 
-  // 5. WebcastSocialMessage (follow vs share vs unknown)
+  // 5. WebcastSocialMessage (follow vs share vs unknown; shareType must not override action)
   const followRes = normalizer.normalize({
     method: 'WebcastSocialMessage',
     msgId: '4001',
     username: 'new_fan',
     action: 1,
-  });
-  assertEqual(followRes.event?.type, 'follow', 'Social action=1 mapped to follow');
+    shareType: 3,
+  } as unknown as NativeTikTokRawEventPayload);
+  assertEqual(followRes.event?.type, 'follow', 'Social action=1 mapped to follow even when shareType=3');
 
   const shareRes = normalizer.normalize({
     method: 'WebcastSocialMessage',
     msgId: '4002',
     username: 'sharer',
     action: 3,
-  });
+    shareType: 1,
+  } as unknown as NativeTikTokRawEventPayload);
   assertEqual(shareRes.event?.type, 'share', 'Social action=3 mapped to share');
+
+  const shareTypeOnlySocial = normalizer.normalize({
+    method: 'WebcastSocialMessage',
+    msgId: '4004',
+    username: 'anon_share_type',
+    action: 0,
+    shareType: 3,
+  } as unknown as NativeTikTokRawEventPayload);
+  assertEqual(shareTypeOnlySocial.event, null, 'shareType=3 without action=3/displayKey must not emit share');
 
   const unknownSocial = normalizer.normalize({
     method: 'WebcastSocialMessage',
@@ -162,15 +192,44 @@ function runNormalizerTests(): void {
   });
   assertEqual(unknownSocial.event, null, 'Unknown social action ignored safely');
 
-  // 6. WebcastMemberMessage (join)
+  // 6. WebcastMemberMessage (only JOINED=1 produces join; SUBSCRIBED=3 and unknown ignored)
   const joinRes = normalizer.normalize({
     method: 'WebcastMemberMessage',
     msgId: '5001',
     username: 'viewer_join',
+    action: 1,
     memberCount: 42,
   });
-  assertEqual(joinRes.event?.type, 'join', 'Member mapped to join');
+  assertEqual(joinRes.event?.type, 'join', 'Member action=1 (JOINED) mapped to join');
   assertEqual(joinRes.viewerCount, 42, 'Member viewerCount');
+
+  const subscribedMember = normalizer.normalize({
+    method: 'WebcastMemberMessage',
+    msgId: '5002',
+    username: 'new_subscriber',
+    action: 3,
+    memberCount: 43,
+  });
+  assertEqual(subscribedMember.event, null, 'Member action=3 (SUBSCRIBED) must not produce fake join');
+  assertEqual(subscribedMember.ignoredReason, 'member_subscribed', 'SUBSCRIBED ignored reason');
+
+  const unknownMemberAction = normalizer.normalize({
+    method: 'WebcastMemberMessage',
+    msgId: '5003',
+    username: 'unknown_member',
+    action: 99,
+    memberCount: 44,
+  });
+  assertEqual(unknownMemberAction.event, null, 'Unknown member action ignored safely');
+  assertEqual(unknownMemberAction.ignoredReason, 'unknown_member_action', 'Unknown member action reason');
+
+  const omittedMemberAction = normalizer.normalize({
+    method: 'WebcastMemberMessage',
+    msgId: '5004',
+    username: 'omitted_action_member',
+    memberCount: 45,
+  });
+  assertEqual(omittedMemberAction.event, null, 'Member message without JOINED action ignored safely');
 
   // 7. WebcastRoomUserSeqMessage (viewers)
   const viewerRes = normalizer.normalize({
@@ -204,6 +263,31 @@ function runNormalizerTests(): void {
     msgId: '9001',
   });
   assertEqual(unknownMethod.event, null, 'Unknown method must be ignored safely');
+
+  // 10. Normalizer reset clears dedup window so prior msgId can be accepted cleanly in new session
+  const freshChat = normalizer.normalize({
+    method: 'WebcastChatMessage',
+    msgId: '1009',
+    username: 'budi_live',
+    content: '!play Neon Horizon',
+  });
+  assert(freshChat.event !== null, 'Fresh chat accepted before reset');
+  const chatDupBeforeReset = normalizer.normalize({
+    method: 'WebcastChatMessage',
+    msgId: '1009',
+    username: 'budi_live',
+    content: '!play Neon Horizon',
+  });
+  assertEqual(chatDupBeforeReset.ignoredReason, 'duplicate', 'Existing chat msgId deduplicated before reset');
+  normalizer.reset();
+  assertEqual(normalizer.getDedupWindowSize(), 0, 'Reset clears dedup window');
+  const chatAfterReset = normalizer.normalize({
+    method: 'WebcastChatMessage',
+    msgId: '1009',
+    username: 'budi_live',
+    content: '!play Neon Horizon',
+  });
+  assert(chatAfterReset.event !== null, 'Chat accepted cleanly after normalizer.reset()');
 }
 
 function runBoundedDedupTests(): void {

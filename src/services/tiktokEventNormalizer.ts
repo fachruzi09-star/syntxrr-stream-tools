@@ -34,6 +34,20 @@ function toSafeInt(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+function normalizeRepeatEnd(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value !== 0;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed !== 0;
+    }
+  }
+  return undefined;
+}
+
 function resolveDisplayUsername(raw: NativeTikTokRawEventPayload): string {
   const handle = sanitizeText(raw.username, MAX_USERNAME_LEN);
   if (handle) return handle;
@@ -192,6 +206,7 @@ export class TikTokEventNormalizer {
         return { event: null, ignoredReason: 'incomplete_gift' };
       }
       const repeatCount = Math.max(1, toSafeInt(raw.repeatCount, 1));
+      const repeatEnd = normalizeRepeatEnd(raw.repeatEnd);
       const diamondCount = toSafeInt(raw.diamondCount, 0);
       const giftImage = sanitizeText(raw.giftImage, 320) || undefined;
       const totalDiamonds = diamondCount > 0 ? diamondCount * repeatCount : undefined;
@@ -225,6 +240,7 @@ export class TikTokEventNormalizer {
           giftId: giftId || undefined,
           giftName,
           repeatCount,
+          ...(repeatEnd !== undefined ? { repeatEnd } : {}),
           diamondCount,
           giftImage,
           timestamp,
@@ -309,6 +325,13 @@ export class TikTokEventNormalizer {
     }
 
     if (method === 'WebcastMemberMessage') {
+      const action = toSafeInt(raw.action, 0);
+      if (action !== 1) {
+        return {
+          event: null,
+          ignoredReason: action === 3 ? 'member_subscribed' : 'unknown_member_action',
+        };
+      }
       if (!username) {
         return { event: null, ignoredReason: 'missing_member_username' };
       }

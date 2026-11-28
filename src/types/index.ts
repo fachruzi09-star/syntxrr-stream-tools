@@ -425,6 +425,7 @@ export interface StreamEvent {
   giftId?: string;
   giftName?: string;
   repeatCount?: number;
+  repeatEnd?: boolean;
   diamondCount?: number;
   giftImage?: string;
   likeCount?: number;
