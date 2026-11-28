@@ -1451,6 +1451,56 @@ public final class TikTokRoomResolver {
         }
     }
 
+    @NonNull
+    public static String buildInitialWebcastFetchUrl(
+            @NonNull String roomId,
+            @Nullable String deviceId,
+            @Nullable String cursor,
+            @Nullable String internalExt,
+            long lastRttMs
+    ) {
+        String cleanRoomId = roomId.trim();
+        if (cleanRoomId.isEmpty()) {
+            throw new IllegalArgumentException("room_id kosong saat membentuk URL webcast/im/fetch.");
+        }
+        String effectiveDeviceId = (deviceId != null && DEVICE_ID_PATTERN.matcher(deviceId.trim()).matches())
+                ? deviceId.trim()
+                : "";
+        String safeCursor = cursor != null ? cursor.trim() : "";
+        String safeInternalExt = internalExt != null ? internalExt.trim() : "";
+        long safeLastRtt = Math.max(0L, lastRttMs);
+
+        StringBuilder urlSb = new StringBuilder(WEBCAST_IM_FETCH_ENDPOINT);
+        urlSb.append("?aid=1988");
+        urlSb.append("&app_language=en");
+        urlSb.append("&app_name=tiktok_web");
+        urlSb.append("&browser_language=en-US");
+        urlSb.append("&browser_name=").append(urlEncodeRfc3986(CLIENT_BROWSER_NAME));
+        urlSb.append("&browser_platform=").append(urlEncodeRfc3986(CLIENT_BROWSER_PLATFORM));
+        urlSb.append("&browser_version=").append(urlEncodeRfc3986(CLIENT_BROWSER_VERSION));
+        urlSb.append("&cookie_enabled=true");
+        urlSb.append("&cursor=").append(urlEncodeRfc3986(safeCursor));
+        if (!effectiveDeviceId.isEmpty()) {
+            urlSb.append("&device_id=").append(effectiveDeviceId);
+            urlSb.append("&did=").append(effectiveDeviceId);
+        }
+        urlSb.append("&device_platform=").append(CLIENT_DEVICE_PLATFORM);
+        urlSb.append("&did_rule=3");
+        urlSb.append("&fetch_rule=1");
+        urlSb.append("&identity=audience");
+        urlSb.append("&internal_ext=").append(urlEncodeRfc3986(safeInternalExt));
+        urlSb.append("&last_rtt=").append(safeLastRtt);
+        urlSb.append("&live_id=12");
+        urlSb.append("&os=").append(CLIENT_OS);
+        urlSb.append("&resp_content_type=protobuf");
+        urlSb.append("&room_id=").append(urlEncodeRfc3986(cleanRoomId));
+        urlSb.append("&screen_height=800");
+        urlSb.append("&screen_width=360");
+        urlSb.append("&tz_name=UTC");
+        urlSb.append("&version_code=180800");
+        return urlSb.toString();
+    }
+
     /**
      * Melakukan panggilan awal https://webcast.tiktok.com/webcast/im/fetch/ untuk memperoleh
      * cursor, internalExt, routeParams (imprp/wrss), pushServer, heartbeatDurationMs, dan
@@ -1461,7 +1511,7 @@ public final class TikTokRoomResolver {
             @NonNull String roomId,
             @Nullable Map<String, String> existingCookies
     ) {
-        return fetchInitialWebcastResponse(roomId, null, existingCookies);
+        return fetchInitialWebcastResponse(roomId, null, existingCookies, null, null, 0L);
     }
 
     @NonNull
@@ -1469,6 +1519,18 @@ public final class TikTokRoomResolver {
             @NonNull String roomId,
             @Nullable String deviceId,
             @Nullable Map<String, String> existingCookies
+    ) {
+        return fetchInitialWebcastResponse(roomId, deviceId, existingCookies, null, null, 0L);
+    }
+
+    @NonNull
+    public static InitialFetchResult fetchInitialWebcastResponse(
+            @NonNull String roomId,
+            @Nullable String deviceId,
+            @Nullable Map<String, String> existingCookies,
+            @Nullable String cursor,
+            @Nullable String internalExt,
+            long lastRttMs
     ) {
         String cleanRoomId = roomId.trim();
         Map<String, String> mergedCookies = existingCookies != null
@@ -1488,40 +1550,10 @@ public final class TikTokRoomResolver {
         HttpURLConnection conn = null;
         long startMs = System.currentTimeMillis();
         try {
-            String effectiveDeviceId = (deviceId != null && DEVICE_ID_PATTERN.matcher(deviceId.trim()).matches())
-                    ? deviceId.trim()
-                    : "";
-            String encodedRoom = URLEncoder.encode(cleanRoomId, StandardCharsets.UTF_8.name());
-            StringBuilder urlSb = new StringBuilder(WEBCAST_IM_FETCH_ENDPOINT);
-            urlSb.append("?aid=1988");
-            urlSb.append("&app_language=en");
-            urlSb.append("&app_name=tiktok_web");
-            urlSb.append("&browser_language=en-US");
-            urlSb.append("&browser_name=").append(urlEncodeRfc3986(CLIENT_BROWSER_NAME));
-            urlSb.append("&browser_platform=").append(urlEncodeRfc3986(CLIENT_BROWSER_PLATFORM));
-            urlSb.append("&browser_version=").append(urlEncodeRfc3986(CLIENT_BROWSER_VERSION));
-            urlSb.append("&cookie_enabled=true");
-            urlSb.append("&cursor=");
-            if (!effectiveDeviceId.isEmpty()) {
-                urlSb.append("&device_id=").append(effectiveDeviceId);
-                urlSb.append("&did=").append(effectiveDeviceId);
-            }
-            urlSb.append("&device_platform=").append(CLIENT_DEVICE_PLATFORM);
-            urlSb.append("&did_rule=3");
-            urlSb.append("&fetch_rule=1");
-            urlSb.append("&identity=audience");
-            urlSb.append("&internal_ext=");
-            urlSb.append("&last_rtt=0");
-            urlSb.append("&live_id=12");
-            urlSb.append("&os=").append(CLIENT_OS);
-            urlSb.append("&resp_content_type=protobuf");
-            urlSb.append("&room_id=").append(encodedRoom);
-            urlSb.append("&screen_height=800");
-            urlSb.append("&screen_width=360");
-            urlSb.append("&tz_name=UTC");
-            urlSb.append("&version_code=180800");
-
-            URL url = new URL(urlSb.toString());
+            String fetchUrl = buildInitialWebcastFetchUrl(
+                    cleanRoomId, deviceId, cursor, internalExt, lastRttMs
+            );
+            URL url = new URL(fetchUrl);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);

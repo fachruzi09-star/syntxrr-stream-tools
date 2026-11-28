@@ -5,6 +5,7 @@ import androidx.annotation.Nullable;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,12 +16,14 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -61,7 +64,10 @@ public final class TikTokWebSocketTransport {
 
     private static final String WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private static final int CONNECT_TIMEOUT_MS = 12_000;
-    private static final int READ_TIMEOUT_MS = 35_000;
+    // Maksimum interval heartbeat = 30 dtk dan deadline Pong = 20 dtk (total 50 dtk).
+    // 65 dtk memberi margin aman agar SO_TIMEOUT tidak memutus room tenang sebelum watchdog bekerja.
+    static final int READ_TIMEOUT_MS = 65_000;
+    static final long DEFAULT_PONG_TIMEOUT_MS = 20_000L;
     private static final int MAX_HEADER_BYTES = 32 * 1024;
     private static final int MAX_FRAME_BYTES = 4 * 1024 * 1024;
     private static final Pattern SENSITIVE_TEXT_PATTERN = Pattern.compile(
@@ -147,24 +153,56 @@ public final class TikTokWebSocketTransport {
         void onError(@NonNull String reason);
     }
 
+    interface TimeSource {
+        long nowMs();
+    }
+
     private final SecureRandom mRandom = new SecureRandom();
+    private final TimeSource mTimeSource;
+    private final long mPongTimeoutMs;
+    private final AtomicBoolean mUserClosed = new AtomicBoolean(false);
     private final AtomicBoolean mClosed = new AtomicBoolean(false);
     private final AtomicBoolean mOpen = new AtomicBoolean(false);
-    private final AtomicLong mLastPingSentMs = new AtomicLong(0L);
+    private final AtomicBoolean mTerminalEventFired = new AtomicBoolean(false);
     private final AtomicLong mLastRttMs = new AtomicLong(0L);
+    private final AtomicLong mPingSequence = new AtomicLong(0L);
     private final AtomicLong mTikTokHeartbeatSequence = new AtomicLong(1L);
     @Nullable
     private volatile String mTikTokRoomId;
     private final Object mWriteLock = new Object();
+    private final Object mPingLock = new Object();
+    @Nullable
+    private byte[] mPendingPingPayload;
+    private long mPendingPingSentMs = 0L;
+    private long mPendingPingDeadlineMs = 0L;
+    @Nullable
+    private ScheduledFuture<?> mPendingPongTimeoutFuture;
 
     @Nullable
     private volatile SSLSocket mSocket;
+    @Nullable
+    private volatile Closeable mSocketResource;
+    @Nullable
+    private volatile Listener mActiveListener;
     @Nullable
     private volatile OutputStream mOutput;
     @Nullable
     private Thread mReaderThread;
     @Nullable
     private ScheduledExecutorService mHeartbeatExecutor;
+
+    public TikTokWebSocketTransport() {
+        this(DEFAULT_PONG_TIMEOUT_MS, System::currentTimeMillis);
+    }
+
+    TikTokWebSocketTransport(long pongTimeoutMs) {
+        this(pongTimeoutMs, System::currentTimeMillis);
+    }
+
+    TikTokWebSocketTransport(long pongTimeoutMs, @NonNull TimeSource timeSource) {
+        this.mPongTimeoutMs = Math.max(10L, pongTimeoutMs);
+        this.mTimeSource = timeSource;
+    }
 
     @NonNull
     public static String buildWebSocketUrl(
@@ -342,9 +380,10 @@ public final class TikTokWebSocketTransport {
             @Nullable String tikTokRoomId,
             @NonNull Listener listener
     ) {
-        if (mClosed.get()) return;
+        if (mClosed.get() || mUserClosed.get()) return;
         mTikTokRoomId = tikTokRoomId != null ? tikTokRoomId.trim() : null;
         mTikTokHeartbeatSequence.set(1L);
+        mActiveListener = listener;
 
         Thread connectThread = new Thread(() -> {
             SSLSocket socket = null;
@@ -354,7 +393,7 @@ public final class TikTokWebSocketTransport {
                 URI uri = URI.create(wsUrl);
                 String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.US) : "";
                 if (!"wss".equals(scheme) && !"https".equals(scheme)) {
-                    listener.onHandshakeRejected(new HandshakeDiagnostics(
+                    notifyHandshakeRejectedOnce(listener, new HandshakeDiagnostics(
                             0, "", "", "", "", "", "", false, 0, "empty", "unknown",
                             "Skema URL WebSocket tidak didukung: " + sanitizeHeaderValue(scheme)
                     ));
@@ -362,7 +401,7 @@ public final class TikTokWebSocketTransport {
                 }
                 String host = uri.getHost();
                 if (host == null || host.isEmpty()) {
-                    listener.onHandshakeRejected(new HandshakeDiagnostics(
+                    notifyHandshakeRejectedOnce(listener, new HandshakeDiagnostics(
                             0, "", "", "", "", "", "", false, 0, "empty", "unknown",
                             "Host URL WebSocket kosong."
                     ));
@@ -380,6 +419,7 @@ public final class TikTokWebSocketTransport {
                 SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
                 socket = (SSLSocket) factory.createSocket();
                 mSocket = socket;
+                mSocketResource = socket;
                 socket.setSoTimeout(READ_TIMEOUT_MS);
 
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
@@ -396,7 +436,7 @@ public final class TikTokWebSocketTransport {
                     throw new SSLPeerUnverifiedException("Hostname sertifikat TLS tidak cocok untuk " + host);
                 }
 
-                if (mClosed.get()) {
+                if (mClosed.get() || mUserClosed.get()) {
                     closeQuietly(socket);
                     return;
                 }
@@ -431,7 +471,7 @@ public final class TikTokWebSocketTransport {
                 HandshakeEvaluation evaluation = readAndEvaluateHandshake(host, in, secWebSocketKey, socket);
                 if (!evaluation.accepted) {
                     closeQuietly(socket);
-                    listener.onHandshakeRejected(evaluation.diagnostics);
+                    notifyHandshakeRejectedOnce(listener, evaluation.diagnostics);
                     return;
                 }
 
@@ -450,21 +490,30 @@ public final class TikTokWebSocketTransport {
 
                 readFrameLoop(in, listener);
             } catch (Exception e) {
-                if (!mClosed.get()) {
+                if (!mUserClosed.get() && !mClosed.get() && !mTerminalEventFired.get()) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                    String safeMsg = sanitizeDiagnosticText("Gagal terhubung WebSocket: " + msg, secKeyForDiag, 220);
                     if (!mOpen.get()) {
-                        listener.onHandshakeRejected(new HandshakeDiagnostics(
+                        String safeMsg = sanitizeDiagnosticText("Gagal terhubung WebSocket: " + msg, secKeyForDiag, 220);
+                        notifyHandshakeRejectedOnce(listener, new HandshakeDiagnostics(
                                 0, attemptedHostForDiag, "", "", "", "", "", false, 0, "empty", "unknown", safeMsg
                         ));
                     } else {
-                        listener.onError(sanitizeDiagnosticText("Koneksi WebSocket terputus: " + msg, secKeyForDiag, 220));
+                        failTransportAndNotify(
+                                sanitizeDiagnosticText("Koneksi WebSocket terputus: " + msg, secKeyForDiag, 220)
+                        );
                     }
                 }
             } finally {
                 mOpen.set(false);
+                mClosed.set(true);
                 stopHeartbeat();
+                synchronized (mWriteLock) {
+                    mOutput = null;
+                }
                 closeQuietly(socket);
+                mSocket = null;
+                mSocketResource = null;
+                mActiveListener = null;
             }
         }, "TikTokWsTransport");
         mReaderThread = connectThread;
@@ -477,16 +526,19 @@ public final class TikTokWebSocketTransport {
     }
 
     public void close() {
-        if (!mClosed.compareAndSet(false, true)) {
+        if (!mUserClosed.compareAndSet(false, true)) {
             return;
         }
+        mClosed.set(true);
         mOpen.set(false);
         stopHeartbeat();
         try {
             writeFrame(0x8, new byte[]{0x03, (byte) 0xE8}); // Close 1000
         } catch (Exception ignored) {
         }
+        closeQuietly(mSocketResource);
         closeQuietly(mSocket);
+        mSocketResource = null;
         mSocket = null;
         synchronized (mWriteLock) {
             mOutput = null;
@@ -497,33 +549,261 @@ public final class TikTokWebSocketTransport {
         }
     }
 
+    void attachOpenTransportForTesting(
+            @NonNull OutputStream out,
+            @Nullable Closeable socketResource,
+            @NonNull Listener listener
+    ) {
+        attachOpenTransportForTesting(out, socketResource, null, listener);
+    }
+
+    void attachOpenTransportForTesting(
+            @NonNull OutputStream out,
+            @Nullable Closeable socketResource,
+            @Nullable String tikTokRoomId,
+            @NonNull Listener listener
+    ) {
+        mActiveListener = listener;
+        mSocketResource = socketResource;
+        mTikTokRoomId = tikTokRoomId;
+        synchronized (mWriteLock) {
+            mOutput = out;
+        }
+        mOpen.set(true);
+    }
+
+    void startHeartbeatForTesting(long heartbeatDurationMs, boolean sendTikTokHeartbeat) {
+        startHeartbeat(heartbeatDurationMs, sendTikTokHeartbeat);
+    }
+
+    void startHeartbeatWithCustomIntervalForTesting(long intervalMs, boolean sendTikTokHeartbeat) {
+        startHeartbeatWithInterval(Math.max(5L, intervalMs), sendTikTokHeartbeat);
+    }
+
+    void performKeepaliveTickForTesting(boolean sendTikTokHeartbeat) {
+        performKeepaliveTick(sendTikTokHeartbeat);
+    }
+
+    boolean handleIncomingPongForTesting(@NonNull byte[] payload) {
+        return handleIncomingPong(payload, mTimeSource.nowMs());
+    }
+
+    void readFrameLoopForTesting(@NonNull InputStream in, @NonNull Listener listener) throws IOException {
+        mActiveListener = listener;
+        readFrameLoop(in, listener);
+    }
+
+    void runReadLoopForTesting(@NonNull InputStream in, @NonNull Listener listener) {
+        mActiveListener = listener;
+        try {
+            readFrameLoop(in, listener);
+        } catch (Exception e) {
+            if (!mUserClosed.get() && !mClosed.get() && !mTerminalEventFired.get()) {
+                failTransportAndNotify("Koneksi WebSocket terputus: " + safeExceptionMessage(e));
+            }
+        }
+    }
+
+    boolean isWriteLockHeldByCurrentThreadForTesting() {
+        return Thread.holdsLock(mWriteLock);
+    }
+
+    @Nullable
+    byte[] getPendingPingPayloadForTesting() {
+        synchronized (mPingLock) {
+            return mPendingPingPayload != null ? mPendingPingPayload.clone() : null;
+        }
+    }
+
+    boolean isHeartbeatRunningForTesting() {
+        ScheduledExecutorService exec = mHeartbeatExecutor;
+        return exec != null && !exec.isShutdown();
+    }
+
     private void startHeartbeat(long heartbeatDurationMs, boolean sendTikTokHeartbeat) {
         long intervalMs = Math.max(8_000L, Math.min(30_000L, heartbeatDurationMs > 0 ? heartbeatDurationMs : 10_000L));
+        startHeartbeatWithInterval(intervalMs, sendTikTokHeartbeat);
+    }
+
+    private void startHeartbeatWithInterval(long intervalMs, boolean sendTikTokHeartbeat) {
+        if (!isOpen()) return;
         ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "TikTokWsHeartbeat");
             t.setDaemon(true);
             return t;
         });
         mHeartbeatExecutor = exec;
-        exec.scheduleAtFixedRate(() -> {
-            if (!isOpen()) return;
+        exec.scheduleAtFixedRate(
+                () -> performKeepaliveTick(sendTikTokHeartbeat),
+                intervalMs,
+                intervalMs,
+                TimeUnit.MILLISECONDS
+        );
+    }
+
+    private void performKeepaliveTick(boolean sendTikTokHeartbeat) {
+        if (!isOpen()) return;
+
+        long nowMs = mTimeSource.nowMs();
+        boolean pingTimedOut = false;
+        byte[] pingPayloadToSend = null;
+
+        synchronized (mPingLock) {
+            if (mPendingPingPayload != null) {
+                if (mPendingPingDeadlineMs > 0L && nowMs >= mPendingPingDeadlineMs) {
+                    pingTimedOut = true;
+                }
+                // Ping sebelumnya masih menunggu Pong: jangan kirim Ping baru.
+            } else {
+                pingPayloadToSend = nextUniquePingPayload();
+                mPendingPingPayload = pingPayloadToSend;
+                mPendingPingSentMs = nowMs;
+                mPendingPingDeadlineMs = nowMs + mPongTimeoutMs;
+            }
+        }
+
+        if (pingTimedOut) {
+            failTransportAndNotify("Pong timeout: koneksi WebSocket tidak merespons Ping dalam "
+                    + mPongTimeoutMs + " ms.");
+            return;
+        }
+
+        if (pingPayloadToSend != null) {
+            boolean pingSent = writeFrame(0x9, pingPayloadToSend);
+            if (!pingSent) {
+                synchronized (mPingLock) {
+                    if (mPendingPingPayload != null && Arrays.equals(mPendingPingPayload, pingPayloadToSend)) {
+                        mPendingPingPayload = null;
+                        mPendingPingSentMs = 0L;
+                        mPendingPingDeadlineMs = 0L;
+                    }
+                }
+                return;
+            }
+            ScheduledExecutorService exec = mHeartbeatExecutor;
+            if (exec != null && !exec.isShutdown() && isOpen()) {
+                final byte[] expectedPayload = pingPayloadToSend;
+                try {
+                    ScheduledFuture<?> timeoutFuture = exec.schedule(
+                            () -> checkPongTimeout(expectedPayload),
+                            mPongTimeoutMs,
+                            TimeUnit.MILLISECONDS
+                    );
+                    synchronized (mPingLock) {
+                        if (mPendingPingPayload != null
+                                && Arrays.equals(mPendingPingPayload, expectedPayload)
+                                && isOpen()) {
+                            if (mPendingPongTimeoutFuture != null) {
+                                mPendingPongTimeoutFuture.cancel(false);
+                            }
+                            mPendingPongTimeoutFuture = timeoutFuture;
+                        } else {
+                            timeoutFuture.cancel(false);
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Executor shut down concurrently during close/teardown.
+                }
+            }
+        }
+
+        if (sendTikTokHeartbeat && isOpen()) {
+            String roomId = mTikTokRoomId;
+            if (roomId != null && !roomId.isEmpty()) {
+                long sequenceId = mTikTokHeartbeatSequence.getAndIncrement();
+                try {
+                    byte[] hbFrame = TikTokWebcastDecoder.encodePushFrameHeartbeat(roomId, sequenceId);
+                    writeFrame(0x2, hbFrame);
+                } catch (Exception e) {
+                    failTransportAndNotify("Gagal menyiapkan/mengirim heartbeat TikTok: "
+                            + safeExceptionMessage(e));
+                }
+            }
+        }
+    }
+
+    private void checkPongTimeout(@NonNull byte[] expectedPayload) {
+        if (!isOpen()) return;
+        long nowMs = mTimeSource.nowMs();
+        long remainingMs;
+        synchronized (mPingLock) {
+            if (mPendingPingPayload == null
+                    || !Arrays.equals(mPendingPingPayload, expectedPayload)
+                    || mPendingPingDeadlineMs <= 0L) {
+                return;
+            }
+            remainingMs = mPendingPingDeadlineMs - nowMs;
+        }
+        if (remainingMs <= 0L) {
+            failTransportAndNotify("Pong timeout: koneksi WebSocket tidak merespons Ping dalam "
+                    + mPongTimeoutMs + " ms.");
+            return;
+        }
+        ScheduledExecutorService exec = mHeartbeatExecutor;
+        if (exec != null && !exec.isShutdown() && isOpen()) {
             try {
-                mLastPingSentMs.set(System.currentTimeMillis());
-                writeFrame(0x9, new byte[0]); // RFC 6455 Ping
-                if (sendTikTokHeartbeat) {
-                    String roomId = mTikTokRoomId;
-                    if (roomId != null && !roomId.isEmpty()) {
-                        long sequenceId = mTikTokHeartbeatSequence.getAndIncrement();
-                        writeFrame(0x2,
-                                TikTokWebcastDecoder.encodePushFrameHeartbeat(roomId, sequenceId));
+                ScheduledFuture<?> retry = exec.schedule(
+                        () -> checkPongTimeout(expectedPayload),
+                        Math.max(1L, remainingMs),
+                        TimeUnit.MILLISECONDS
+                );
+                synchronized (mPingLock) {
+                    if (mPendingPingPayload != null
+                            && Arrays.equals(mPendingPingPayload, expectedPayload)
+                            && isOpen()) {
+                        mPendingPongTimeoutFuture = retry;
+                    } else {
+                        retry.cancel(false);
                     }
                 }
             } catch (Exception ignored) {
+                // Executor shut down concurrently during close/teardown.
             }
-        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private boolean handleIncomingPong(@NonNull byte[] payload, long nowMs) {
+        synchronized (mPingLock) {
+            if (mPendingPingPayload == null || !Arrays.equals(mPendingPingPayload, payload)) {
+                return false;
+            }
+            if (mPendingPingSentMs > 0L) {
+                mLastRttMs.set(Math.max(1L, nowMs - mPendingPingSentMs));
+            }
+            mPendingPingPayload = null;
+            mPendingPingSentMs = 0L;
+            mPendingPingDeadlineMs = 0L;
+            if (mPendingPongTimeoutFuture != null) {
+                mPendingPongTimeoutFuture.cancel(false);
+                mPendingPongTimeoutFuture = null;
+            }
+            return true;
+        }
+    }
+
+    @NonNull
+    private byte[] nextUniquePingPayload() {
+        long seq = mPingSequence.incrementAndGet();
+        byte[] randomPart = new byte[4];
+        mRandom.nextBytes(randomPart);
+        byte[] payload = new byte[12];
+        for (int i = 0; i < 8; i++) {
+            payload[i] = (byte) ((seq >>> (56 - 8 * i)) & 0xFF);
+        }
+        System.arraycopy(randomPart, 0, payload, 8, 4);
+        return payload;
     }
 
     private void stopHeartbeat() {
+        synchronized (mPingLock) {
+            mPendingPingPayload = null;
+            mPendingPingSentMs = 0L;
+            mPendingPingDeadlineMs = 0L;
+            if (mPendingPongTimeoutFuture != null) {
+                mPendingPongTimeoutFuture.cancel(false);
+                mPendingPongTimeoutFuture = null;
+            }
+        }
         ScheduledExecutorService exec = mHeartbeatExecutor;
         mHeartbeatExecutor = null;
         if (exec != null) {
@@ -531,7 +811,48 @@ public final class TikTokWebSocketTransport {
         }
     }
 
+    private void failTransportAndNotify(@NonNull String reason) {
+        if (mUserClosed.get()) {
+            return;
+        }
+        mClosed.set(true);
+        mOpen.set(false);
+        stopHeartbeat();
+        synchronized (mWriteLock) {
+            mOutput = null;
+        }
+        closeQuietly(mSocketResource);
+        closeQuietly(mSocket);
+        mSocketResource = null;
+        mSocket = null;
+        Listener listener = mActiveListener;
+        if (!mUserClosed.get() && mTerminalEventFired.compareAndSet(false, true) && listener != null) {
+            listener.onError(reason);
+        }
+    }
+
+    private void notifyHandshakeRejectedOnce(
+            @NonNull Listener listener,
+            @NonNull HandshakeDiagnostics diagnostics
+    ) {
+        if (!mUserClosed.get() && mTerminalEventFired.compareAndSet(false, true)) {
+            listener.onHandshakeRejected(diagnostics);
+        }
+    }
+
+    private void notifyClosedOnce(
+            @NonNull Listener listener,
+            int code,
+            @NonNull String reason,
+            boolean byRemote
+    ) {
+        if (!mUserClosed.get() && mTerminalEventFired.compareAndSet(false, true)) {
+            listener.onClosed(code, reason, byRemote);
+        }
+    }
+
     private boolean writeFrame(int opcode, @NonNull byte[] payload) {
+        IOException writeFailure = null;
         synchronized (mWriteLock) {
             OutputStream out = mOutput;
             // close() marks the transport closed before emitting the RFC 6455 close
@@ -569,9 +890,40 @@ public final class TikTokWebSocketTransport {
                 out.flush();
                 return true;
             } catch (IOException e) {
-                return false;
+                writeFailure = e;
             }
         }
+        // Jangan pernah memanggil callback atau menutup resource saat masih memegang mWriteLock.
+        if (opcode != 0x8 && !mUserClosed.get()) {
+            failTransportAndNotify("Gagal menulis frame WebSocket (" + describeOpcode(opcode)
+                    + "): " + safeExceptionMessage(writeFailure));
+        }
+        return false;
+    }
+
+    @NonNull
+    private static String describeOpcode(int opcode) {
+        switch (opcode) {
+            case 0x1:
+                return "text";
+            case 0x2:
+                return "binary";
+            case 0x8:
+                return "close";
+            case 0x9:
+                return "ping";
+            case 0xA:
+                return "pong";
+            default:
+                return "opcode_" + opcode;
+        }
+    }
+
+    @NonNull
+    private static String safeExceptionMessage(@Nullable Throwable t) {
+        if (t == null) return "unknown";
+        String msg = t.getMessage();
+        return (msg != null && !msg.trim().isEmpty()) ? msg.trim() : t.getClass().getSimpleName();
     }
 
     private void readFrameLoop(@NonNull InputStream in, @NonNull Listener listener) throws IOException {
@@ -581,12 +933,12 @@ public final class TikTokWebSocketTransport {
         while (!mClosed.get()) {
             int b1 = in.read();
             if (b1 == -1) {
-                listener.onClosed(1006, "Stream WebSocket berakhir.", true);
+                notifyClosedOnce(listener, 1006, "Stream WebSocket berakhir.", true);
                 return;
             }
             int b2 = in.read();
             if (b2 == -1) {
-                listener.onClosed(1006, "Header frame WebSocket terpotong.", true);
+                notifyClosedOnce(listener, 1006, "Header frame WebSocket terpotong.", true);
                 return;
             }
 
@@ -631,16 +983,15 @@ public final class TikTokWebSocketTransport {
                         reason = new String(payload, 2, payload.length - 2, StandardCharsets.UTF_8);
                     }
                 }
-                listener.onClosed(code, reason, true);
+                notifyClosedOnce(listener, code, reason, true);
                 return;
             } else if (opcode == 0x9) { // Ping -> Pong
-                writeFrame(0xA, payload);
+                if (!writeFrame(0xA, payload)) {
+                    return;
+                }
                 continue;
             } else if (opcode == 0xA) { // Pong
-                long sent = mLastPingSentMs.get();
-                if (sent > 0L) {
-                    mLastRttMs.set(Math.max(1L, System.currentTimeMillis() - sent));
-                }
+                handleIncomingPong(payload, mTimeSource.nowMs());
                 continue;
             }
 
@@ -1249,10 +1600,10 @@ public final class TikTokWebSocketTransport {
         return out.toString();
     }
 
-    private static void closeQuietly(@Nullable SSLSocket socket) {
-        if (socket == null) return;
+    private static void closeQuietly(@Nullable Closeable resource) {
+        if (resource == null) return;
         try {
-            socket.close();
+            resource.close();
         } catch (IOException ignored) {
         }
     }

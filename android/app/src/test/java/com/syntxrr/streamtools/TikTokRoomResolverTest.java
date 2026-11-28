@@ -504,6 +504,60 @@ public class TikTokRoomResolverTest {
         assertEquals("7345678901234567890", withDeviceId.deviceId);
     }
 
+    @Test
+    public void initialWebcastFetchUrlSupportsFreshConnectDefaults() throws Exception {
+        String url = TikTokRoomResolver.buildInitialWebcastFetchUrl(
+                "7712777833754118933",
+                "7345678901234567890",
+                null,
+                null,
+                0L
+        );
+
+        assertTrue(url.startsWith(TikTokRoomResolver.WEBCAST_IM_FETCH_ENDPOINT + "?"));
+        Map<String, String> params = parseQuery(url.substring(url.indexOf('?') + 1));
+        assertEquals("7712777833754118933", params.get("room_id"));
+        assertEquals("7345678901234567890", params.get("device_id"));
+        assertEquals("7345678901234567890", params.get("did"));
+        assertEquals("", params.get("cursor"));
+        assertEquals("", params.get("internal_ext"));
+        assertEquals("0", params.get("last_rtt"));
+        assertEquals("protobuf", params.get("resp_content_type"));
+    }
+
+    @Test
+    public void initialWebcastFetchUrlIncludesAndEncodesReconnectCursorInternalExtAndRtt() throws Exception {
+        String url = TikTokRoomResolver.buildInitialWebcastFetchUrl(
+                "7712777833754118933",
+                "7345678901234567890",
+                "cur+1/2=abc ",
+                "ext=a&b c",
+                87L
+        );
+
+        String rawQuery = url.substring(url.indexOf('?') + 1);
+        assertTrue(rawQuery.contains("cursor=cur%2B1%2F2%3Dabc"));
+        assertTrue(rawQuery.contains("internal_ext=ext%3Da%26b%20c"));
+        assertTrue(rawQuery.contains("last_rtt=87"));
+
+        Map<String, String> params = parseQuery(rawQuery);
+        assertEquals("cur+1/2=abc", params.get("cursor"));
+        assertEquals("ext=a&b c", params.get("internal_ext"));
+        assertEquals("87", params.get("last_rtt"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void initialWebcastFetchUrlRejectsEmptyRoomId() {
+        TikTokRoomResolver.buildInitialWebcastFetchUrl("  ", "7345678901234567890", "c", "e", 10L);
+    }
+
+    @Test
+    public void effectiveLastRttPrefersPositiveWebSocketRttAndFallsBackSafely() {
+        assertEquals(42L, TikTokLiveConnector.resolveEffectiveLastRttMs(42L, 120L));
+        assertEquals(120L, TikTokLiveConnector.resolveEffectiveLastRttMs(0L, 120L));
+        assertEquals(0L, TikTokLiveConnector.resolveEffectiveLastRttMs(-5L, -10L));
+    }
+
     private static Map<String, String> parseQuery(String rawQuery) throws Exception {
         Map<String, String> result = new HashMap<>();
         for (String pair : rawQuery.split("&")) {
