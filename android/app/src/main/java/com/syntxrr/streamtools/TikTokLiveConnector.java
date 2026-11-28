@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -283,9 +284,159 @@ public final class TikTokLiveConnector {
         return Math.max(0L, fallbackImFetchRttMs);
     }
 
+    static final long NETWORK_TRANSITION_DEBOUNCE_MS = 450L;
+
+    enum NetworkTransitionAction {
+        NONE,
+        PAUSE_FOR_NETWORK_LOSS,
+        TRIGGER_COORDINATED_RECONNECT,
+        TRIGGER_HANDOFF_RECONNECT
+    }
+
+    static final class NetworkSnapshot {
+        final boolean available;
+        final boolean wifi;
+        final boolean cellular;
+        final long networkHandle;
+
+        NetworkSnapshot(boolean available, boolean wifi, boolean cellular, long networkHandle) {
+            this.available = available;
+            this.wifi = wifi;
+            this.cellular = cellular;
+            this.networkHandle = networkHandle;
+        }
+
+        boolean sameRoutingAs(@NonNull NetworkSnapshot other) {
+            return this.available == other.available
+                    && this.wifi == other.wifi
+                    && this.cellular == other.cellular
+                    && this.networkHandle == other.networkHandle;
+        }
+    }
+
+    /**
+     * Koordinator transisi jaringan pure-Java (deterministic & testable tanpa Android stub).
+     * Mengelola debounce transisi cepat (Wi-Fi/Seluler), guard generasi sesi/epoch, dan
+     * mencegah badai reconnect maupun pemborosan retry budget saat perangkat offline.
+     */
+    static final class NetworkCoordinator {
+        private final Object mCoordLock = new Object();
+        @NonNull
+        private NetworkSnapshot mLatestRaw = new NetworkSnapshot(true, false, false, -1L);
+        @NonNull
+        private NetworkSnapshot mLastSettled = new NetworkSnapshot(true, false, false, -1L);
+        private long mBoundSessionGeneration = 0L;
+        private long mNetworkEpoch = 0L;
+
+        boolean isNetworkAvailable() {
+            synchronized (mCoordLock) {
+                return mLatestRaw.available;
+            }
+        }
+
+        boolean isWifiActive() {
+            synchronized (mCoordLock) {
+                return mLatestRaw.available && mLatestRaw.wifi;
+            }
+        }
+
+        void initializeBaseline(@NonNull NetworkSnapshot baseline) {
+            synchronized (mCoordLock) {
+                mLatestRaw = baseline;
+                mLastSettled = baseline;
+            }
+        }
+
+        long onSessionGenerationChanged(long newSessionGeneration) {
+            synchronized (mCoordLock) {
+                mBoundSessionGeneration = newSessionGeneration;
+                mNetworkEpoch++;
+                return mNetworkEpoch;
+            }
+        }
+
+        /**
+         * Mengantrekan snapshot jaringan baru.
+         * Mengembalikan epoch positif (> 0) jika perlu menjadwalkan evaluasi debounced,
+         * atau -1 jika snapshot identik (redundant callback).
+         */
+        long submitSnapshot(@NonNull NetworkSnapshot snapshot, long currentSessionGeneration) {
+            synchronized (mCoordLock) {
+                mBoundSessionGeneration = currentSessionGeneration;
+                if (snapshot.sameRoutingAs(mLatestRaw) && snapshot.sameRoutingAs(mLastSettled)) {
+                    return -1L;
+                }
+                mLatestRaw = snapshot;
+                mNetworkEpoch++;
+                return mNetworkEpoch;
+            }
+        }
+
+        @NonNull
+        NetworkTransitionAction evaluateSettledIfCurrent(
+                long expectedSessionGeneration,
+                long expectedEpoch,
+                boolean sessionActive,
+                @Nullable String state,
+                boolean waitingForNetworkRecovery,
+                @Nullable String errorCode
+        ) {
+            final NetworkSnapshot current;
+            final NetworkSnapshot previous;
+            synchronized (mCoordLock) {
+                if (expectedSessionGeneration != mBoundSessionGeneration || expectedEpoch != mNetworkEpoch) {
+                    return NetworkTransitionAction.NONE;
+                }
+                current = mLatestRaw;
+                previous = mLastSettled;
+                mLastSettled = current;
+            }
+
+            if (!sessionActive || state == null || "disconnected".equals(state) || "error".equals(state)) {
+                return NetworkTransitionAction.NONE;
+            }
+
+            if (!current.available) {
+                if (!waitingForNetworkRecovery) {
+                    return NetworkTransitionAction.PAUSE_FOR_NETWORK_LOSS;
+                }
+                return NetworkTransitionAction.NONE;
+            }
+
+            // Network tersedia saat evaluasi settled.
+            if (!previous.available || waitingForNetworkRecovery) {
+                if (waitingForNetworkRecovery
+                        || "reconnecting".equals(state)
+                        || ("waiting_for_live".equals(state) && ("NETWORK_ERROR".equals(errorCode) || "NETWORK_UNAVAILABLE".equals(errorCode)))) {
+                    return NetworkTransitionAction.TRIGGER_COORDINATED_RECONNECT;
+                }
+                return NetworkTransitionAction.NONE;
+            }
+
+            boolean handleSwitched = previous.networkHandle != -1L
+                    && current.networkHandle != -1L
+                    && previous.networkHandle != current.networkHandle;
+            if (handleSwitched) {
+                if ("connected_direct".equals(state)
+                        || "connected_euler".equals(state)
+                        || "connecting_direct".equals(state)
+                        || "connecting_euler".equals(state)
+                        || "resolving_room".equals(state)
+                        || "reconnecting".equals(state)) {
+                    return NetworkTransitionAction.TRIGGER_HANDOFF_RECONNECT;
+                }
+            }
+            return NetworkTransitionAction.NONE;
+        }
+    }
+
     public interface Listener {
         void onStateChanged(@NonNull JSONObject stateJson);
         void onEventDecoded(@NonNull JSONObject eventJson);
+    }
+
+    interface SessionStateObserver {
+        void onConnectorSessionStateChanged(boolean sessionActive, @NonNull String state);
     }
 
     @Nullable
@@ -318,10 +469,13 @@ public final class TikTokLiveConnector {
 
     @Nullable
     private volatile Listener mListener;
+    private final CopyOnWriteArraySet<SessionStateObserver> mSessionObservers = new CopyOnWriteArraySet<>();
     @Nullable
     private TikTokWebSocketTransport mActiveWs;
     @Nullable
     private ScheduledFuture<?> mPendingTask;
+    @Nullable
+    private ScheduledFuture<?> mNetworkDebounceTask;
 
     // Session state (disimpan di memori saja selama sesi aktif)
     @NonNull
@@ -352,6 +506,8 @@ public final class TikTokLiveConnector {
     private String mEulerJwtKey = "";
     private boolean mAllowEulerFallback = true;
     private boolean mUseAlternateDirectWsHost = false;
+    private boolean mWaitingForNetworkRecovery = false;
+    private long mLastActivityLeaseRefreshMs = 0L;
     @NonNull
     private String mCursor = "";
     @NonNull
@@ -365,6 +521,7 @@ public final class TikTokLiveConnector {
     @NonNull
     private String mErrorCode = "";
     private final ReconnectPolicy mReconnectPolicy = new ReconnectPolicy();
+    private final NetworkCoordinator mNetworkCoordinator = new NetworkCoordinator();
 
     // Mode A connection diagnostics (in-memory per session, never persisted or logged with secrets)
     private static final Pattern SENSITIVE_QUERY_PARAM_PATTERN = Pattern.compile(
@@ -541,10 +698,19 @@ public final class TikTokLiveConnector {
         }
     }
 
+    void addSessionStateObserver(@NonNull SessionStateObserver observer) {
+        mSessionObservers.add(observer);
+        observer.onConnectorSessionStateChanged(isSessionActive(), mState);
+    }
+
+    void removeSessionStateObserver(@NonNull SessionStateObserver observer) {
+        mSessionObservers.remove(observer);
+    }
+
     public boolean isSessionActive() {
         synchronized (mLock) {
             if ("waiting_for_live".equals(mState)) {
-                return mPendingTask != null && !mPendingTask.isCancelled();
+                return mWaitingForNetworkRecovery || (mPendingTask != null && !mPendingTask.isCancelled());
             }
             return !"disconnected".equals(mState) && !"error".equals(mState);
         }
@@ -873,6 +1039,8 @@ public final class TikTokLiveConnector {
             }
 
             gen = mSessionGeneration.incrementAndGet();
+            mNetworkCoordinator.onSessionGenerationChanged(gen);
+            cancelNetworkDebounceTaskLocked();
             cancelPendingTaskLocked();
             closeActiveWsLocked();
 
@@ -881,6 +1049,7 @@ public final class TikTokLiveConnector {
             mEulerJwtKey = suppliedJwtKey;
             mAllowEulerFallback = allowEulerFallback;
             mUseAlternateDirectWsHost = false;
+            mWaitingForNetworkRecovery = false;
             mConnectionMethod = method;
             mRoomStatus = "unknown";
             mRoomId = "";
@@ -915,9 +1084,12 @@ public final class TikTokLiveConnector {
 
     private void stopInternal(@NonNull String terminalState, @NonNull String errorCode, @NonNull String message) {
         synchronized (mLock) {
-            mSessionGeneration.incrementAndGet();
+            long nextGen = mSessionGeneration.incrementAndGet();
+            mNetworkCoordinator.onSessionGenerationChanged(nextGen);
+            cancelNetworkDebounceTaskLocked();
             cancelPendingTaskLocked();
             closeActiveWsLocked();
+            mWaitingForNetworkRecovery = false;
             if ("error".equals(terminalState)) {
                 mDiagStage = "error";
                 mDiagLastTransportError = sanitizeDiagnosticReason(message, mEulerApiKey, mEulerJwtKey);
@@ -945,6 +1117,140 @@ public final class TikTokLiveConnector {
         }
     }
 
+    void initializeNetworkBaseline(@NonNull NetworkSnapshot baseline) {
+        mNetworkCoordinator.initializeBaseline(baseline);
+    }
+
+    void onSystemNetworkChanged(@NonNull NetworkSnapshot snapshot) {
+        final long sessionGen;
+        final long epoch;
+        synchronized (mLock) {
+            sessionGen = mSessionGeneration.get();
+            if (!isSessionActive()) {
+                mNetworkCoordinator.initializeBaseline(snapshot);
+                return;
+            }
+            epoch = mNetworkCoordinator.submitSnapshot(snapshot, sessionGen);
+            if (epoch < 0L) {
+                return;
+            }
+            // Jika jaringan baru saja hilang sementara retry timer sudah terjadwal, batalkan
+            // timer offline agar retry budget tidak terbakar sia-sia saat tidak ada internet.
+            if (!snapshot.available && ("reconnecting".equals(mState) || "waiting_for_live".equals(mState))) {
+                cancelPendingTaskLocked();
+            }
+            cancelNetworkDebounceTaskLocked();
+            final ScheduledFuture<?>[] selfHolder = new ScheduledFuture<?>[1];
+            ScheduledFuture<?> scheduled = mScheduler.schedule(() -> {
+                synchronized (mLock) {
+                    if (mNetworkDebounceTask != selfHolder[0]) {
+                        return;
+                    }
+                    mNetworkDebounceTask = null;
+                }
+                executeDebouncedNetworkTransition(sessionGen, epoch);
+            }, NETWORK_TRANSITION_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+            selfHolder[0] = scheduled;
+            mNetworkDebounceTask = scheduled;
+        }
+    }
+
+    private void executeDebouncedNetworkTransition(long expectedGen, long expectedEpoch) {
+        final NetworkTransitionAction action;
+        final boolean useEuler;
+        final boolean reuseDirectRoom;
+        final String targetUsername;
+        synchronized (mLock) {
+            if (isStaleGeneration(expectedGen)) {
+                return;
+            }
+            action = mNetworkCoordinator.evaluateSettledIfCurrent(
+                    expectedGen,
+                    expectedEpoch,
+                    isSessionActive(),
+                    mState,
+                    mWaitingForNetworkRecovery,
+                    mErrorCode
+            );
+            if (action == NetworkTransitionAction.NONE) {
+                return;
+            }
+            if (action == NetworkTransitionAction.PAUSE_FOR_NETWORK_LOSS) {
+                pauseForNetworkLossLocked(expectedGen, System.currentTimeMillis());
+                return;
+            }
+
+            // TRIGGER_COORDINATED_RECONNECT atau TRIGGER_HANDOFF_RECONNECT
+            cancelPendingTaskLocked();
+            if (action == NetworkTransitionAction.TRIGGER_HANDOFF_RECONNECT) {
+                long nowMs = System.currentTimeMillis();
+                if ("connected_direct".equals(mState)) {
+                    mReconnectPolicy.onDirectTransportEnded(nowMs);
+                } else if ("connected_euler".equals(mState)) {
+                    mReconnectPolicy.onEulerTransportEnded(nowMs);
+                }
+                closeActiveWsLocked();
+            }
+            mWaitingForNetworkRecovery = false;
+            mErrorCode = "";
+            useEuler = "euler".equals(mTransportMode) || "euler".equals(mConnectionMethod);
+            targetUsername = mUsername;
+            reuseDirectRoom = !useEuler && !mRoomId.isEmpty();
+            if (useEuler) {
+                mDiagStage = "websocket_connecting";
+                setStateLocked("connecting_euler", "euler",
+                        "Jaringan tersedia; menyambung kembali via EulerStream...");
+            } else if (reuseDirectRoom) {
+                mDiagStage = "websocket_connecting";
+                setStateLocked("reconnecting", "direct_ws",
+                        "Jaringan tersedia; menyambung kembali ke TikTok LIVE @" + targetUsername + "...");
+            } else {
+                mDiagStage = "resolving_room";
+                setStateLocked("resolving_room", "none",
+                        "Jaringan tersedia; memeriksa kembali room LIVE @" + targetUsername + "...");
+            }
+        }
+
+        if (useEuler) {
+            mWorker.execute(() -> startEulerFallback(expectedGen,
+                    "Jaringan tersedia; menyambung kembali via EulerStream..."));
+        } else if (reuseDirectRoom) {
+            mWorker.execute(() -> startDirectWebSocket(expectedGen));
+        } else {
+            mWorker.execute(() -> runRoomResolution(expectedGen, targetUsername));
+        }
+    }
+
+    private void pauseForNetworkLossLocked(long gen, long nowMs) {
+        if (isStaleGeneration(gen) || !isSessionActive()) {
+            return;
+        }
+        cancelPendingTaskLocked();
+        if ("connected_direct".equals(mState)) {
+            mReconnectPolicy.onDirectTransportEnded(nowMs);
+        } else if ("connected_euler".equals(mState)) {
+            mReconnectPolicy.onEulerTransportEnded(nowMs);
+        }
+        closeActiveWsLocked();
+        mWaitingForNetworkRecovery = true;
+        mErrorCode = "NETWORK_UNAVAILABLE";
+        if ("waiting_for_live".equals(mState) || mReconnectPolicy.shouldRouteNetworkErrorToWaitingForLive()) {
+            mDiagStage = "waiting_for_live";
+            setStateLocked(
+                    "waiting_for_live",
+                    "none",
+                    "Jaringan terputus; menunggu koneksi internet kembali untuk memantau @" + mUsername + "..."
+            );
+        } else {
+            mDiagStage = "reconnecting";
+            setStateLocked(
+                    "reconnecting",
+                    "none",
+                    "Jaringan terputus; menunggu koneksi internet kembali tanpa mengulang sesi..."
+            );
+        }
+    }
+
     private static final AtomicLong ENTER_UNIQUE_SEQUENCE =
             new AtomicLong(Math.max(1L, System.currentTimeMillis()));
 
@@ -964,7 +1270,13 @@ public final class TikTokLiveConnector {
     }
 
     private void runRoomResolution(long gen, @NonNull String username) {
-        if (isStaleGeneration(gen)) return;
+        synchronized (mLock) {
+            if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
+        }
 
         TikTokRoomResolver.Result res = TikTokRoomResolver.resolve(username);
         if (isStaleGeneration(gen)) return;
@@ -1150,6 +1462,10 @@ public final class TikTokLiveConnector {
     ) {
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
             closeActiveWsLocked();
             cancelPendingTaskLocked();
             // Jangan menganggap NETWORK_ERROR sebagai NOT_LIVE dan jangan habiskan budget reconnect transport.
@@ -1195,6 +1511,10 @@ public final class TikTokLiveConnector {
     ) {
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
             closeActiveWsLocked();
             cancelPendingTaskLocked();
             mRoomStatus = "unreadable";
@@ -1245,6 +1565,10 @@ public final class TikTokLiveConnector {
 
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
             closeActiveWsLocked();
             roomId = mRoomId;
             deviceId = mDeviceId;
@@ -1258,6 +1582,7 @@ public final class TikTokLiveConnector {
             allowEuler = mAllowEulerFallback;
             useAlternateDirectHost = mUseAlternateDirectWsHost;
             username = mUsername;
+            mWaitingForNetworkRecovery = false;
             resetWebSocketAttemptDiagnosticsLocked();
             mDiagStage = "websocket_connecting";
             setStateLocked(
@@ -1546,9 +1871,14 @@ public final class TikTokLiveConnector {
         final String jwtKey;
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
             boolean enteringEuler = !"euler".equals(mTransportMode);
             closeActiveWsLocked();
             cancelPendingTaskLocked();
+            mWaitingForNetworkRecovery = false;
             resetWebSocketAttemptDiagnosticsLocked();
             mDiagStage = "websocket_connecting";
             username = mUsername;
@@ -1614,8 +1944,10 @@ public final class TikTokLiveConnector {
                 if (isStaleTransport(gen, ws)) return;
                 synchronized (mLock) {
                     if (isStaleTransport(gen, ws)) return;
+                    long nowMs = System.currentTimeMillis();
                     mDiagLastPayloadType = "euler_json";
-                    mDiagLastFrameReceivedAt = System.currentTimeMillis();
+                    mDiagLastFrameReceivedAt = nowMs;
+                    refreshSessionActivityLeaseLocked(nowMs);
                 }
                 handleEulerJsonFrame(gen, text);
             }
@@ -1978,6 +2310,7 @@ public final class TikTokLiveConnector {
                     && decoded.events.isEmpty()) {
                 emitDiagUpdate = true;
             }
+            refreshSessionActivityLeaseLocked(frameReceivedAt);
         }
 
         if (decoded.needAck && decoded.logId > 0L) {
@@ -2134,6 +2467,10 @@ public final class TikTokLiveConnector {
         final int attempt;
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
             closeActiveWsLocked();
             cancelPendingTaskLocked();
             mReconnectPolicy.deterministicRejectCount++;
@@ -2188,6 +2525,10 @@ public final class TikTokLiveConnector {
 
         synchronized (mLock) {
             if (isStaleGeneration(gen)) return;
+            if (!mNetworkCoordinator.isNetworkAvailable()) {
+                pauseForNetworkLossLocked(gen, System.currentTimeMillis());
+                return;
+            }
             closeActiveWsLocked();
             cancelPendingTaskLocked();
 
@@ -2323,6 +2664,26 @@ public final class TikTokLiveConnector {
         mMessage = message;
         updateCompanionNotification(nextState, mUsername);
         emitCurrentState();
+        notifySessionStateObserversLocked(nextState);
+    }
+
+    private void notifySessionStateObserversLocked(@NonNull String state) {
+        mLastActivityLeaseRefreshMs = System.currentTimeMillis();
+        boolean active = isSessionActive();
+        for (SessionStateObserver observer : mSessionObservers) {
+            try {
+                observer.onConnectorSessionStateChanged(active, state);
+            } catch (Exception e) {
+                Log.w(TAG, "Gagal memberi tahu observer sesi Companion: " + e.getMessage());
+            }
+        }
+    }
+
+    private void refreshSessionActivityLeaseLocked(long nowMs) {
+        if (nowMs - mLastActivityLeaseRefreshMs < 60_000L) {
+            return;
+        }
+        notifySessionStateObserversLocked(mState);
     }
 
     private void updateCompanionNotification(@NonNull String state, @NonNull String username) {
@@ -2369,6 +2730,13 @@ public final class TikTokLiveConnector {
         if (mPendingTask != null) {
             mPendingTask.cancel(false);
             mPendingTask = null;
+        }
+    }
+
+    private void cancelNetworkDebounceTaskLocked() {
+        if (mNetworkDebounceTask != null) {
+            mNetworkDebounceTask.cancel(false);
+            mNetworkDebounceTask = null;
         }
     }
 
