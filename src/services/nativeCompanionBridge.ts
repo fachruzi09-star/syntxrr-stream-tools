@@ -192,6 +192,8 @@ export interface NativeTikTokStatePayload {
 
 export interface NativeTikTokRawEventPayload {
   method: string;
+  nativeSequence?: number;
+  nativeSessionId?: number;
   msgId?: string;
   createTime?: number;
   userId?: string;
@@ -214,6 +216,26 @@ export interface NativeTikTokRawEventPayload {
   memberCount?: number;
   viewerCount?: number;
   controlAction?: number;
+}
+
+export interface NativeTikTokEventBatchPayload {
+  sessionId: number;
+  events: NativeTikTokRawEventPayload[];
+  firstSequence: number;
+  lastSequence: number;
+  droppedPendingCount: number;
+  coalescedViewerCount: number;
+}
+
+export interface NativeTikTokReplaySnapshot {
+  sessionId: number;
+  events: NativeTikTokRawEventPayload[];
+  oldestSequence: number;
+  latestSequence: number;
+  overflow: boolean;
+  droppedCount: number;
+  hasMore: boolean;
+  sessionChanged: boolean;
 }
 
 export interface FloatingCompanionPluginInterface {
@@ -256,6 +278,11 @@ export interface FloatingCompanionPluginInterface {
   }): Promise<{ accepted: boolean; status?: NativeTikTokStatePayload }>;
   disconnectTikTokLive(): Promise<{ success: boolean; status?: NativeTikTokStatePayload }>;
   getTikTokLiveStatus(): Promise<NativeTikTokStatePayload>;
+  getTikTokLiveEventsSince(options?: {
+    sessionId?: number;
+    afterSequence?: number;
+    limit?: number;
+  }): Promise<NativeTikTokReplaySnapshot>;
   addListener(
     eventName: 'floatingHudClick',
     listenerFunc: (data: { timestamp: number }) => void
@@ -275,6 +302,10 @@ export interface FloatingCompanionPluginInterface {
   addListener(
     eventName: 'tiktokLiveState',
     listenerFunc: (data: NativeTikTokStatePayload) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'tiktokLiveEventBatch',
+    listenerFunc: (data: NativeTikTokEventBatchPayload) => void
   ): Promise<PluginListenerHandle>;
   addListener(
     eventName: 'tiktokLiveEvent',
@@ -863,6 +894,104 @@ export async function onTikTokLiveState(
   }
 }
 
+function isValidNativeTikTokRawEvent(value: unknown): value is NativeTikTokRawEventPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.method !== 'string' || candidate.method.trim().length === 0) {
+    return false;
+  }
+  if (
+    candidate.nativeSequence !== undefined &&
+    (typeof candidate.nativeSequence !== 'number' || !Number.isFinite(candidate.nativeSequence))
+  ) {
+    return false;
+  }
+  if (
+    candidate.nativeSessionId !== undefined &&
+    (typeof candidate.nativeSessionId !== 'number' || !Number.isFinite(candidate.nativeSessionId))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export async function getTikTokLiveEventsSinceNative(options?: {
+  sessionId?: number;
+  afterSequence?: number;
+  limit?: number;
+}): Promise<NativeTikTokReplaySnapshot | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    const raw = await FloatingCompanion.getTikTokLiveEventsSince({
+      sessionId: options?.sessionId ?? 0,
+      afterSequence: options?.afterSequence ?? 0,
+      limit: options?.limit ?? 256,
+    });
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return null;
+    }
+    const rawEvents = Array.isArray(raw.events) ? raw.events : [];
+    const validEvents = rawEvents.filter(isValidNativeTikTokRawEvent);
+    return {
+      sessionId: typeof raw.sessionId === 'number' && Number.isFinite(raw.sessionId) ? raw.sessionId : 0,
+      events: validEvents,
+      oldestSequence:
+        typeof raw.oldestSequence === 'number' && Number.isFinite(raw.oldestSequence) ? raw.oldestSequence : 0,
+      latestSequence:
+        typeof raw.latestSequence === 'number' && Number.isFinite(raw.latestSequence) ? raw.latestSequence : 0,
+      overflow: !!raw.overflow,
+      droppedCount:
+        typeof raw.droppedCount === 'number' && Number.isFinite(raw.droppedCount) ? raw.droppedCount : 0,
+      hasMore: !!raw.hasMore,
+      sessionChanged: !!raw.sessionChanged,
+    };
+  } catch (error: any) {
+    console.warn('Gagal mengambil replay buffer tiktokLiveEventsSince:', error);
+    return null;
+  }
+}
+
+export async function onTikTokLiveEventBatch(
+  callback: (data: NativeTikTokEventBatchPayload) => void
+): Promise<PluginListenerHandle | null> {
+  if (!isNativeAndroid()) {
+    return null;
+  }
+
+  try {
+    return await FloatingCompanion.addListener('tiktokLiveEventBatch', (batch) => {
+      if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !Array.isArray(batch.events)) {
+        return;
+      }
+      const validEvents = batch.events.filter(isValidNativeTikTokRawEvent);
+      callback({
+        sessionId: typeof batch.sessionId === 'number' && Number.isFinite(batch.sessionId) ? batch.sessionId : 0,
+        events: validEvents,
+        firstSequence:
+          typeof batch.firstSequence === 'number' && Number.isFinite(batch.firstSequence) ? batch.firstSequence : 0,
+        lastSequence:
+          typeof batch.lastSequence === 'number' && Number.isFinite(batch.lastSequence) ? batch.lastSequence : 0,
+        droppedPendingCount:
+          typeof batch.droppedPendingCount === 'number' && Number.isFinite(batch.droppedPendingCount)
+            ? batch.droppedPendingCount
+            : 0,
+        coalescedViewerCount:
+          typeof batch.coalescedViewerCount === 'number' && Number.isFinite(batch.coalescedViewerCount)
+            ? batch.coalescedViewerCount
+            : 0,
+      });
+    });
+  } catch (error: any) {
+    console.warn('Gagal mendaftarkan listener tiktokLiveEventBatch:', error);
+    return null;
+  }
+}
+
 export async function onTikTokLiveEvent(
   callback: (data: NativeTikTokRawEventPayload) => void
 ): Promise<PluginListenerHandle | null> {
@@ -871,9 +1000,23 @@ export async function onTikTokLiveEvent(
   }
 
   try {
-    return await FloatingCompanion.addListener('tiktokLiveEvent', callback);
+    return await FloatingCompanion.addListener('tiktokLiveEventBatch', (batch) => {
+      if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !Array.isArray(batch.events)) {
+        return;
+      }
+      for (const rawEvent of batch.events) {
+        if (!isValidNativeTikTokRawEvent(rawEvent)) {
+          continue;
+        }
+        try {
+          callback(rawEvent);
+        } catch (err) {
+          console.warn('Gagal memproses item dalam tiktokLiveEventBatch:', err);
+        }
+      }
+    });
   } catch (error: any) {
-    console.warn('Gagal mendaftarkan listener tiktokLiveEvent:', error);
+    console.warn('Gagal mendaftarkan listener tiktokLiveEventBatch:', error);
     return null;
   }
 }
@@ -906,7 +1049,9 @@ export const nativeCompanionBridge = {
   connectTikTokLiveNative,
   disconnectTikTokLiveNative,
   getTikTokLiveStatusNative,
+  getTikTokLiveEventsSinceNative,
   onTikTokLiveState,
+  onTikTokLiveEventBatch,
   onTikTokLiveEvent,
 };
 

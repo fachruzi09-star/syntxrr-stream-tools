@@ -22,10 +22,15 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 /**
  * FloatingCompanionPlugin
@@ -55,7 +60,12 @@ public class FloatingCompanionPlugin extends Plugin {
 
     private static final long[] MIXER_PROMO_RETRY_DELAYS_MS = { 120L, 250L, 500L };
 
+    private static final long EVENT_BATCH_FLUSH_INTERVAL_MS = 90L;
+    private static final int EVENT_BATCH_EARLY_FLUSH_SIZE = 64;
+    private static final int EVENT_BATCH_PENDING_CAPACITY = 256;
+
     private static final Object sSharedLock = new Object();
+    private static final NativeTikTokEventBuffer sEventBuffer = new NativeTikTokEventBuffer();
     @Nullable
     private static volatile FloatingHudManager sSharedHudManager;
     @Nullable
@@ -78,13 +88,19 @@ public class FloatingCompanionPlugin extends Plugin {
 
                 @Override
                 public void onEventDecoded(@NonNull JSONObject eventJson) {
+                    // 1. Rekam event ke bounded replay buffer native sebelum notifikasi JS.
+                    JSONObject sequencedEvent = sEventBuffer.record(eventJson);
+
+                    // 2. Pertahankan alur Native Floating HUD menggunakan payload asli.
                     FloatingHudManager hud = getSharedHudManagerIfCreated();
                     if (hud != null) {
                         hud.pushNativeTikTokEvent(eventJson);
                     }
+
+                    // 3. Antrekan salinan berurutan ke batch queue plugin aktif (jika ada).
                     FloatingCompanionPlugin plugin = getActivePlugin();
                     if (plugin != null) {
-                        plugin.emitToJs("tiktokLiveEvent", toJsObject(eventJson));
+                        plugin.enqueueTikTokEventForBatch(sequencedEvent);
                     }
                 }
             };
@@ -103,7 +119,7 @@ public class FloatingCompanionPlugin extends Plugin {
     /**
      * Dipanggil ketika CompanionService benar-benar dihentikan (termasuk saat Activity
      * sudah dihancurkan): lepas listener native, hentikan konektor jika masih aktif, dan
-     * bersihkan buffer 60 item Floating HUD.
+     * bersihkan buffer 60 item Floating HUD serta replay buffer proses.
      */
     public static void onNativeCompanionStopped(@NonNull Context appContext) {
         Context safeContext = appContext.getApplicationContext();
@@ -112,6 +128,12 @@ public class FloatingCompanionPlugin extends Plugin {
         if (connector.isSessionActive()) {
             connector.disconnect("Companion Service dihentikan.");
         }
+
+        FloatingCompanionPlugin activePlugin = getActivePlugin();
+        if (activePlugin != null) {
+            activePlugin.clearPendingTikTokEventBatch();
+        }
+        sEventBuffer.beginSession();
 
         final FloatingHudManager hud;
         final boolean shouldDestroyHud;
@@ -317,11 +339,17 @@ public class FloatingCompanionPlugin extends Plugin {
      * overlay crash atau mengubah status palsu.
      */
     private void emitToJs(@NonNull String event, @NonNull JSObject data) {
+        tryEmitToJs(event, data);
+    }
+
+    private boolean tryEmitToJs(@NonNull String event, @NonNull JSObject data) {
         try {
             notifyListeners(event, data);
+            return true;
         } catch (Exception e) {
             android.util.Log.w("FloatingCompanion",
                     "Gagal mengirim event " + event + ": " + e.getMessage());
+            return false;
         }
     }
 
@@ -1049,6 +1077,187 @@ public class FloatingCompanionPlugin extends Plugin {
 
     @Nullable
     private volatile TikTokLiveConnector mTikTokConnector;
+    private final Object mBatchLock = new Object();
+    private final ArrayDeque<JSONObject> mPendingEventQueue = new ArrayDeque<>(EVENT_BATCH_PENDING_CAPACITY);
+    private int mDroppedPendingCount = 0;
+    private int mCoalescedViewerCount = 0;
+    private boolean mBatchFlushScheduled = false;
+    private boolean mBatchImmediateFlushScheduled = false;
+    private long mBatchSessionEpoch = 0L;
+    private final Runnable mFlushTikTokBatchRunnable = new Runnable() {
+        @Override
+        public void run() {
+            flushTikTokEventBatch();
+        }
+    };
+
+    private void enqueueTikTokEventForBatch(@NonNull JSONObject sequencedEvent) {
+        final boolean shouldScheduleDelayed;
+        final boolean shouldPostImmediate;
+        synchronized (mBatchLock) {
+            if (mPendingEventQueue.size() >= EVENT_BATCH_PENDING_CAPACITY) {
+                applyPendingBackpressureLocked(sequencedEvent);
+            }
+            mPendingEventQueue.addLast(sequencedEvent);
+            boolean reachedThreshold = mPendingEventQueue.size() >= EVENT_BATCH_EARLY_FLUSH_SIZE;
+            if (!mBatchFlushScheduled) {
+                mBatchFlushScheduled = true;
+                mBatchImmediateFlushScheduled = reachedThreshold;
+                shouldPostImmediate = reachedThreshold;
+                shouldScheduleDelayed = !reachedThreshold;
+            } else if (reachedThreshold && !mBatchImmediateFlushScheduled) {
+                mBatchImmediateFlushScheduled = true;
+                shouldPostImmediate = true;
+                shouldScheduleDelayed = false;
+            } else {
+                shouldPostImmediate = false;
+                shouldScheduleDelayed = false;
+            }
+        }
+        if (shouldPostImmediate) {
+            mMainHandler.removeCallbacks(mFlushTikTokBatchRunnable);
+            mMainHandler.post(mFlushTikTokBatchRunnable);
+        } else if (shouldScheduleDelayed) {
+            mMainHandler.postDelayed(mFlushTikTokBatchRunnable, EVENT_BATCH_FLUSH_INTERVAL_MS);
+        }
+    }
+
+    private void applyPendingBackpressureLocked(@NonNull JSONObject incomingEvent) {
+        String incomingMethod = incomingEvent.optString("method", "");
+        boolean incomingIsViewerSeq = "WebcastRoomUserSeqMessage".equals(incomingMethod);
+        int viewerSeqCount = 0;
+        if (!incomingIsViewerSeq) {
+            for (JSONObject pending : mPendingEventQueue) {
+                if ("WebcastRoomUserSeqMessage".equals(pending.optString("method", ""))) {
+                    viewerSeqCount++;
+                    if (viewerSeqCount >= 2) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 1. Koalesensikan snapshot WebcastRoomUserSeqMessage lama jika ada snapshot lebih baru.
+        if (incomingIsViewerSeq || viewerSeqCount >= 2) {
+            Iterator<JSONObject> it = mPendingEventQueue.iterator();
+            while (it.hasNext()) {
+                JSONObject candidate = it.next();
+                if ("WebcastRoomUserSeqMessage".equals(candidate.optString("method", ""))) {
+                    it.remove();
+                    mCoalescedViewerCount++;
+                    return;
+                }
+            }
+        }
+
+        // 2. Jika masih penuh, keluarkan event non-chat/non-gift tertua lebih dulu.
+        Iterator<JSONObject> it = mPendingEventQueue.iterator();
+        while (it.hasNext()) {
+            JSONObject candidate = it.next();
+            String method = candidate.optString("method", "");
+            if (!"WebcastChatMessage".equals(method) && !"WebcastGiftMessage".equals(method)) {
+                it.remove();
+                mDroppedPendingCount++;
+                return;
+            }
+        }
+
+        // 3. Fallback terakhir jika seluruh antrean berisi chat/gift: evict event tertua.
+        if (mPendingEventQueue.pollFirst() != null) {
+            mDroppedPendingCount++;
+        }
+    }
+
+    private void flushTikTokEventBatch() {
+        final List<JSONObject> drained;
+        final int dropped;
+        final int coalesced;
+        final long batchEpoch;
+        synchronized (mBatchLock) {
+            mBatchFlushScheduled = false;
+            mBatchImmediateFlushScheduled = false;
+            if (mPendingEventQueue.isEmpty()) {
+                return;
+            }
+            drained = new ArrayList<>(mPendingEventQueue.size());
+            while (!mPendingEventQueue.isEmpty()) {
+                drained.add(mPendingEventQueue.pollFirst());
+            }
+            dropped = mDroppedPendingCount;
+            coalesced = mCoalescedViewerCount;
+            mDroppedPendingCount = 0;
+            mCoalescedViewerCount = 0;
+            batchEpoch = mBatchSessionEpoch;
+        }
+
+        if (getBridge() == null) {
+            synchronized (mBatchLock) {
+                if (mBatchSessionEpoch == batchEpoch) {
+                    mDroppedPendingCount += dropped;
+                    mCoalescedViewerCount += coalesced;
+                }
+            }
+            return;
+        }
+
+        long firstSeq = drained.get(0).optLong("nativeSequence", 0L);
+        long lastSeq = drained.get(drained.size() - 1).optLong("nativeSequence", firstSeq);
+        long sessionId = drained.get(0).optLong("nativeSessionId", sEventBuffer.getCurrentSessionId());
+
+        JSONArray eventsArray = new JSONArray();
+        for (JSONObject evt : drained) {
+            eventsArray.put(evt);
+        }
+
+        JSONObject rawBatch = new JSONObject();
+        try {
+            rawBatch.put("sessionId", sessionId);
+            rawBatch.put("events", eventsArray);
+            rawBatch.put("firstSequence", firstSeq);
+            rawBatch.put("lastSequence", lastSeq);
+            rawBatch.put("droppedPendingCount", dropped);
+            rawBatch.put("coalescedViewerCount", coalesced);
+        } catch (JSONException ignored) {
+        }
+
+        boolean emitted = tryEmitToJs("tiktokLiveEventBatch", toJsObject(rawBatch));
+        if (!emitted) {
+            synchronized (mBatchLock) {
+                if (mBatchSessionEpoch == batchEpoch) {
+                    mDroppedPendingCount += dropped;
+                    mCoalescedViewerCount += coalesced;
+                }
+            }
+        }
+    }
+
+    private void clearPendingTikTokEventBatch() {
+        synchronized (mBatchLock) {
+            mBatchSessionEpoch++;
+            mPendingEventQueue.clear();
+            mDroppedPendingCount = 0;
+            mCoalescedViewerCount = 0;
+            mBatchFlushScheduled = false;
+            mBatchImmediateFlushScheduled = false;
+        }
+        mMainHandler.removeCallbacks(mFlushTikTokBatchRunnable);
+    }
+
+    private static long readLongOption(@NonNull PluginCall call, @NonNull String key, long defaultValue) {
+        JSObject data = call.getData();
+        if (data == null || !data.has(key) || data.isNull(key)) {
+            return defaultValue;
+        }
+        Object raw = data.opt(key);
+        if (raw instanceof Number) {
+            return ((Number) raw).longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(raw));
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
 
     private synchronized TikTokLiveConnector getTikTokConnector() {
         if (mTikTokConnector == null) {
@@ -1103,6 +1312,9 @@ public class FloatingCompanionPlugin extends Plugin {
             }
         }
 
+        clearPendingTikTokEventBatch();
+        sEventBuffer.beginSession();
+
         attachTikTokConnectorListener();
         TikTokLiveConnector connector = getTikTokConnector();
         connector.connect(username, eulerApiKey, eulerJwtKey, allowEulerFallback, connectionMethod);
@@ -1121,6 +1333,9 @@ public class FloatingCompanionPlugin extends Plugin {
         synchronized (sSharedLock) {
             sTikTokListenerAttached = false;
         }
+        clearPendingTikTokEventBatch();
+        sEventBuffer.beginSession();
+
         FloatingHudManager hud = getSharedHudManagerIfCreated();
         if (hud != null) {
             hud.clearNativeTikTokSession(true);
@@ -1138,8 +1353,20 @@ public class FloatingCompanionPlugin extends Plugin {
         call.resolve(toJsObject(connector.getStateSnapshot()));
     }
 
+    @PluginMethod
+    public void getTikTokLiveEventsSince(PluginCall call) {
+        long sessionId = readLongOption(call, "sessionId", 0L);
+        long afterSequence = readLongOption(call, "afterSequence", 0L);
+        Integer limitOpt = call.getInt("limit", NativeTikTokEventBuffer.MAX_CAPACITY);
+        int limit = limitOpt != null ? limitOpt : NativeTikTokEventBuffer.MAX_CAPACITY;
+        NativeTikTokEventBuffer.Snapshot snapshot =
+                sEventBuffer.getEventsSince(sessionId, afterSequence, limit);
+        call.resolve(toJsObject(snapshot.toJsonObject()));
+    }
+
     @Override
     protected void handleOnDestroy() {
+        clearPendingTikTokEventBatch();
         CompanionService.clearLifecycleListener(mServiceLifecycleListener);
         synchronized (sSharedLock) {
             if (sActivePluginRef != null && sActivePluginRef.get() == this) {
@@ -1156,6 +1383,7 @@ public class FloatingCompanionPlugin extends Plugin {
                 connector.setListener(null);
                 connector.disconnect("Plugin dihancurkan tanpa CompanionService.");
             }
+            sEventBuffer.beginSession();
             final FloatingHudManager hudToDestroy;
             synchronized (sSharedLock) {
                 sTikTokListenerAttached = false;
