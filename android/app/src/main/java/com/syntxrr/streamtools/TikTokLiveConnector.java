@@ -150,6 +150,22 @@ public final class TikTokLiveConnector {
             transportConnectedAtMs = 0L;
         }
 
+        void onNaturalLiveEnded(
+                boolean isCurrentGeneration,
+                @Nullable String activeTransportMode,
+                boolean hasActiveTransport,
+                long nowMs
+        ) {
+            if (!isCurrentGeneration || !hasActiveTransport || activeTransportMode == null) {
+                return;
+            }
+            if ("direct_ws".equals(activeTransportMode)) {
+                onDirectTransportEnded(nowMs);
+            } else if ("euler".equals(activeTransportMode)) {
+                onEulerTransportEnded(nowMs);
+            }
+        }
+
         void beginEulerFallbackAttempt() {
             eulerReconnectAttempt = 0;
         }
@@ -2039,7 +2055,15 @@ public final class TikTokLiveConnector {
             long waitGeneration = -1L;
             String username = "";
             synchronized (mLock) {
-                if (!isStaleGeneration(gen)) {
+                boolean isCurrentGen = !isStaleGeneration(gen);
+                if (isCurrentGen) {
+                    long endedAtMs = System.currentTimeMillis();
+                    mReconnectPolicy.onNaturalLiveEnded(
+                            true,
+                            mTransportMode,
+                            mActiveWs != null,
+                            endedAtMs
+                    );
                     waitGeneration = mSessionGeneration.incrementAndGet();
                     username = mUsername;
                     cancelPendingTaskLocked();

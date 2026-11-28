@@ -682,6 +682,93 @@ public class TikTokWebSocketLivenessAndReconnectTest {
     }
 
     // -------------------------------------------------------------------------
+    // Batch 2.2: Natural LIVE End & Stable Transport Retry Reset
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void naturalDirectLiveEndAfterSixtySecondsResetsOnlyDirectRetryCounter() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.directReconnectAttempt = 4;
+        policy.eulerReconnectAttempt = 2;
+
+        policy.onDirectConnected(100_000L);
+        policy.onNaturalLiveEnded(true, "direct_ws", true, 160_000L);
+
+        assertEquals(0, policy.directReconnectAttempt);
+        assertEquals(2, policy.eulerReconnectAttempt);
+        assertEquals(0L, policy.transportConnectedAtMs);
+    }
+
+    @Test
+    public void naturalDirectLiveEndBeforeSixtySecondsPreservesDirectRetryCounter() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.directReconnectAttempt = 4;
+        policy.eulerReconnectAttempt = 2;
+
+        policy.onDirectConnected(100_000L);
+        policy.onNaturalLiveEnded(true, "direct_ws", true, 159_999L);
+
+        assertEquals(4, policy.directReconnectAttempt);
+        assertEquals(2, policy.eulerReconnectAttempt);
+        assertEquals(0L, policy.transportConnectedAtMs);
+    }
+
+    @Test
+    public void naturalEulerLiveEndAfterSixtySecondsResetsOnlyEulerRetryCounter() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.directReconnectAttempt = 5;
+        policy.eulerReconnectAttempt = 3;
+
+        policy.onEulerConnected(200_000L);
+        policy.onNaturalLiveEnded(true, "euler", true, 260_000L);
+
+        assertEquals(0, policy.eulerReconnectAttempt);
+        assertEquals(5, policy.directReconnectAttempt);
+        assertEquals(0L, policy.transportConnectedAtMs);
+    }
+
+    @Test
+    public void naturalEulerLiveEndBeforeSixtySecondsPreservesEulerRetryCounter() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.directReconnectAttempt = 5;
+        policy.eulerReconnectAttempt = 3;
+
+        policy.onEulerConnected(200_000L);
+        policy.onNaturalLiveEnded(true, "euler", true, 259_999L);
+
+        assertEquals(3, policy.eulerReconnectAttempt);
+        assertEquals(5, policy.directReconnectAttempt);
+        assertEquals(0L, policy.transportConnectedAtMs);
+    }
+
+    @Test
+    public void repeatedOrStaleNaturalLiveEndDoesNotDoubleResetOrTouchOtherTransportBudget() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.directReconnectAttempt = 4;
+        policy.eulerReconnectAttempt = 2;
+
+        // Stale generation and inactive transport must be complete no-ops.
+        policy.onDirectConnected(100_000L);
+        policy.onNaturalLiveEnded(false, "direct_ws", true, 200_000L);
+        policy.onNaturalLiveEnded(true, "direct_ws", false, 200_000L);
+        policy.onNaturalLiveEnded(true, "none", true, 200_000L);
+        assertEquals(4, policy.directReconnectAttempt);
+        assertEquals(2, policy.eulerReconnectAttempt);
+        assertEquals(100_000L, policy.transportConnectedAtMs);
+
+        // First valid natural end (< 60s) preserves count and clears timestamp.
+        policy.onNaturalLiveEnded(true, "direct_ws", true, 120_000L);
+        assertEquals(4, policy.directReconnectAttempt);
+        assertEquals(0L, policy.transportConnectedAtMs);
+
+        // Repeated call later (>= 60s from original start) must NOT reset because session already ended.
+        policy.onNaturalLiveEnded(true, "direct_ws", true, 500_000L);
+        assertEquals(4, policy.directReconnectAttempt);
+        assertEquals(2, policy.eulerReconnectAttempt);
+        assertEquals(0L, policy.transportConnectedAtMs);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
