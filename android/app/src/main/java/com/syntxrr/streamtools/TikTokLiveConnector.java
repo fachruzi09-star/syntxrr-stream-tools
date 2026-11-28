@@ -18,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
@@ -123,7 +124,6 @@ public final class TikTokLiveConnector {
         }
 
         void onDirectConnected(long nowMs) {
-            directReconnectAttempt = 0;
             deterministicRejectCount = 0;
             monitoringWaitingForLive = false;
             waitingNetworkAttempt = 0;
@@ -245,6 +245,18 @@ public final class TikTokLiveConnector {
                     MAX_EULER_RECONNECT_ATTEMPTS,
                     delayMs
             );
+        }
+    }
+
+    static final class OneShotRecoveryGuard {
+        private final AtomicBoolean mClaimed = new AtomicBoolean(false);
+
+        boolean tryClaim() {
+            return mClaimed.compareAndSet(false, true);
+        }
+
+        boolean isClaimed() {
+            return mClaimed.get();
         }
     }
 
@@ -1315,6 +1327,7 @@ public final class TikTokLiveConnector {
         );
 
         TikTokWebSocketTransport ws = new TikTokWebSocketTransport();
+        final OneShotRecoveryGuard recoveryGuard = new OneShotRecoveryGuard();
         synchronized (mLock) {
             if (isStaleGeneration(gen)) {
                 ws.close();
@@ -1353,13 +1366,16 @@ public final class TikTokLiveConnector {
                     return;
                 }
                 if (!ws.sendBinary(enterFrame)) {
+                    final boolean claimedRecovery;
                     synchronized (mLock) {
-                        if (!isStaleTransport(gen, ws)) {
-                            mDiagRoomEntryFrameSent = false;
-                        }
+                        if (isStaleGeneration(gen)) return;
+                        mDiagRoomEntryFrameSent = false;
+                        claimedRecovery = !isStaleTransport(gen, ws) && recoveryGuard.tryClaim();
                     }
-                    scheduleReconnectOrFail(gen, "DIRECT_ROOM_ENTER_SEND_FAILED",
-                            "WebSocket terbuka tetapi pesan masuk ke room TikTok gagal dikirim.", false);
+                    if (claimedRecovery) {
+                        scheduleReconnectOrFail(gen, "DIRECT_ROOM_ENTER_SEND_FAILED",
+                                "WebSocket terbuka tetapi pesan masuk ke room TikTok gagal dikirim.", false);
+                    }
                     return;
                 }
                 synchronized (mLock) {
@@ -1476,7 +1492,7 @@ public final class TikTokLiveConnector {
                 if (!byRemote || isStaleTransport(gen, ws)) return;
                 String msg = "Koneksi WebSocket langsung ditutup server (kode " + code + ").";
                 synchronized (mLock) {
-                    if (isStaleTransport(gen, ws)) return;
+                    if (isStaleTransport(gen, ws) || !recoveryGuard.tryClaim()) return;
                     long wsRtt = ws.getLastRttMs();
                     if (wsRtt > 0L) {
                         mLastWebSocketRttMs = wsRtt;
@@ -1495,7 +1511,7 @@ public final class TikTokLiveConnector {
             public void onError(@NonNull String reason) {
                 if (isStaleTransport(gen, ws)) return;
                 synchronized (mLock) {
-                    if (isStaleTransport(gen, ws)) return;
+                    if (isStaleTransport(gen, ws) || !recoveryGuard.tryClaim()) return;
                     long wsRtt = ws.getLastRttMs();
                     if (wsRtt > 0L) {
                         mLastWebSocketRttMs = wsRtt;

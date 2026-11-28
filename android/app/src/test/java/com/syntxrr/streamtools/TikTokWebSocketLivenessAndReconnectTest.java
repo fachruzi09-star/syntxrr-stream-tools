@@ -529,6 +529,159 @@ public class TikTokWebSocketLivenessAndReconnectTest {
     }
 
     // -------------------------------------------------------------------------
+    // Batch 2.1 Fix A & Fix B: Direct 60s Stability & Per-WebSocket One-Shot Guard
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void directConnectionEndingBeforeSixtySecondsDoesNotResetRetryCounter() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.deterministicRejectCount = 1;
+        policy.monitoringWaitingForLive = true;
+        policy.waitingNetworkAttempt = 2;
+
+        TikTokLiveConnector.RetryDecision d1 = policy.nextTransportRetryDecision(
+                false, false, false, false);
+        assertEquals(1, d1.attemptNumber);
+        assertEquals(1, policy.directReconnectAttempt);
+
+        // Room-entry ACK succeeds: records timestamp & clears waiting/deterministic reject state,
+        // without prematurely clearing directReconnectAttempt.
+        policy.onDirectConnected(10_000L);
+        assertEquals(10_000L, policy.transportConnectedAtMs);
+        assertEquals(0, policy.deterministicRejectCount);
+        assertFalse(policy.monitoringWaitingForLive);
+        assertEquals(0, policy.waitingNetworkAttempt);
+        assertEquals(1, policy.directReconnectAttempt);
+
+        // Disconnect at 59,999 ms (< 60,000 ms): must preserve accumulated Direct retry count.
+        policy.onDirectTransportEnded(69_999L);
+        assertEquals(0L, policy.transportConnectedAtMs);
+        assertEquals(1, policy.directReconnectAttempt);
+
+        TikTokLiveConnector.RetryDecision d2 = policy.nextTransportRetryDecision(
+                false, false, false, false);
+        assertEquals(2, d2.attemptNumber);
+        assertEquals(2_000L, d2.delayMs);
+        assertEquals(2, policy.directReconnectAttempt);
+    }
+
+    @Test
+    public void multipleShortLivedDirectSessionsAccumulateRetriesAndResetAfterSixtySeconds() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        policy.eulerReconnectAttempt = 3; // Must remain completely isolated.
+
+        // Three consecutive short-lived sessions (< 60s) must accumulate attempts 1 -> 2 -> 3.
+        long now = 100_000L;
+        for (int expectedAttempt = 1; expectedAttempt <= 3; expectedAttempt++) {
+            policy.onDirectConnected(now);
+            assertEquals(expectedAttempt - 1, policy.directReconnectAttempt);
+
+            now += expectedAttempt * 15_000L; // 15s, 30s, 45s (all < 60,000ms)
+            policy.onDirectTransportEnded(now);
+            assertEquals(expectedAttempt - 1, policy.directReconnectAttempt);
+
+            TikTokLiveConnector.RetryDecision decision = policy.nextTransportRetryDecision(
+                    false, false, false, false);
+            assertEquals(expectedAttempt, decision.attemptNumber);
+            assertEquals(expectedAttempt, policy.directReconnectAttempt);
+        }
+        assertEquals(3, policy.eulerReconnectAttempt);
+
+        // Fourth session stays connected exactly >= 60,000 ms -> ending it resets Direct budget.
+        policy.onDirectConnected(500_000L);
+        assertEquals(3, policy.directReconnectAttempt);
+        policy.onDirectTransportEnded(560_000L);
+        assertEquals(0, policy.directReconnectAttempt);
+        assertEquals(3, policy.eulerReconnectAttempt);
+
+        TikTokLiveConnector.RetryDecision afterStable = policy.nextTransportRetryDecision(
+                false, false, false, false);
+        assertEquals(1, afterStable.attemptNumber);
+        assertEquals(1_000L, afterStable.delayMs);
+    }
+
+    @Test
+    public void perWebSocketRecoveryGuardAllowsOnlyOneClaimAcrossTerminalErrorAndSendBinaryFailure() {
+        TikTokLiveConnector.ReconnectPolicy policy = new TikTokLiveConnector.ReconnectPolicy();
+        TikTokLiveConnector.OneShotRecoveryGuard guard1 = new TikTokLiveConnector.OneShotRecoveryGuard();
+        AtomicInteger claims = new AtomicInteger(0);
+        AtomicInteger onErrorCalls = new AtomicInteger(0);
+
+        OutputStream failingOut = new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                throw new IOException("Broken pipe on im_enter_room");
+            }
+        };
+        TikTokWebSocketTransport ws1 = new TikTokWebSocketTransport();
+        TikTokWebSocketTransport.Listener listener = new TikTokWebSocketTransport.Listener() {
+            @Override
+            public void onConnected(int httpStatus) {}
+
+            @Override
+            public void onBinaryFrame(byte[] payload) {}
+
+            @Override
+            public void onTextFrame(String text) {}
+
+            @Override
+            public void onHandshakeRejected(int httpStatus, String reason) {}
+
+            @Override
+            public void onClosed(int code, String reason, boolean byRemote) {
+                if (byRemote && guard1.tryClaim()) {
+                    claims.incrementAndGet();
+                    policy.nextTransportRetryDecision(false, false, false, false);
+                }
+            }
+
+            @Override
+            public void onError(String reason) {
+                onErrorCalls.incrementAndGet();
+                if (guard1.tryClaim()) {
+                    claims.incrementAndGet();
+                    policy.nextTransportRetryDecision(false, false, false, false);
+                }
+            }
+        };
+        ws1.attachOpenTransportForTesting(failingOut, null, "7712345678901234567", listener);
+
+        // Simulate Direct onConnected() calling sendBinary(enterFrame) where writeFrame() fails
+        // and synchronously invokes listener.onError() before sendBinary() returns false.
+        boolean sent = ws1.sendBinary(new byte[]{1, 2, 3});
+        assertFalse(sent);
+        if (!sent && guard1.tryClaim()) {
+            claims.incrementAndGet();
+            policy.nextTransportRetryDecision(false, false, false, false);
+        }
+        // Even if remote onClosed tried to compete afterwards, guard1 rejects it.
+        listener.onClosed(1006, "late close", true);
+
+        assertEquals(1, onErrorCalls.get());
+        assertEquals("Only one recovery path may claim guard1", 1, claims.get());
+        assertEquals("Only one retry decision may be consumed", 1, policy.directReconnectAttempt);
+        assertTrue(guard1.isClaimed());
+
+        // Reverse order: explicit sendBinary(false) fallback claims first, competing callbacks become no-ops.
+        TikTokLiveConnector.OneShotRecoveryGuard guard2 = new TikTokLiveConnector.OneShotRecoveryGuard();
+        AtomicInteger reverseClaims = new AtomicInteger(0);
+        if (guard2.tryClaim()) {
+            reverseClaims.incrementAndGet();
+            policy.nextTransportRetryDecision(false, false, false, false);
+        }
+        assertFalse("Competing onError must not claim guard2", guard2.tryClaim());
+        assertFalse("Competing onClosed must not claim guard2", guard2.tryClaim());
+        assertEquals(1, reverseClaims.get());
+        assertEquals(2, policy.directReconnectAttempt);
+
+        // New WebSocket attempt gets a fresh guard that can be claimed normally.
+        TikTokLiveConnector.OneShotRecoveryGuard freshGuardForNextWs = new TikTokLiveConnector.OneShotRecoveryGuard();
+        assertFalse(freshGuardForNextWs.isClaimed());
+        assertTrue(freshGuardForNextWs.tryClaim());
+        assertEquals(3, policy.nextTransportRetryDecision(false, false, false, false).attemptNumber);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
