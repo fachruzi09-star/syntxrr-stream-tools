@@ -5,6 +5,7 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 import type {
   AppSettings,
+  StreamEventMetadataUpdate,
   TikTokAccountState,
   TikTokConnectionDiagnostics,
   TikTokConnectionMethod,
@@ -394,6 +395,7 @@ export class TikTokLiveConnector {
   private readonly adapter: TikTokTransportAdapter;
   private readonly normalizer = new TikTokEventNormalizer();
   private readonly emitToBus: (event: NonNullable<ReturnType<TikTokEventNormalizer['normalize']>['event']>) => void;
+  private readonly updateToBus: (update: StreamEventMetadataUpdate) => void;
   private readonly listeners = new Set<TikTokStatusListener>();
 
   private status: TikTokConnectorStatus = initialStatus();
@@ -413,10 +415,13 @@ export class TikTokLiveConnector {
   constructor(
     adapter: TikTokTransportAdapter = DEFAULT_NATIVE_ADAPTER,
     emitToBus: (event: NonNullable<ReturnType<TikTokEventNormalizer['normalize']>['event']>) => void = (evt) =>
-      streamEventBus.emit(evt)
+      streamEventBus.emit(evt),
+    updateToBus: (update: StreamEventMetadataUpdate) => void = (upd) =>
+      streamEventBus.updateEventMetadata(upd)
   ) {
     this.adapter = adapter;
     this.emitToBus = emitToBus;
+    this.updateToBus = updateToBus;
   }
 
   getStatus(): TikTokConnectorStatus {
@@ -717,6 +722,9 @@ export class TikTokLiveConnector {
 
     if (outcome.event) {
       this.emitToBus(outcome.event);
+    }
+    if (outcome.giftComboUpdate) {
+      this.updateToBus(outcome.giftComboUpdate);
     }
   }
 

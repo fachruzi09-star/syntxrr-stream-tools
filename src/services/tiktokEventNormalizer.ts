@@ -2,11 +2,12 @@
 // Memetakan pesan Webcast TikTok yang sudah didekode ke kontrak StreamEvent SYNTXRR.
 // Tidak menyimpan histori chat secara permanen dan mengabaikan payload tak lengkap dengan aman.
 
-import type { StreamEvent } from '../types';
+import type { StreamEvent, StreamEventMetadataUpdate } from '../types';
 import type { NativeTikTokRawEventPayload } from './nativeCompanionBridge';
 
 export interface NormalizeOutcome {
   event: StreamEvent | null;
+  giftComboUpdate?: StreamEventMetadataUpdate;
   viewerCount?: number;
   totalLikeCount?: number;
   roomEnded?: boolean;
@@ -105,14 +106,17 @@ export class BoundedEventDeduplicator {
 
 export class TikTokEventNormalizer {
   private readonly deduplicator: BoundedEventDeduplicator;
+  private readonly finalizedGiftCombos: BoundedEventDeduplicator;
   private fallbackCounter = 0;
 
   constructor(maxDedupWindow = DEFAULT_DEDUP_WINDOW) {
     this.deduplicator = new BoundedEventDeduplicator(maxDedupWindow);
+    this.finalizedGiftCombos = new BoundedEventDeduplicator(maxDedupWindow);
   }
 
   reset(): void {
     this.deduplicator.clear();
+    this.finalizedGiftCombos.clear();
     this.fallbackCounter = 0;
   }
 
@@ -211,16 +215,39 @@ export class TikTokEventNormalizer {
       const giftImage = sanitizeText(raw.giftImage, 320) || undefined;
       const totalDiamonds = diamondCount > 0 ? diamondCount * repeatCount : undefined;
 
-      // Sertakan repeatCount dalam kunci dedup agar combo/streak naik tetap diteruskan,
-      // sementara replay frame identik tetap tersaring.
-      const dedupKey = msgId ? `gift:${msgId}:${giftId || giftName}:${repeatCount}` : '';
-      if (dedupKey && this.deduplicator.markAndCheckDuplicate(dedupKey)) {
-        return { event: null, ignoredReason: 'duplicate' };
-      }
-
       const id = msgId
         ? `tt_gift_${msgId}_x${repeatCount}`
         : `tt_gift_${timestamp}_${++this.fallbackCounter}`;
+
+      // Sertakan repeatCount dalam kunci dedup agar combo/streak naik tetap diteruskan.
+      // Jika frame dengan (msgId, gift, repeatCount) sama sudah pernah terbit dengan repeatEnd=0
+      // lalu menerima repeatEnd!=0, kirim giftComboUpdate metadata saja tanpa memicu event gift kedua.
+      const dedupKey = msgId ? `gift:${msgId}:${giftId || giftName}:${repeatCount}` : '';
+      const alreadyEmitted = dedupKey ? this.deduplicator.markAndCheckDuplicate(dedupKey) : false;
+      if (alreadyEmitted) {
+        if (repeatEnd === true && !this.finalizedGiftCombos.has(dedupKey)) {
+          this.finalizedGiftCombos.markAndCheckDuplicate(dedupKey);
+          return {
+            event: null,
+            giftComboUpdate: {
+              id,
+              type: 'gift',
+              giftId: giftId || undefined,
+              giftName,
+              repeatCount,
+              repeatEnd: true,
+              timestamp,
+            },
+            ignoredReason: 'combo_terminal_update',
+          };
+        }
+        return { event: null, ignoredReason: 'duplicate' };
+      }
+
+      if (dedupKey && repeatEnd === true) {
+        this.finalizedGiftCombos.markAndCheckDuplicate(dedupKey);
+      }
+
       const sender = username || 'Penonton LIVE';
       const detail =
         repeatCount > 1

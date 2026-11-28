@@ -1,20 +1,32 @@
 // Event Bus Terpusat — SYNTXRR STREAM
 // Menghubungkan Event Stream (Chat, Gift, Like, Follow, Donasi) dengan Overlay & TTS
 
-import { StreamEvent } from '../types';
+import { StreamEvent, StreamEventMetadataUpdate } from '../types';
 import { ttsService } from './ttsService';
 import { soundboardEngine } from './soundboardEngine';
 
 type EventListener = (event: StreamEvent) => void;
+type EventMetadataUpdateListener = (
+  update: StreamEventMetadataUpdate,
+  updatedEvent?: StreamEvent
+) => void;
 
 class StreamEventBus {
   private listeners: Set<EventListener> = new Set();
+  private updateListeners: Set<EventMetadataUpdateListener> = new Set();
   private history: StreamEvent[] = [];
 
   subscribe(listener: EventListener): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  subscribeUpdates(listener: EventMetadataUpdateListener): () => void {
+    this.updateListeners.add(listener);
+    return () => {
+      this.updateListeners.delete(listener);
     };
   }
 
@@ -52,6 +64,36 @@ class StreamEventBus {
         console.error('Error saat menjalankan listener event:', err);
       }
     });
+  }
+
+  /**
+   * Memperbarui metadata event yang sudah terbit (mis. status terminal combo gift repeatEnd=true)
+   * tanpa menambah duplikat ke histori dan tanpa memicu TTS, soundboard, atau alert ulang.
+   */
+  updateEventMetadata(update: StreamEventMetadataUpdate): StreamEvent | undefined {
+    let updatedEvent: StreamEvent | undefined;
+    const index = this.history.findIndex((item) => item.id === update.id);
+    if (index !== -1) {
+      const current = this.history[index];
+      updatedEvent = {
+        ...current,
+        ...(update.repeatEnd !== undefined ? { repeatEnd: update.repeatEnd } : {}),
+        ...(update.repeatCount !== undefined ? { repeatCount: update.repeatCount } : {}),
+        ...(update.giftId !== undefined ? { giftId: update.giftId } : {}),
+        ...(update.giftName !== undefined ? { giftName: update.giftName } : {}),
+      };
+      this.history[index] = updatedEvent;
+    }
+
+    this.updateListeners.forEach((listener) => {
+      try {
+        listener(update, updatedEvent);
+      } catch (err) {
+        console.error('Error saat menjalankan listener update event:', err);
+      }
+    });
+
+    return updatedEvent;
   }
 
   getHistory(): StreamEvent[] {

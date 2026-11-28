@@ -3,7 +3,10 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { StreamEvent } from '../../types';
+import type { StreamEvent, StreamEventMetadataUpdate } from '../../types';
+import { streamEventBus } from '../eventBus';
+import { ttsService } from '../ttsService';
+import { soundboardEngine } from '../soundboardEngine';
 import type {
   NativeTikTokRawEventPayload,
   NativeTikTokStatePayload,
@@ -1497,6 +1500,249 @@ async function runConnectionDiagnosticsTests(): Promise<void> {
   await connector.destroy();
 }
 
+async function runGiftComboTerminalUpdateTests(): Promise<void> {
+  // Normalizer unit checks for combo progression, terminal update, identical terminal replay, and non-combo gift
+  const normalizer = new TikTokEventNormalizer(20);
+
+  // Test 1 & 2 (normalizer level): repeatCount=5, repeatEnd=0 -> diterima, lalu repeatCount=5, repeatEnd=1 -> terminal metadata update
+  const activeCombo = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'combo_500',
+    username: 'sultan_a',
+    giftId: '5655',
+    giftName: 'Rose',
+    repeatCount: 5,
+    repeatEnd: 0,
+    diamondCount: 1,
+  });
+  assert(activeCombo.event !== null, 'Test 1: repeatCount=5, repeatEnd=0 accepted');
+  assertEqual(activeCombo.event?.repeatCount, 5, 'Test 1: repeatCount is 5');
+  assertEqual(activeCombo.event?.repeatEnd, false, 'Test 1: repeatEnd is false while combo active');
+  assertEqual(activeCombo.giftComboUpdate, undefined, 'Test 1: initial frame has no giftComboUpdate');
+
+  const terminalUpdate = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'combo_500',
+    username: 'sultan_a',
+    giftId: '5655',
+    giftName: 'Rose',
+    repeatCount: 5,
+    repeatEnd: 1,
+    diamondCount: 1,
+  });
+  assertEqual(terminalUpdate.event, null, 'Test 2: repeatCount=5, repeatEnd=1 does not emit second gift event');
+  assert(terminalUpdate.giftComboUpdate !== undefined, 'Test 2: emits giftComboUpdate metadata');
+  assertEqual(terminalUpdate.giftComboUpdate?.id, activeCombo.event?.id, 'Test 2: targets same event id');
+  assertEqual(terminalUpdate.giftComboUpdate?.repeatCount, 5, 'Test 2: preserves repeatCount=5');
+  assertEqual(terminalUpdate.giftComboUpdate?.repeatEnd, true, 'Test 2: marks combo finished (repeatEnd=true)');
+
+  // Test 7: Replay identik terminal (repeatCount=5, repeatEnd=1 kedua kali) ditolak
+  const terminalReplay = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'combo_500',
+    username: 'sultan_a',
+    giftId: '5655',
+    giftName: 'Rose',
+    repeatCount: 5,
+    repeatEnd: 1,
+    diamondCount: 1,
+  });
+  assertEqual(terminalReplay.event, null, 'Test 7: identical terminal replay emits no event');
+  assertEqual(terminalReplay.giftComboUpdate, undefined, 'Test 7: identical terminal replay emits no metadata update');
+  assertEqual(terminalReplay.ignoredReason, 'duplicate', 'Test 7: identical terminal replay rejected as duplicate');
+
+  // Test 8: Combo progression repeatCount naik (1 -> 3 -> 5) dengan repeatEnd 0 -> 0 -> 1 tetap akurat
+  const step1 = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'combo_prog',
+    username: 'sultan_b',
+    giftId: '5879',
+    giftName: 'Doughnut',
+    repeatCount: 1,
+    repeatEnd: 0,
+    diamondCount: 30,
+  });
+  const step3 = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'combo_prog',
+    username: 'sultan_b',
+    giftId: '5879',
+    giftName: 'Doughnut',
+    repeatCount: 3,
+    repeatEnd: 0,
+    diamondCount: 30,
+  });
+  const step5 = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'combo_prog',
+    username: 'sultan_b',
+    giftId: '5879',
+    giftName: 'Doughnut',
+    repeatCount: 5,
+    repeatEnd: 1,
+    diamondCount: 30,
+  });
+  assertEqual(step1.event?.repeatCount, 1, 'Test 8: step 1 repeatCount=1');
+  assertEqual(step1.event?.repeatEnd, false, 'Test 8: step 1 active');
+  assertEqual(step3.event?.repeatCount, 3, 'Test 8: step 3 repeatCount=3');
+  assertEqual(step3.event?.repeatEnd, false, 'Test 8: step 3 active');
+  assertEqual(step5.event?.repeatCount, 5, 'Test 8: step 5 repeatCount=5');
+  assertEqual(step5.event?.repeatEnd, true, 'Test 8: step 5 terminal');
+  assertEqual(step5.event?.amount, 150, 'Test 8: step 5 coin amount = 30 * 5');
+
+  // Test 9: Non-combo gift (tunggal dengan repeatEnd=1 dan tanpa repeatEnd) tetap berjalan normal
+  const singleWithEnd = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'single_1',
+    username: 'fan_1',
+    giftId: '6001',
+    giftName: 'TikTok',
+    repeatCount: 1,
+    repeatEnd: 1,
+    diamondCount: 1,
+  });
+  assert(singleWithEnd.event !== null, 'Test 9a: single gift with repeatEnd=1 accepted');
+  assertEqual(singleWithEnd.event?.repeatCount, 1, 'Test 9a: single gift repeatCount=1');
+  assertEqual(singleWithEnd.event?.repeatEnd, true, 'Test 9a: single gift repeatEnd=true');
+
+  const singleWithoutEnd = normalizer.normalize({
+    method: 'WebcastGiftMessage',
+    msgId: 'single_2',
+    username: 'fan_2',
+    giftId: '6002',
+    giftName: 'GG',
+    repeatCount: 1,
+    diamondCount: 1,
+  });
+  assert(singleWithoutEnd.event !== null, 'Test 9b: single gift without repeatEnd accepted');
+  assertEqual(singleWithoutEnd.event?.repeatEnd, undefined, 'Test 9b: repeatEnd stays undefined when omitted');
+
+  // End-to-end integration test through TikTokLiveConnector -> real streamEventBus -> TTS, Soundboard, Floating Alert, Studio/Consumers
+  const origTtsConfig = ttsService.getConfig();
+  const origSpeak = ttsService.speak;
+  const origPlaySfx = soundboardEngine.playSynthesizedSFX;
+
+  const ttsCalls: string[] = [];
+  const sfxCalls: string[] = [];
+  const floatingAlertsReceived: StreamEvent[] = [];
+  const studioEffectTriggers: StreamEvent[] = [];
+  const consumerUpdates: Array<{ update: StreamEventMetadataUpdate; updatedEvent?: StreamEvent }> = [];
+
+  streamEventBus.clearHistory();
+  ttsService.updateConfig({ enabled: true, readGifts: true });
+  (ttsService as unknown as { speak: (text: string, force?: boolean) => boolean }).speak = (text: string) => {
+    ttsCalls.push(text);
+    return true;
+  };
+  (
+    soundboardEngine as unknown as {
+      playSynthesizedSFX: (type: 'cheer' | 'horn' | 'level_up' | 'game_over' | 'tada' | 'bell') => Promise<{ ok: true }>;
+    }
+  ).playSynthesizedSFX = async (type) => {
+    sfxCalls.push(type);
+    return { ok: true };
+  };
+
+  const unsubAlert = streamEventBus.subscribe((ev) => {
+    floatingAlertsReceived.push(ev);
+    studioEffectTriggers.push(ev);
+  });
+  const unsubUpdates = streamEventBus.subscribeUpdates((update, updatedEvent) => {
+    consumerUpdates.push({ update, updatedEvent });
+  });
+
+  let eventCallback: ((payload: NativeTikTokRawEventPayload) => void) | null = null;
+  const busConnector = new TikTokLiveConnector({
+    isSupported: () => true,
+    connect: async () => ({ accepted: true }),
+    disconnect: async () => ({ success: true }),
+    getStatus: async () => null,
+    onState: async () => ({ remove: async () => {} }),
+    onEvent: async (cb) => {
+      eventCallback = cb;
+      return {
+        remove: async () => {
+          eventCallback = null;
+        },
+      };
+    },
+  });
+
+  try {
+    await busConnector.ensureListenersAttached();
+    assert(eventCallback !== null, 'Connector attached onEvent listener');
+
+    // Frame 1: repeatCount=5, repeatEnd=0
+    eventCallback!({
+      method: 'WebcastGiftMessage',
+      msgId: 'e2e_combo_900',
+      username: 'donatur_e2e',
+      giftId: '7777',
+      giftName: 'Galaxy',
+      repeatCount: 5,
+      repeatEnd: 0,
+      diamondCount: 1000,
+    });
+
+    assertEqual(streamEventBus.getHistory().length, 1, 'E2E Test 1: 1 gift event added to bus history');
+    assertEqual(streamEventBus.getHistory()[0]?.repeatEnd, false, 'E2E Test 1: initial history item has repeatEnd=false');
+    assertEqual(ttsCalls.length, 1, 'E2E Test 4: TTS gift triggered once initially');
+    assertEqual(sfxCalls.length, 1, 'E2E Test 5: Soundboard gift triggered once initially');
+    assertEqual(sfxCalls[0], 'level_up', 'E2E Test 5: Soundboard played level_up');
+    assertEqual(floatingAlertsReceived.length, 1, 'E2E Test 6: Floating alert triggered once initially');
+    assertEqual(studioEffectTriggers.length, 1, 'E2E Test 6: Studio effect listener triggered once initially');
+    assertEqual(consumerUpdates.length, 0, 'E2E Test 3: no metadata update yet');
+
+    // Frame 2: msgId sama, giftId sama, repeatCount sama (5), repeatEnd=1
+    eventCallback!({
+      method: 'WebcastGiftMessage',
+      msgId: 'e2e_combo_900',
+      username: 'donatur_e2e',
+      giftId: '7777',
+      giftName: 'Galaxy',
+      repeatCount: 5,
+      repeatEnd: 1,
+      diamondCount: 1000,
+    });
+
+    assertEqual(streamEventBus.getHistory().length, 1, 'E2E Test 2: history still has 1 gift (no duplicate gift event)');
+    assertEqual(streamEventBus.getHistory()[0]?.repeatEnd, true, 'E2E Test 3: bus history updated in-place to repeatEnd=true');
+    assertEqual(consumerUpdates.length, 1, 'E2E Test 3: terminal update delivered to consumer subscriber');
+    assertEqual(consumerUpdates[0]?.update.repeatEnd, true, 'E2E Test 3: consumer update has repeatEnd=true');
+    assertEqual(consumerUpdates[0]?.updatedEvent?.repeatEnd, true, 'E2E Test 3: consumer updatedEvent reflects repeatEnd=true');
+    assertEqual(ttsCalls.length, 1, 'E2E Test 4: TTS gift still ran ONLY ONCE after terminal update');
+    assertEqual(sfxCalls.length, 1, 'E2E Test 5: Soundboard gift still ran ONLY ONCE after terminal update');
+    assertEqual(floatingAlertsReceived.length, 1, 'E2E Test 6: Floating alert still ran ONLY ONCE after terminal update');
+    assertEqual(studioEffectTriggers.length, 1, 'E2E Test 6: Studio effect listener still ran ONLY ONCE after terminal update');
+
+    // Frame 3: identical terminal replay (repeatCount=5, repeatEnd=1) MUST NOT emit update or side effect
+    eventCallback!({
+      method: 'WebcastGiftMessage',
+      msgId: 'e2e_combo_900',
+      username: 'donatur_e2e',
+      giftId: '7777',
+      giftName: 'Galaxy',
+      repeatCount: 5,
+      repeatEnd: 1,
+      diamondCount: 1000,
+    });
+
+    assertEqual(streamEventBus.getHistory().length, 1, 'E2E Test 7: history count stays 1 on terminal replay');
+    assertEqual(consumerUpdates.length, 1, 'E2E Test 7: terminal replay does not emit duplicate metadata update');
+    assertEqual(ttsCalls.length, 1, 'E2E Test 7: TTS count stays 1 on terminal replay');
+    assertEqual(sfxCalls.length, 1, 'E2E Test 7: Soundboard count stays 1 on terminal replay');
+    assertEqual(floatingAlertsReceived.length, 1, 'E2E Test 7: Floating alert count stays 1 on terminal replay');
+  } finally {
+    unsubAlert();
+    unsubUpdates();
+    await busConnector.destroy();
+    (ttsService as unknown as { speak: typeof origSpeak }).speak = origSpeak;
+    (soundboardEngine as unknown as { playSynthesizedSFX: typeof origPlaySfx }).playSynthesizedSFX = origPlaySfx;
+    ttsService.updateConfig(origTtsConfig);
+    streamEventBus.clearHistory();
+  }
+}
+
 async function main(): Promise<void> {
   runNormalizerTests();
   runBoundedDedupTests();
@@ -1506,6 +1752,7 @@ async function main(): Promise<void> {
   runHonestStatusAndHudTests();
   runTargetUsernameResolutionTests();
   await runConnectionDiagnosticsTests();
+  await runGiftComboTerminalUpdateTests();
   console.log('ALL_TIKTOK_CONNECTOR_TESTS_PASSED');
 }
 

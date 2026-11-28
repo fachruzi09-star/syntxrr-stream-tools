@@ -125,7 +125,23 @@ export const LiveCenterView: React.FC<LiveCenterViewProps> = ({
     const unsubscribe = streamEventBus.subscribe((newEvent) => {
       setEvents((prev) => [newEvent, ...prev.slice(0, 49)]);
     });
-    return () => unsubscribe();
+    const unsubscribeUpdates = streamEventBus.subscribeUpdates((update) => {
+      setEvents((prev) =>
+        prev.map((item) =>
+          item.id === update.id
+            ? {
+                ...item,
+                ...(update.repeatEnd !== undefined ? { repeatEnd: update.repeatEnd } : {}),
+                ...(update.repeatCount !== undefined ? { repeatCount: update.repeatCount } : {}),
+              }
+            : item
+        )
+      );
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeUpdates();
+    };
   }, []);
 
   const triggerEvent = (

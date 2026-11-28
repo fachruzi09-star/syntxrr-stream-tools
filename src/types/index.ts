@@ -435,6 +435,16 @@ export interface StreamEvent {
   isSimulation?: boolean;
 }
 
+export interface StreamEventMetadataUpdate {
+  id: string;
+  type: StreamEventType;
+  giftId?: string;
+  giftName?: string;
+  repeatCount?: number;
+  repeatEnd?: boolean;
+  timestamp: number;
+}
+
 // TTS & NOTIFICATION SYSTEM
 export interface TTSConfig {
   enabled: boolean;
